@@ -34,30 +34,39 @@ static Z80Context cpu_z80;
 
 static volatile int done;
 
+#define TRACE_MEM	1
+#define TRACE_IO	2
+#define TRACE_ROM	4
+#define TRACE_UNK	8
+static int trace = 0;
+
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
 static uint8_t mem_read(int unused, uint16_t addr)
 {
     unsigned int bank = (addr & 0xC000) >> 14;
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "R %04x[%02X] = %02X\n",
+            addr, (unsigned int) bankreg[bank],
+            (unsigned int)ramrom[(bankreg[bank] << 14) + (addr&0x3FFF)]);
     addr &= 0x3FFF;
-#ifdef TRACE
-    printf("read %04x (bank %d maps to %02x:%06X)\n", (unsigned int) addr, bank, (unsigned int) bankreg[bank], (bankreg[bank] << 14) + addr);
-    fflush(stdout);
-#endif
     return ramrom[(bankreg[bank] << 14) + addr];
 }
 
 static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
     unsigned int bank = (addr & 0xC000) >> 14;
+    if (trace & TRACE_MEM)
+	fprintf(stderr, "W %04x[%02X] = %02X\n",
+	    (unsigned int) addr, (unsigned int) bankreg[bank],
+            (unsigned int)val);
     if (bankreg[bank] >= 32) {
 	addr &= 0x3FFF;
-#ifdef TRACE
-	printf("writed %04x (bank %d maps to %02x:%06X)\n", (unsigned int) addr, bank, (unsigned int) bankreg[bank], (bankreg[bank] << 14) + addr);
-	fflush(stdout);
-#endif
 	ramrom[(bankreg[bank] << 14) + addr] = val;
     }
+    else
+        if (trace & TRACE_MEM)
+            fprintf(stderr,"[Discarded: ROM]\n");
     /* ROM writes go nowhere */
 }
 
@@ -399,6 +408,8 @@ static uint8_t rtcwp = 0x80;
 static uint8_t rtc24 = 1;
 static struct tm *rtc_tm;
 
+static int rtc;
+
 static uint8_t rtc_read(uint16_t addr)
 {
     if (rtcst & 0x30)
@@ -539,15 +550,13 @@ static void rtc_write(uint16_t addr, uint8_t val)
 static void toggle_rom(void)
 {
     if (bankreg[0] == 0) {
-#ifdef TRACE_ROM
-        printf("[ROM out]\n");
-#endif
+        if (trace & TRACE_ROM)
+            fprintf(stderr, "[ROM out]\n");
         bankreg[0] = 34;
         bankreg[1] = 35;
     } else {
-#ifdef TRACE_ROM
-        printf("[ROM in]\n");
-#endif
+        if (trace & TRACE_ROM)
+            fprintf(stderr, "[ROM in]\n");
         bankreg[0] = 0;
         bankreg[1] = 1;
     }
@@ -555,9 +564,8 @@ static void toggle_rom(void)
 
 static uint8_t io_read(int unused, uint16_t addr)
 {
-#ifdef TRACE_IO
-    printf("read %02x\n", addr);
-#endif
+    if (trace & TRACE_IO)
+        fprintf(stderr, "read %02x\n", addr);
     addr &= 0xFF;
     if (addr >= 0x80 && addr <= 0xBF && acia)
 	return acia_read(addr & 1);
@@ -565,16 +573,17 @@ static uint8_t io_read(int unused, uint16_t addr)
 	return sio2_read(addr & 3);
     if ((addr >= 0x10 && addr <= 0x17) && ide)
 	return my_ide_read(addr & 7);
-    if (addr == 0xC0)
+    if (addr == 0xC0 && rtc)
 	return rtc_read(addr);
+    if (trace & TRACE_UNK)
+        fprintf(stderr, "Unknown read from port %04X\n", addr);
     return 0xFF;
 }
 
 static void io_write(int unused, uint16_t addr, uint8_t val)
 {
-#ifdef TRACE_IO
-    printf("write %02x <- %02x\n", addr, val);
-#endif
+    if (trace & TRACE_IO)
+        fprintf(stderr, "write %02x <- %02x\n", addr, val);
     addr &= 0xFF;
     if (addr >= 0x80 && addr <= 0xBF && acia)
 	acia_write(addr & 1, val);
@@ -586,10 +595,13 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	bankreg[addr & 3] = val;
     else if (bank512 && addr == 0x7C)
 	bank_enable = val & 1;
-    else if (addr == 0xC0)
+    else if (addr == 0xC0 && rtc)
 	rtc_write(addr, val);
     else if (switchrom && addr == 0x38)
         toggle_rom();
+    else if (trace & TRACE_UNK)
+        fprintf(stderr, "Unknown write to port %04X of %02X\n",
+            addr, val);
 }
 
 static struct termios saved_term, term;
