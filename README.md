@@ -39,6 +39,7 @@ Options:
 To build a disk image
 
 ./makedisk 3 my.cf
+
 dd if=filesystem of=my.cf bs=512 skip=2 conv=notrunc
 
 In other words the IDE disk format has a 1K header that holds meta-data and
