@@ -10,7 +10,7 @@ The goal is to emulate
 - 6850 ACIA (done)
 - Z80 SIO/2 (in progress)
 - 512K RAM/512K ROM card (in progress)
-- CF adapter (not started)
+- CF adapter (done)
 - Real time clock (in progress)
 
 At this point in time the ACIA emulation is complete and sufficient to run
@@ -25,3 +25,21 @@ https://rc2014.co.uk/
 # For ROM images see
 
 https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
+
+# Usage
+
+Options:
+- -a		enable 6850 ACIA
+- -b		512K ROM/512K RAM board (not yet enabled)
+- -e n		Execute ROM back n (0-7)
+- -i path	Enable IDE and use this file
+- -r path	Load the ROM image from this path
+- -s		Enable the SIO/2 (broken)
+
+To build a disk image
+
+./makedisk 3 my.cf
+dd if=filesystem of=my.cf bs=512 skip=2 conv=notrunc
+
+In other words the IDE disk format has a 1K header that holds meta-data and
+the virtual identify block.
