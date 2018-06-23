@@ -16,7 +16,6 @@
 #include <string.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/ioctl.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -585,13 +584,13 @@ static struct termios saved_term, term;
 
 static void cleanup(int sig)
 {
-    ioctl(0, TCSETS, &saved_term);
+    tcsetattr(0, TCSADRAIN, &saved_term);
     exit(1);
 }
 
 static void exit_cleanup(void)
 {
-    ioctl(0, TCSETS, &saved_term);
+    tcsetattr(0, TCSADRAIN, &saved_term);
 }
 
 
@@ -622,7 +621,7 @@ int main(int argc, char *argv[])
     tc.tv_sec = 0;
     tc.tv_nsec = 5000000L;
 
-    if (ioctl(0, TCGETS, &term) == 0) {
+    if (tcgetattr(0, &term) == 0) {
 	saved_term = term;
 	atexit(exit_cleanup);
 	signal(SIGINT, cleanup);
@@ -630,7 +629,7 @@ int main(int argc, char *argv[])
 	term.c_lflag &= ~(ICANON|ECHO);
 	term.c_cc[VMIN] = 1;
 	term.c_cc[VTIME] = 0;
-	ioctl(0, TCSETS, &term);
+	tcsetattr(0, TCSADRAIN, &term);
     }
 
     Z80RESET(&cpu_z80);
