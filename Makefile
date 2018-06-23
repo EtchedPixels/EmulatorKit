@@ -1,9 +1,14 @@
 
-all:	rc2014
+CFLAGS = -Wall -pedantic
 
-rc2014:	rc2014.c
+all:	rc2014 makedisk
+
+rc2014:	rc2014.o ide.o
 	(cd libz80; make)
-	cc -g3 rc2014.c libz80/libz80.o -o rc2014
+	cc -g3 rc2014.o ide.o libz80/libz80.o -o rc2014
+
+makedisk: makedisk.o ide.o
+	cc -O2 -o makedisk makedisk.o ide.o
 
 clean:
 	(cd libz80; make clean)

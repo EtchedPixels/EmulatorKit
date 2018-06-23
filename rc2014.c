@@ -20,14 +20,15 @@
 #include <time.h>
 #include <unistd.h>
 #include "libz80/z80.h"
+#include "ide.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
 static unsigned int bankreg[4];
 static uint8_t bank_enable;
 
-static uint8_t pager = 0;
-static uint8_t switchrom = 0;
+static uint8_t bank512 = 0;
+static uint8_t switchrom = 1;
 
 static Z80Context cpu_z80;
 
@@ -99,7 +100,7 @@ static unsigned int next_char(void)
 static uint8_t acia_status = 2;
 static uint8_t acia_config;
 static uint8_t acia_char;
-static uint8_t acia = 1;
+static uint8_t acia;
 
 static void acia_irq_compute(void)
 {
@@ -185,7 +186,8 @@ struct z80_sio_chan {
 #define INT_ERR	4
 };
 
-struct z80_sio_chan sio[2];
+static int sio2;
+static struct z80_sio_chan sio[2];
 
 /*
  *	Interrupts. We don't handle IM2 yet.
@@ -366,13 +368,17 @@ static void sio2_write(uint16_t addr, uint8_t val)
     }
 }
 
+static int ide = 0;
+struct ide_controller *ide0;
+
 static uint8_t my_ide_read(uint16_t addr)
 {
-    return 0xFF;
+    return ide_read8(ide0, addr);
 }
 
 static void my_ide_write(uint16_t addr, uint8_t val)
 {
+    ide_write8(ide0, addr, val);
 }
 
 /* Real time clock state machine and related state.
@@ -533,9 +539,15 @@ static void rtc_write(uint16_t addr, uint8_t val)
 static void toggle_rom(void)
 {
     if (bankreg[0] == 0) {
+#ifdef TRACE_ROM
+        printf("[ROM out]\n");
+#endif
         bankreg[0] = 34;
         bankreg[1] = 35;
     } else {
+#ifdef TRACE_ROM
+        printf("[ROM in]\n");
+#endif
         bankreg[0] = 0;
         bankreg[1] = 1;
     }
@@ -549,10 +561,10 @@ static uint8_t io_read(int unused, uint16_t addr)
     addr &= 0xFF;
     if (addr >= 0x80 && addr <= 0xBF && acia)
 	return acia_read(addr & 1);
-    if (addr >= 0x80 && addr <= 0x83)
+    if ((addr >= 0x80 && addr <= 0x83) && sio2)
 	return sio2_read(addr & 3);
-    if (addr >= 0x10 && addr <= 0x17)
-	return my_ide_read(addr);
+    if ((addr >= 0x10 && addr <= 0x17) && ide)
+	return my_ide_read(addr & 7);
     if (addr == 0xC0)
 	return rtc_read(addr);
     return 0xFF;
@@ -566,13 +578,13 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     addr &= 0xFF;
     if (addr >= 0x80 && addr <= 0xBF && acia)
 	acia_write(addr & 1, val);
-    else if (addr >= 0x80 && addr <= 0x83)
+    else if ((addr >= 0x80 && addr <= 0x83) && sio2)
 	sio2_write(addr & 3, val);
-    else if (addr >= 0x10 && addr <= 0x17)
-	my_ide_write(addr, val);
-    else if (pager && addr >= 0x78 && addr <= 0x7B)
+    else if ((addr >= 0x10 && addr <= 0x17) && ide)
+	my_ide_write(addr & 7, val);
+    else if (bank512 && addr >= 0x78 && addr <= 0x7B)
 	bankreg[addr & 3] = val;
-    else if (pager && addr == 0x7C)
+    else if (bank512 && addr == 0x7C)
 	bank_enable = val & 1;
     else if (addr == 0xC0)
 	rtc_write(addr, val);
@@ -593,30 +605,94 @@ static void exit_cleanup(void)
     tcsetattr(0, TCSADRAIN, &saved_term);
 }
 
+static void usage(void)
+{
+    fprintf(stderr, "rc2014: [-a] [-r bamk] [-s]\n");
+    exit(EXIT_FAILURE);
+}
 
 int main(int argc, char *argv[])
 {
     static struct timespec tc;
-#if 0
-    /* For the moment hard code ROMWBW */
-    int fd = open("romwbw.rom", O_RDONLY);
-    if (fd == -1) {
-	perror("romwbw.rom");
-	exit(1);
+    int opt;
+    int fd;
+    int rom = 1;
+    int rombank = 0;
+    char *rompath = "rc2014.rom";
+    char *idepath;
+
+    while((opt = getopt(argc, argv, "abe:i:r:s")) != -1) {
+        switch(opt) {
+            case 'a':
+                acia = 1;
+                break;
+            case 'r':
+                rompath = optarg;
+                break;
+            case 's':
+                sio2 = 1;
+                break;
+            case 'e':
+                rombank = atoi(optarg);
+                break;
+            case 'b':
+                /* Not yet done */
+                bank512 = 1;
+                switchrom = 0;
+                rom = 0;
+                break;
+            case 'i':
+                ide = 1;
+                idepath = optarg;
+                break;
+            default:
+                usage();
+        }
     }
-#else
-    int fd = open("R0000009.BIN", O_RDONLY);
-    if (fd == -1) {
-	perror("R0000009.rom");
-	exit(1);
+    if (optind < argc)
+        usage();
+
+    if (acia == 0 && sio2 == 0) {
+        fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
+        acia = 1;
     }
-    bankreg[0] = 0;
-    bankreg[1] = 0;
-    bankreg[2] = 32;
-    bankreg[3] = 33;
-#endif
-    read(fd, ramrom, 512 * 1024);
-    close(fd);
+
+    if (rom) {
+        fd = open(rompath, O_RDONLY);
+        if (fd == -1) {
+	    perror(rompath);
+            exit(1);
+        }
+        bankreg[0] = 0;
+        bankreg[1] = 0;
+        bankreg[2] = 32;
+        bankreg[3] = 33;
+        if (lseek(fd, 8192 * rombank, SEEK_SET) < 0) {
+            perror("lseek");
+            exit(1);
+        }
+        if (read(fd, ramrom, 65536) <= 8192) {
+            fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
+            exit(EXIT_FAILURE);
+        }
+        close(fd);
+    }
+
+    if (ide) {
+        ide0 = ide_allocate("cf");
+        if (ide0) {
+            fd = open(idepath, O_RDWR);
+            if (fd == -1) {
+                perror(idepath);
+                ide = 0;
+            }
+            if (ide_attach(ide0, 0, fd) == 0) {
+                ide = 1;
+                ide_reset(ide0);
+            }
+        } else
+            ide = 0;
+    }
 
     tc.tv_sec = 0;
     tc.tv_nsec = 5000000L;
