@@ -579,7 +579,6 @@ uint8_t ide_read8(struct ide_controller *c, uint8_t r)
 {
   struct ide_drive *d = &c->drive[c->selected];
   struct ide_taskfile *t = &d->taskfile;
-  printf("ider %02X\n", r);
   switch(r) {
     case ide_data:
       return ide_data_in(d, 1);
@@ -598,7 +597,6 @@ uint8_t ide_read8(struct ide_controller *c, uint8_t r)
     case ide_status_r:
       d->intrq = 0;		/* Acked */
     case ide_altst_r:
-      printf("status %02X\n", t->status);
       return t->status;
     default:
       ide_fault(d, "bogus register");
@@ -611,7 +609,6 @@ void ide_write8(struct ide_controller *c, uint8_t r, uint8_t v)
   struct ide_drive *d = &c->drive[c->selected];
   struct ide_taskfile *t = &d->taskfile;
 
-  printf("idew %02X %02X\n", r, v);
   if (r != ide_devctrl_w) {
     if (t->status & ST_BSY) {
       ide_fault(d, "command written while busy");
