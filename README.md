@@ -8,8 +8,8 @@ The goal is to emulate
 - Z80 CPU (mostly done, time sync wants work)
 - ROM and switchable ROM cards (done)
 - 6850 ACIA (done)
-- Z80 SIO/2 (in progress)
-- 512K RAM/512K ROM card (in progress)
+- Z80 SIO/2 (async polled done, needs interrupt support)
+- 512K RAM/512K ROM card (done, untested)
 - CF adapter (done)
 - Real time clock (in progress)
 
@@ -35,7 +35,7 @@ https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
 
 Options:
 - -a		enable 6850 ACIA
-- -b		512K ROM/512K RAM board (not yet enabled)
+- -b		512K ROM/512K RAM board
 - -e n		Execute ROM back n (0-7)
 - -i path	Enable IDE and use this file
 - -r path	Load the ROM image from this path
