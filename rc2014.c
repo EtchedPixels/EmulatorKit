@@ -25,7 +25,7 @@
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
 static unsigned int bankreg[4];
-static uint8_t bank_enable;
+static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
 static uint8_t switchrom = 1;
@@ -38,36 +38,50 @@ static volatile int done;
 #define TRACE_IO	2
 #define TRACE_ROM	4
 #define TRACE_UNK	8
+#define TRACE_SIO	16
 static int trace = 0;
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
 static uint8_t mem_read(int unused, uint16_t addr)
 {
-    unsigned int bank = (addr & 0xC000) >> 14;
+    if (bankenable) {
+        unsigned int bank = (addr & 0xC000) >> 14;
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "R %04x[%02X] = %02X\n",
+                addr, (unsigned int) bankreg[bank],
+                (unsigned int)ramrom[(bankreg[bank] << 14) + (addr&0x3FFF)]);
+        addr &= 0x3FFF;
+        return ramrom[(bankreg[bank] << 14) + addr];
+    }
     if (trace & TRACE_MEM)
-        fprintf(stderr, "R %04x[%02X] = %02X\n",
-            addr, (unsigned int) bankreg[bank],
-            (unsigned int)ramrom[(bankreg[bank] << 14) + (addr&0x3FFF)]);
-    addr &= 0x3FFF;
-    return ramrom[(bankreg[bank] << 14) + addr];
+        fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
+    return ramrom[addr];
 }
 
 static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
-    unsigned int bank = (addr & 0xC000) >> 14;
-    if (trace & TRACE_MEM)
-	fprintf(stderr, "W %04x[%02X] = %02X\n",
-	    (unsigned int) addr, (unsigned int) bankreg[bank],
-            (unsigned int)val);
-    if (bankreg[bank] >= 32) {
-	addr &= 0x3FFF;
-	ramrom[(bankreg[bank] << 14) + addr] = val;
-    }
-    else
+    if (bankenable) {
+        unsigned int bank = (addr & 0xC000) >> 14;
         if (trace & TRACE_MEM)
-            fprintf(stderr,"[Discarded: ROM]\n");
+	    fprintf(stderr, "W %04x[%02X] = %02X\n",
+	        (unsigned int) addr, (unsigned int) bankreg[bank],
+	        (unsigned int)val);
+        if (bankreg[bank] >= 32) {
+            addr &= 0x3FFF;
+            ramrom[(bankreg[bank] << 14) + addr] = val;
+        }
     /* ROM writes go nowhere */
+        else if (trace & TRACE_MEM)
+            fprintf(stderr,"[Discarded: ROM]\n");
+    } else {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "W: %04X = %02X\n", addr, val);
+        if (addr > 32768 && !bank512)
+            ramrom[addr] = val;
+        else if (trace & TRACE_MEM)
+                fprintf(stderr, "[Discarded: ROM]\n");
+    }
 }
 
 static int check_chario(void)
@@ -202,7 +216,7 @@ static struct z80_sio_chan sio[2];
  *	Interrupts. We don't handle IM2 yet.
  */
 
-static uint8_t sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
+static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
     chan->intbits &= ~m;
     /* Check me - does it auto clear down or do you have to reti it ? */
@@ -212,7 +226,7 @@ static uint8_t sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
     }
 }
 
-static uint8_t sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
+static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 {
     uint8_t new = (chan->intbits ^ m) & m;
     chan->intbits |= m;
@@ -223,8 +237,8 @@ static uint8_t sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
             Z80INT(&cpu_z80, 0xFF);	/* FIXME: for IM2 this is complex */
         }
     }
-    
 }
+
 /*
  *	The SIO replaces the last character in the FIFO on an
  *	overrun.
@@ -272,19 +286,29 @@ static void sio2_timer(void)
 
 static void sio2_channel_reset(struct z80_sio_chan *chan)
 {
-    chan->rr[0] = 2;
-    chan->rr[1] = 0;
+    chan->rr[0] = 0x2C;
+    chan->rr[1] = 0x01;
     chan->rr[2] = 0;
     sio2_clear_int(chan, INT_RX|INT_TX|INT_ERR);
+}
+
+static void sio_reset(void)
+{
+    sio2_channel_reset(&sio);
+    sio2_channel_reset(sio + 1);
 }
 
 static uint8_t sio2_read(uint16_t addr)
 {
     struct z80_sio_chan *chan =  (addr & 2) ? sio + 1 : sio;
-    if (addr & 1) {
+    if (!(addr & 1)) {
         /* Control */
         uint8_t r = chan->wr[0] & 007;
         chan->wr[0] &= ~007;
+
+        if (trace & TRACE_SIO)
+            fprintf(stderr, "sio%c read reg %d\n",
+                (addr & 2)?'b':'a', r);
         switch(r) {
             case 0:
             case 1:
@@ -308,6 +332,9 @@ static uint8_t sio2_read(uint16_t addr)
         sio2_clear_int(chan, INT_RX);
         chan->rr[0] &= 0x3F;
         chan->rr[1] &= 0x3F;
+        if (trace & TRACE_SIO)
+            fprintf(stderr, "sio%c read data %d\n",
+                (addr & 2)?'b':'a', c);
         return c;
     }
     return 0xFF;
@@ -316,7 +343,10 @@ static uint8_t sio2_read(uint16_t addr)
 static void sio2_write(uint16_t addr, uint8_t val)
 {
     struct z80_sio_chan *chan =  (addr & 2) ? sio + 1 : sio;
-    if (addr & 1) {
+    if (!(addr & 1)) {
+        if (trace & TRACE_SIO)
+            fprintf(stderr, "sio%c write reg %d with %02X\n",
+                (addr & 2)?'b':'a', chan->wr[0] & 7, val);
         switch(chan->wr[0] & 007) {
             case 0:
                 chan->wr[0] = val;
@@ -332,6 +362,8 @@ static void sio2_write(uint16_t addr, uint8_t val)
                         chan->rr[1] &= 0xCF ; /* Clear status bits on rr0 */
                         break;
                     case 030:	/* Channel reset */
+                        if (trace & TRACE_SIO)
+                            fprintf(stderr, "[channel reset]\n");
                         sio2_channel_reset(chan);
                         break;
                     case 040:	/* Enable interrupt on next rx */
@@ -373,6 +405,9 @@ static void sio2_write(uint16_t addr, uint8_t val)
         chan->txint = 1;
         /* Should check chan->wr[5] & 8 */
         sio2_clear_int(chan, INT_TX);
+        if (trace & TRACE_SIO)
+            fprintf(stderr, "sio%c write data %d\n",
+                (addr & 2)?'b':'a', val);
         write(1, &val, 1);
     }
 }
@@ -567,7 +602,7 @@ static uint8_t io_read(int unused, uint16_t addr)
     if (trace & TRACE_IO)
         fprintf(stderr, "read %02x\n", addr);
     addr &= 0xFF;
-    if (addr >= 0x80 && addr <= 0xBF && acia)
+    if ((addr >= 0x80 && addr <= 0xBF) && acia)
 	return acia_read(addr & 1);
     if ((addr >= 0x80 && addr <= 0x83) && sio2)
 	return sio2_read(addr & 3);
@@ -585,7 +620,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     if (trace & TRACE_IO)
         fprintf(stderr, "write %02x <- %02x\n", addr, val);
     addr &= 0xFF;
-    if (addr >= 0x80 && addr <= 0xBF && acia)
+    if ((addr >= 0x80 && addr <= 0xBF) && acia)
 	acia_write(addr & 1, val);
     else if ((addr >= 0x80 && addr <= 0x83) && sio2)
 	sio2_write(addr & 3, val);
@@ -594,7 +629,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     else if (bank512 && addr >= 0x78 && addr <= 0x7B)
 	bankreg[addr & 3] = val;
     else if (bank512 && addr == 0x7C)
-	bank_enable = val & 1;
+	bankenable = val & 1;
     else if (addr == 0xC0 && rtc)
 	rtc_write(addr, val);
     else if (switchrom && addr == 0x38)
@@ -668,23 +703,41 @@ int main(int argc, char *argv[])
         fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
         acia = 1;
     }
+    if (rom == 0 && bank512 == 0) {
+        fprintf(stderr, "rc2014: no ROM\n");
+        exit(EXIT_FAILURE);
+    }
 
     if (rom) {
         fd = open(rompath, O_RDONLY);
         if (fd == -1) {
 	    perror(rompath);
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         bankreg[0] = 0;
         bankreg[1] = 0;
         bankreg[2] = 32;
         bankreg[3] = 33;
+        bankenable = 1;
         if (lseek(fd, 8192 * rombank, SEEK_SET) < 0) {
             perror("lseek");
             exit(1);
         }
-        if (read(fd, ramrom, 65536) <= 8192) {
+        if (read(fd, ramrom, 65536) < 8192) {
             fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
+            exit(EXIT_FAILURE);
+        }
+        close(fd);
+    }
+
+    if (bank512) {
+        fd = open(rompath, O_RDONLY);
+        if (fd == -1) {
+            perror(rompath);
+            exit(EXIT_FAILURE);
+        }
+        if (read(fd, ramrom, 524288) != 524288) {
+            fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
             exit(EXIT_FAILURE);
         }
         close(fd);
@@ -700,11 +753,14 @@ int main(int argc, char *argv[])
             }
             if (ide_attach(ide0, 0, fd) == 0) {
                 ide = 1;
-                ide_reset(ide0);
+                ide_reset_begin(ide0);
             }
         } else
             ide = 0;
     }
+
+    if (sio2)
+        sio_reset();
 
     tc.tv_sec = 0;
     tc.tv_nsec = 5000000L;
@@ -737,6 +793,8 @@ int main(int argc, char *argv[])
 	Z80ExecuteTStates(&cpu_z80, 20000);
 	if (acia)
 	    acia_timer();
+        if (sio2)
+            sio2_timer();
 	/* Do 50ms of I/O and delays */
 	nanosleep(&tc, NULL);
     }
