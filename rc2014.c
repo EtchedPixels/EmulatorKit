@@ -721,7 +721,7 @@ int main(int argc, char *argv[])
     char *rompath = "rc2014.rom";
     char *idepath;
 
-    while((opt = getopt(argc, argv, "abc:e:i:r:s")) != -1) {
+    while((opt = getopt(argc, argv, "abc:e:i:m:r:s")) != -1) {
         switch(opt) {
             case 'a':
                 acia = 1;
