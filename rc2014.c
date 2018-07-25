@@ -29,6 +29,9 @@ static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
 static uint8_t switchrom = 1;
+static uint8_t cpuboard = 0;
+static uint8_t ctc = 0;
+static uint8_t port38 = 0;
 
 static Z80Context cpu_z80;
 
@@ -43,7 +46,7 @@ static int trace = 0;
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
-static uint8_t mem_read(int unused, uint16_t addr)
+static uint8_t mem_read0(uint16_t addr)
 {
     if (bankenable) {
         unsigned int bank = (addr & 0xC000) >> 14;
@@ -59,7 +62,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
     return ramrom[addr];
 }
 
-static void mem_write(int unused, uint16_t addr, uint8_t val)
+static void mem_write0(uint16_t addr, uint8_t val)
 {
     if (bankenable) {
         unsigned int bank = (addr & 0xC000) >> 14;
@@ -81,6 +84,54 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
             ramrom[addr] = val;
         else if (trace & TRACE_MEM)
                 fprintf(stderr, "[Discarded: ROM]\n");
+    }
+}
+
+static uint8_t mem_read108(uint16_t addr)
+{
+    if (addr < 0x8000 && !(port38 & 0x01))
+        return ramrom[addr];
+    if (port38 & 0x80)
+        return ramrom[addr + 131072];
+    else
+        return ramrom[addr + 65536];
+}
+
+static void mem_write108(uint16_t addr, uint8_t val)
+{
+    if (addr < 0x8000 && !(port38 & 0x01))
+        return;
+    if (port38 & 0x80)
+        ramrom[addr + 131072] = val;
+    else
+        ramrom[addr + 65536] = val;
+}
+
+static uint8_t mem_read(int unused, uint16_t addr)
+{
+    switch(cpuboard) {
+    case 0:
+        return mem_read0(addr);
+    case 1:
+        return mem_read108(addr);
+    default:
+        fputs("invalid cpu type.\n", stderr);
+        exit(1);
+    }
+}
+
+static void mem_write(int unused, uint16_t addr, uint8_t val)
+{
+    switch(cpuboard) {
+    case 0:
+        mem_write0(addr, val);
+        break;
+    case 1:
+        mem_write108(addr, val);
+        break;
+    default:
+        fputs("invalid cpu type.\n", stderr);
+        exit(1);
     }
 }
 
@@ -294,7 +345,7 @@ static void sio2_channel_reset(struct z80_sio_chan *chan)
 
 static void sio_reset(void)
 {
-    sio2_channel_reset(&sio);
+    sio2_channel_reset(sio);
     sio2_channel_reset(sio + 1);
 }
 
@@ -634,6 +685,8 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	rtc_write(addr, val);
     else if (switchrom && addr == 0x38)
         toggle_rom();
+    else if (cpuboard == 1 && addr == 0x38)
+        port38 = val;
     else if (trace & TRACE_UNK)
         fprintf(stderr, "Unknown write to port %04X of %02X\n",
             addr, val);
@@ -654,7 +707,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-    fprintf(stderr, "rc2014: [-a] [-r bamk] [-s]\n");
+    fprintf(stderr, "rc2014: [-a] [-b] [-c] [-m mainboard] [-r bank] [-e rombank] [-s]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -668,7 +721,7 @@ int main(int argc, char *argv[])
     char *rompath = "rc2014.rom";
     char *idepath;
 
-    while((opt = getopt(argc, argv, "abe:i:r:s")) != -1) {
+    while((opt = getopt(argc, argv, "abc:e:i:r:s")) != -1) {
         switch(opt) {
             case 'a':
                 acia = 1;
@@ -683,7 +736,6 @@ int main(int argc, char *argv[])
                 rombank = atoi(optarg);
                 break;
             case 'b':
-                /* Not yet done */
                 bank512 = 1;
                 switchrom = 0;
                 rom = 0;
@@ -691,6 +743,16 @@ int main(int argc, char *argv[])
             case 'i':
                 ide = 1;
                 idepath = optarg;
+                break;
+            case 'c':
+                ctc = 1;	/* TODO */
+                break;
+            case 'm':
+                /* Default Z80 board */
+                if (strcmp(optarg, "z80") == 0)
+                    cpuboard = 0;
+                if (strcmp(optarg, "sc108") == 0)
+                    cpuboard = 1;
                 break;
             default:
                 usage();
@@ -762,8 +824,10 @@ int main(int argc, char *argv[])
     if (sio2)
         sio_reset();
 
+    /* 50ms - it's a balance between nice behaviour and simulation
+       smoothness */
     tc.tv_sec = 0;
-    tc.tv_nsec = 5000000L;
+    tc.tv_nsec = 50000000L;
 
     if (tcgetattr(0, &term) == 0) {
 	saved_term = term;
@@ -788,14 +852,16 @@ int main(int argc, char *argv[])
        is loaded though */
 
     while (!done) {
-        /* FIXME: switch to faster CPU clock */
-	/* Simulate 5ms of CPU time (4MHz / 200) */
-	Z80ExecuteTStates(&cpu_z80, 20000);
-	if (acia)
-	    acia_timer();
-        if (sio2)
-            sio2_timer();
-	/* Do 50ms of I/O and delays */
+        int i;
+        /* 36400 T states */
+        for (i = 0;i < 100; i++) {
+            Z80ExecuteTStates(&cpu_z80, 364);
+            if (acia)
+	        acia_timer();
+	    if (sio2)
+                sio2_timer();
+        }
+	/* Do 5ms of I/O and delays */
 	nanosleep(&tc, NULL);
     }
     exit(0);

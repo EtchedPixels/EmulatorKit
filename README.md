@@ -36,10 +36,12 @@ https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
 Options:
 - -a		enable 6850 ACIA
 - -b		512K ROM/512K RAM board
-- -e n		Execute ROM back n (0-7)
+- -c		CTC card present (not yet supported)
+- -e n		Execute ROM bank n (0-7)
 - -i path	Enable IDE and use this file
+- -m board	Board type (z80 for default rc2014 or sc108)
 - -r path	Load the ROM image from this path
-- -s		Enable the SIO/2 (broken)
+- -s		Enable the SIO/2 (no IRQ support yet)
 
 To build a disk image
 
