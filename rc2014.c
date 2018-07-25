@@ -42,7 +42,7 @@ static volatile int done;
 #define TRACE_ROM	4
 #define TRACE_UNK	8
 #define TRACE_SIO	16
-static int trace = 0;
+static int trace;
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
@@ -89,22 +89,33 @@ static void mem_write0(uint16_t addr, uint8_t val)
 
 static uint8_t mem_read108(uint16_t addr)
 {
+    uint32_t aphys;
     if (addr < 0x8000 && !(port38 & 0x01))
-        return ramrom[addr];
-    if (port38 & 0x80)
-        return ramrom[addr + 131072];
+        aphys = addr;
+    else if (port38 & 0x80)
+        aphys = addr + 131072;
     else
-        return ramrom[addr + 65536];
+        aphys = addr + 65536;
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "R %04X = %02X\n", addr, ramrom[aphys]);
+    return ramrom[aphys];
 }
 
 static void mem_write108(uint16_t addr, uint8_t val)
 {
-    if (addr < 0x8000 && !(port38 & 0x01))
+    uint32_t aphys;
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "W: %04X = %02X\n", addr, val);
+    if (addr < 0x8000 && !(port38 & 0x01)) {
+        if (trace & TRACE_MEM)
+            fprintf(stderr,"[Discarded: ROM]\n");
         return;
-    if (port38 & 0x80)
-        ramrom[addr + 131072] = val;
+    }
+    else if (port38 & 0x80)
+        aphys = addr + 131072;
     else
-        ramrom[addr + 65536] = val;
+        aphys = addr + 65536;
+    ramrom[aphys] = val;
 }
 
 static uint8_t mem_read(int unused, uint16_t addr)
@@ -685,9 +696,11 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	rtc_write(addr, val);
     else if (switchrom && addr == 0x38)
         toggle_rom();
-    else if (cpuboard == 1 && addr == 0x38)
+    else if (cpuboard == 1 && addr == 0x38) {
+        if (trace & TRACE_ROM)
+            fprintf(stderr, "Bank set to %02X\n", val);
         port38 = val;
-    else if (trace & TRACE_UNK)
+    } else if (trace & TRACE_UNK)
         fprintf(stderr, "Unknown write to port %04X of %02X\n",
             addr, val);
 }
@@ -751,8 +764,14 @@ int main(int argc, char *argv[])
                 /* Default Z80 board */
                 if (strcmp(optarg, "z80") == 0)
                     cpuboard = 0;
-                if (strcmp(optarg, "sc108") == 0)
+                else if (strcmp(optarg, "sc108") == 0) {
+                    switchrom = 0;
+                    bank512 = 0;
                     cpuboard = 1;
+                } else {
+                    fputs("rc2014: supported cpu types z80, sc108.\n", stderr);
+                    exit(EXIT_FAILURE);
+                }
                 break;
             default:
                 usage();
