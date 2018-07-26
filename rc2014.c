@@ -30,7 +30,7 @@ static uint8_t bankenable;
 static uint8_t bank512 = 0;
 static uint8_t switchrom = 1;
 static uint8_t cpuboard = 0;
-static uint8_t ctc = 0;
+static uint8_t have_ctc = 0;
 static uint8_t port38 = 0;
 
 static Z80Context cpu_z80;
@@ -291,12 +291,24 @@ static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 {
     uint8_t new = (chan->intbits ^ m) & m;
+    uint8_t vector;
     chan->intbits |= m;
     if (new) {
         if (!sio->irq) {
             sio->irq = 1;
             sio->rr[1] |= 0x02;
-            Z80INT(&cpu_z80, 0xFF);	/* FIXME: for IM2 this is complex */
+            vector = sio[1].wr[2];
+            /* This is a subset of the real options. FIXME: add
+               external status change */
+            if (sio[1].wr[1] & 0x04) {
+                vector &= 0xF1;
+                vector |= (chan - sio) << 2;
+                if (m & INT_RX)
+                    vector |= 2;
+                else if (m & INT_ERR)
+                    vector |= 1;
+            }
+            Z80INT(&cpu_z80, vector);
         }
     }
 }
@@ -639,6 +651,167 @@ static void rtc_write(uint16_t addr, uint8_t val)
 }
 
 /*
+ *	Z80 CTC
+ */
+
+struct z80_ctc {
+    uint16_t count;
+    uint8_t reload;
+    uint8_t vector;
+    uint8_t ctrl;
+#define CTC_IRQ		0x80
+#define CTC_COUNTER	0x40
+#define CTC_PRESCALER	0x20
+#define CTC_RISING	0x10
+#define CTC_PULSE	0x08
+#define CTC_TCONST	0x04
+#define CTC_RESET	0x02
+#define CTC_CONTROL	0x01
+
+    uint8_t state;
+    uint8_t stopped;
+};
+
+struct z80_ctc ctc[4];
+
+static void ctc_reset(struct z80_ctc *c)
+{
+    c->vector = 0;
+    c->stopped = 1;
+}
+
+static void ctc_init(void)
+{
+    ctc_reset(ctc);
+    ctc_reset(ctc + 1);
+    ctc_reset(ctc + 2);
+    ctc_reset(ctc + 3);
+}
+
+static void ctc_interrupt(struct z80_ctc *c)
+{
+    if (c->ctrl & CTC_IRQ) {
+        uint8_t vector = ctc[0].vector & 0xF8;
+        vector |= (c - ctc) << 1;
+        Z80INT(&cpu_z80, vector);
+    }
+}
+
+/* Model the chains between the CTC devices */
+
+static void ctc_receive_pulse(int i);
+
+static void ctc_pulse(int i)
+{
+    /* Model CTC 0 chained into CTC 1 */
+    if (i == 0)
+        ctc_receive_pulse(1);
+}
+
+/* We don't worry about edge directions just a logical pulse model */
+static void ctc_receive_pulse(int i)
+{
+    struct z80_ctc *c = ctc + i;
+    if (c->ctrl & CTC_COUNTER) {
+        if (c->stopped)
+            return;
+        c->count-= 0x100;	/* No scaling on pulses */
+        if (c->count == 0) {
+            ctc_interrupt(c);
+            ctc_pulse(i);
+        }
+    } else {
+        if (c->ctrl & CTC_PULSE)
+            c->stopped = 0;
+    }
+}
+
+/* Model counters */
+static void ctc_tick(unsigned int clocks)
+{
+    struct z80_ctc *c = ctc;
+    int i;
+    int n;
+    int decby;
+
+    for (i = 0; i < 4; i++, c++) {
+        /* Waiting a value */
+        if (c->stopped)
+            continue;
+        /* Pulse trigger mode */
+        if (c->ctrl & CTC_COUNTER) {
+            /* We work in 1/256ths of a count so that we can correctly
+               deal with abitrary numbers of clocks per 'tick' */
+            switch(i) {
+                case 0:	/* clocked by system */
+                    decby = clocks << 8;
+                    break;
+                    /* 1 has no clocking input as it's chained */
+                case 1:
+                    /* We model 2 and 3 unused - SIO speed etc */
+                case 2:
+                case 3:
+                    break;
+            }
+        } else {
+            /* 256x downscaled */
+            decby = clocks;
+            /* 16x not 256x downscale - so increase by 16x */
+            if (!(c->ctrl & CTC_PRESCALER))
+                decby <<= 4;
+        }
+        /* Now iterate over the events. We need to deal with wraps
+           because we might have something counters chained */
+        n = c->count - decby;
+        while(n < 0) {
+            ctc_interrupt(c);
+            ctc_pulse(i);
+            n += c->reload << 8;
+            if (c->ctrl & CTC_COUNTER) {
+                c->count = c->reload << 8;
+                c->stopped = 1;
+                return;
+            }
+        }
+        c->count = n;
+    }
+}
+
+static void ctc_write(uint8_t channel, uint8_t val)
+{
+    struct z80_ctc *c = ctc + channel;
+    switch(c->state) {
+    case 0:
+        /* We don't yet model the weirdness around edge wanted
+           toggling and clock starts */
+        if (val & CTC_CONTROL) {
+            c->ctrl = val;
+            if (val & CTC_RESET)
+                ctc_reset(c);
+            if (val & CTC_TCONST)
+                c->state = 1;
+        } else {
+            c->vector = val;
+        }
+        break;
+    case 1:
+        c->reload = val;
+        c->state = 0;
+        if (c->stopped && !(c->ctrl & CTC_PULSE) &&
+            !(c->ctrl & CTC_COUNTER)) {
+            c->stopped = 0;
+            c->count = c->reload;
+        }
+        break;
+    }
+}
+
+static uint8_t ctc_read(uint8_t channel)
+{
+    return ctc[channel].count;
+}
+
+/*
  *	Emulate the switchable ROM card. We switch between the ROM and
  *	two banks of RAM (any two will do providing it's not the ones we
  *	pretended the bank mapping used for the top 32K). You can't mix the
@@ -672,6 +845,11 @@ static uint8_t io_read(int unused, uint16_t addr)
 	return my_ide_read(addr & 7);
     if (addr == 0xC0 && rtc)
 	return rtc_read(addr);
+    /* Scott Baker is 0x90-93, suggested defaults for the
+       Stephen Cousins boards at 0x88-0x8B. No doubt we'll get
+       an official CTC board at another address  */
+    if (addr >= 0x90 && addr <= 0x93 && have_ctc)
+        return ctc_read(addr & 3);
     if (trace & TRACE_UNK)
         fprintf(stderr, "Unknown read from port %04X\n", addr);
     return 0xFF;
@@ -694,6 +872,8 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	bankenable = val & 1;
     else if (addr == 0xC0 && rtc)
 	rtc_write(addr, val);
+    if (addr >= 0x88 && addr <= 0x8B && have_ctc)
+        ctc_write(addr & 3, val);
     else if (switchrom && addr == 0x38)
         toggle_rom();
     else if (cpuboard == 1 && addr == 0x38) {
@@ -734,7 +914,7 @@ int main(int argc, char *argv[])
     char *rompath = "rc2014.rom";
     char *idepath;
 
-    while((opt = getopt(argc, argv, "abc:e:i:m:r:s")) != -1) {
+    while((opt = getopt(argc, argv, "abce:i:m:r:s")) != -1) {
         switch(opt) {
             case 'a':
                 acia = 1;
@@ -758,7 +938,7 @@ int main(int argc, char *argv[])
                 idepath = optarg;
                 break;
             case 'c':
-                ctc = 1;	/* TODO */
+                have_ctc = 1;	/* TODO */
                 break;
             case 'm':
                 /* Default Z80 board */
@@ -842,6 +1022,8 @@ int main(int argc, char *argv[])
 
     if (sio2)
         sio_reset();
+    if (have_ctc)
+        ctc_init();
 
     /* 50ms - it's a balance between nice behaviour and simulation
        smoothness */
@@ -879,6 +1061,8 @@ int main(int argc, char *argv[])
 	        acia_timer();
 	    if (sio2)
                 sio2_timer();
+            if (have_ctc)
+                ctc_tick(364);
         }
 	/* Do 5ms of I/O and delays */
 	nanosleep(&tc, NULL);
