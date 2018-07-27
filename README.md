@@ -12,6 +12,7 @@ The goal is to emulate
 - 512K RAM/512K ROM card (done, untested)
 - CF adapter (done)
 - Real time clock (in progress)
+- CTC at 0x90 (untested)
 
 At this point in time the ACIA emulation is complete and sufficient to run
 the standard ROM environment with BASIC. This represents the basic
@@ -21,7 +22,7 @@ ACIA serial I/O card. This also corresponds to the RC2014 Mini.
 With the right options and ROM image you can also boot CP/M on it via the
 emulated compact flash adapter. This corresponds to the RC2014 with the
 switchable ROM, 64K RAM card, ACIA card and Compact Flash card. SIO is not
-yet functional.
+yet fully functional.
 
 # To get actual hardware see
 
@@ -36,10 +37,11 @@ https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
 Options:
 - -a		enable 6850 ACIA
 - -b		512K ROM/512K RAM board
-- -c		CTC card present (not yet supported)
+- -c		CTC card present (not yet tested)
 - -e n		Execute ROM bank n (0-7)
 - -i path	Enable IDE and use this file
 - -m board	Board type (z80 for default rc2014 or sc108)
+- -p		Pageable ROM (needed for CP/M)
 - -r path	Load the ROM image from this path
 - -s		Enable the SIO/2 (no IRQ support yet)
 
@@ -49,8 +51,8 @@ To build a disk image
 
 dd if=cf-image of=my.cf bs=512 seek=2 conv=notrunc
 
-In other words the IDE disk format has a 1K header that holds meta-data and
-the virtual identify block.
+In other words the IDE disk format has a 1K header that holds
+meta-data and the virtual identify block.
 
 Compact flash images can be found at
 

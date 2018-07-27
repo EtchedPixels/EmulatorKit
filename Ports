@@ -12,6 +12,7 @@ partial decode all over the place and clash with everyone.
 0x38		RC2014 pageable ROM
 0x38		SC108 banking/paging
 
+0x40-0x43	Marco's Propeller Graphics Card
 0x48-0x58	Scott Baker Floppy Controller
 
 0x68-0x6B	SC103 Z80 PIO

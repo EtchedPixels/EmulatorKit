@@ -42,7 +42,7 @@ static volatile int done;
 #define TRACE_ROM	4
 #define TRACE_UNK	8
 #define TRACE_SIO	16
-static int trace;
+static int trace = 0;//TRACE_SIO|TRACE_IO;
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
@@ -80,7 +80,7 @@ static void mem_write0(uint16_t addr, uint8_t val)
     } else {
         if (trace & TRACE_MEM)
             fprintf(stderr, "W: %04X = %02X\n", addr, val);
-        if (addr > 32768 && !bank512)
+        if (addr > 8192 && !bank512)
             ramrom[addr] = val;
         else if (trace & TRACE_MEM)
                 fprintf(stderr, "[Discarded: ROM]\n");
@@ -302,12 +302,14 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
                external status change */
             if (sio[1].wr[1] & 0x04) {
                 vector &= 0xF1;
-                vector |= (chan - sio) << 2;
+                vector |= (chan - sio) << 3;
                 if (m & INT_RX)
-                    vector |= 2;
+                    vector |= 4;
                 else if (m & INT_ERR)
-                    vector |= 1;
+                    vector |= 2;
             }
+            if (trace & TRACE_SIO)
+                fprintf(stderr, "SIO2 interrupt %02X\n", vector);
             Z80INT(&cpu_z80, vector);
         }
     }
@@ -326,13 +328,24 @@ static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
     if (chan->dptr == 2) {
         chan->data[2] = c;
         chan->rr[1] |= 0x20;	/* Overrun flagged */
+        /* What are the rules for overrun delivery FIXME */
         sio2_raise_int(chan, INT_ERR);
     } else {
         /* FIFO add */
         chan->data[chan->dptr++] = c;
         chan->rr[0] |= 1;
-        if (chan->dptr == 1)
-            sio2_raise_int(chan, INT_RX);
+        switch(chan->wr[1] & 0x18) {
+            case 0:
+                break;
+            case 1:
+                if (chan->dptr == 1)
+                    sio2_raise_int(chan, INT_RX);
+                break;
+            case 2:
+            case 3:
+                sio2_raise_int(chan, INT_RX);
+                break;
+        }
     }
     /* Need to deal with interrupt results */
 }
@@ -346,7 +359,8 @@ static void sio2_channel_timer(struct z80_sio_chan *chan, uint8_t ab)
         if (c & 2) {
             if (!(chan->rr[0] & 0x04)) {
                 chan->rr[0] |= 0x04;
-                sio2_raise_int(chan, INT_TX);
+                if (chan->wr[1] & 0x02)
+                    sio2_raise_int(chan, INT_TX);
             }
         }
     }
@@ -381,17 +395,23 @@ static uint8_t sio2_read(uint16_t addr)
         chan->wr[0] &= ~007;
 
         if (trace & TRACE_SIO)
-            fprintf(stderr, "sio%c read reg %d\n",
+            fprintf(stderr, "sio%c read reg %d = ",
                 (addr & 2)?'b':'a', r);
         switch(r) {
             case 0:
             case 1:
+                if (trace & TRACE_SIO)
+                    fprintf(stderr, "%02X\n", chan->rr[r]);
                 return chan->rr[r];
             case 2:
-                if (chan != sio)
+                if (chan != sio) {
+                    if (trace & TRACE_SIO)
+                        fprintf(stderr, "%02X\n", chan->rr[2]);
                     return chan->rr[2];
+                }
             case 3:
                 /* What does the hw report ?? */
+                fprintf(stderr, "INVALID(0xFF)\n");
                 return 0xFF;
         }
     } else {
@@ -409,6 +429,8 @@ static uint8_t sio2_read(uint16_t addr)
         if (trace & TRACE_SIO)
             fprintf(stderr, "sio%c read data %d\n",
                 (addr & 2)?'b':'a', c);
+        if (chan->dptr && (chan->wr[1] & 0x10))
+            sio2_raise_int(chan, INT_RX);
         return c;
     }
     return 0xFF;
@@ -656,7 +678,7 @@ static void rtc_write(uint16_t addr, uint8_t val)
 
 struct z80_ctc {
     uint16_t count;
-    uint8_t reload;
+    uint16_t reload;
     uint8_t vector;
     uint8_t ctrl;
 #define CTC_IRQ		0x80
@@ -667,17 +689,17 @@ struct z80_ctc {
 #define CTC_TCONST	0x04
 #define CTC_RESET	0x02
 #define CTC_CONTROL	0x01
-
-    uint8_t state;
-    uint8_t stopped;
 };
 
+#define CTC_STOPPED(c)	((c)->ctrl & (CTC_TCONST|CTC_RESET))
+
 struct z80_ctc ctc[4];
+uint8_t ctc_irqmask;
 
 static void ctc_reset(struct z80_ctc *c)
 {
     c->vector = 0;
-    c->stopped = 1;
+    c->ctrl = CTC_RESET;
 }
 
 static void ctc_init(void)
@@ -692,8 +714,15 @@ static void ctc_interrupt(struct z80_ctc *c)
 {
     if (c->ctrl & CTC_IRQ) {
         uint8_t vector = ctc[0].vector & 0xF8;
-        vector |= (c - ctc) << 1;
-        Z80INT(&cpu_z80, vector);
+        int i = c - ctc;
+        vector |= i << 1;
+        /* In general here we need to implement IE0/IE1 emulation
+           and also internal pending interrupts */
+/*        Z80INT(&cpu_z80, vector); */
+        if (!(ctc_irqmask & (1 << i))) {
+            ctc_irqmask |= 1 << i;
+//          recalc_interrupts();
+        }
     }
 }
 
@@ -713,16 +742,17 @@ static void ctc_receive_pulse(int i)
 {
     struct z80_ctc *c = ctc + i;
     if (c->ctrl & CTC_COUNTER) {
-        if (c->stopped)
+        if (CTC_STOPPED(c))
             return;
         c->count-= 0x100;	/* No scaling on pulses */
         if (c->count == 0) {
             ctc_interrupt(c);
             ctc_pulse(i);
+            c->count = c->reload << 8;
         }
     } else {
         if (c->ctrl & CTC_PULSE)
-            c->stopped = 0;
+            c->ctrl &= ~CTC_PULSE;
     }
 }
 
@@ -736,7 +766,7 @@ static void ctc_tick(unsigned int clocks)
 
     for (i = 0; i < 4; i++, c++) {
         /* Waiting a value */
-        if (c->stopped)
+        if (CTC_STOPPED(c))
             continue;
         /* Pulse trigger mode */
         if (c->ctrl & CTC_COUNTER) {
@@ -769,7 +799,7 @@ static void ctc_tick(unsigned int clocks)
             n += c->reload << 8;
             if (c->ctrl & CTC_COUNTER) {
                 c->count = c->reload << 8;
-                c->stopped = 1;
+                c->ctrl |= CTC_RESET;
                 return;
             }
         }
@@ -780,35 +810,28 @@ static void ctc_tick(unsigned int clocks)
 static void ctc_write(uint8_t channel, uint8_t val)
 {
     struct z80_ctc *c = ctc + channel;
-    switch(c->state) {
-    case 0:
+    if (c->ctrl & CTC_TCONST) {
+        c->ctrl &= ~CTC_TCONST;
+        c->reload = val;
+        /* FIXME: sort out the correct logic for the count reload
+           and reset clear rule */
+        if (!(c->ctrl & CTC_PULSE) && !(c->ctrl & CTC_COUNTER)) {
+                c->count = c->reload;
+        }
+    } else if (val & CTC_CONTROL) {
         /* We don't yet model the weirdness around edge wanted
            toggling and clock starts */
-        if (val & CTC_CONTROL) {
-            c->ctrl = val;
-            if (val & CTC_RESET)
-                ctc_reset(c);
-            if (val & CTC_TCONST)
-                c->state = 1;
-        } else {
-            c->vector = val;
-        }
-        break;
-    case 1:
-        c->reload = val;
-        c->state = 0;
-        if (c->stopped && !(c->ctrl & CTC_PULSE) &&
-            !(c->ctrl & CTC_COUNTER)) {
-            c->stopped = 0;
-            c->count = c->reload;
-        }
-        break;
+        /* Check rule on resets */
+        c->ctrl = val;
+    } else {
+        /* The vector on channel 1 is ignored */
+        c->vector = val;
     }
 }
 
 static uint8_t ctc_read(uint8_t channel)
 {
-    return ctc[channel].count;
+    return ctc[channel].count >> 8;
 }
 
 /*
@@ -914,7 +937,7 @@ int main(int argc, char *argv[])
     char *rompath = "rc2014.rom";
     char *idepath;
 
-    while((opt = getopt(argc, argv, "abce:i:m:r:s")) != -1) {
+    while((opt = getopt(argc, argv, "abce:i:m:pr:s")) != -1) {
         switch(opt) {
             case 'a':
                 acia = 1;
@@ -932,6 +955,9 @@ int main(int argc, char *argv[])
                 bank512 = 1;
                 switchrom = 0;
                 rom = 0;
+                break;
+            case 'p':
+                bankenable = 1;
                 break;
             case 'i':
                 ide = 1;
@@ -979,7 +1005,6 @@ int main(int argc, char *argv[])
         bankreg[1] = 0;
         bankreg[2] = 32;
         bankreg[3] = 33;
-        bankenable = 1;
         if (lseek(fd, 8192 * rombank, SEEK_SET) < 0) {
             perror("lseek");
             exit(1);
@@ -1001,6 +1026,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
             exit(EXIT_FAILURE);
         }
+        bankenable = 1;
         close(fd);
     }
 
