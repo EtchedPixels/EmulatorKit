@@ -28,6 +28,7 @@ partial decode all over the place and clash with everyone.
 0x90-0x93	Scott Baker CTC
 
 0xC0		Scott Baker Real Time Clock
+0xC0		Ancient Computing 16550A
 0xD0-0xD3	Ed Brindley YM-AY
 0xE0-0xE7	Scott Baker CF Adapter
 
