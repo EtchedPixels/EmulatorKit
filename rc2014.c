@@ -42,7 +42,9 @@ static volatile int done;
 #define TRACE_ROM	4
 #define TRACE_UNK	8
 #define TRACE_SIO	16
-static int trace = 0;//TRACE_SIO|TRACE_IO;
+#define TRACE_512	32
+
+static int trace = 0;/*TRACE_512|TRACE_MEM|TRACE_IO|TRACE_UNK; */
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
@@ -889,13 +891,17 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	sio2_write(addr & 3, val);
     else if ((addr >= 0x10 && addr <= 0x17) && ide)
 	my_ide_write(addr & 7, val);
-    else if (bank512 && addr >= 0x78 && addr <= 0x7B)
+    else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 	bankreg[addr & 3] = val;
-    else if (bank512 && addr == 0x7C)
+	if (trace & TRACE_512)
+            fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+    } else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
+        if (trace & TRACE_512)
+            fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en":"dis");
 	bankenable = val & 1;
-    else if (addr == 0xC0 && rtc)
+    } else if (addr == 0xC0 && rtc)
 	rtc_write(addr, val);
-    if (addr >= 0x88 && addr <= 0x8B && have_ctc)
+    else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
         ctc_write(addr & 3, val);
     else if (switchrom && addr == 0x38)
         toggle_rom();
