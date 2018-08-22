@@ -395,7 +395,7 @@ static ushort doAddWord(Z80Context* ctx, ushort a1, ushort a2, int withCarry, in
 			overflow = minuend_sign == subtrahend_sign && result_sign != minuend_sign;
 		VALFLAG(F_PV, overflow);
 		VALFLAG(F_S, (sum & 0x8000) != 0);
-		VALFLAG(F_Z, sum == 0);
+		VALFLAG(F_Z, (sum & 0xFFFF) == 0);
 	}
 	VALFLAG(F_N, isSub);
 	adjustFlags(ctx, sum >> 8);
