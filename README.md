@@ -62,22 +62,16 @@ Remember to unzip the image before putting it on the virtual cf card.
 
 ## N8VEM Mark 2 Emulator
 
-This is a fairly minimal emulator for the N8VEM v2 system board. 
+This is a fairly basic emulator for the N8VEM v2 system board.
 
 https://retrobrewcomputers.org/doku.php?id=boards:sbc:sbc_v2:start
 
-Currently it only provides minimal emulation in order to boot ROMWBW. More emulations
-will be added over time.
-
-Currently the following are emulated: Memory mapping, 16x50 UART
-(minimally), 8255 PIO (minimally), 4UART (minimally).
-
-The goal is to add emulations for PPIDE, PropIOv2 as well as tidying up the
-interrupt logic including supporting the timer on an RS232 control line
-hack.
+Currently the following are emulated: 512K ROM, 512K RAM, memory mapping,
+16x50 UART (minimally), 8255 PIO (PPIDE), 4UART (minimally), PropIOv2 (SD and
+console), timer on serial hack but not yet ECB interrupt via serial hack.
 
 The jumpers are not emulated. K7 is always assumed to be 1-2, K10 1-2 and
-K11 1-2.
+K11 1-2 giving a 32K/32K split.
 
 # To get actual hardware see
 
@@ -91,4 +85,10 @@ https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start
 
 Options:
 - -r path	path to ROM image
-- -i path	path to IDE image (not yet used)
+- -i path	path to IDE image (specify twice for 2 disks)
+- -s path	path for PropIOv2 SD card
+- -p		enable PropIOv2
+- -t		enable timer hack
+- -d n		set debug trace bits
+
+The sd card image is just a raw file of the blocks at this point.
