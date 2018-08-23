@@ -671,7 +671,7 @@ uint16_t ide_read16(struct ide_controller *c, uint8_t r)
 {
   struct ide_drive *d = &c->drive[c->selected];
   if (r == ide_data)
-    return htons(ide_data_in(d,2));
+    return ide_data_in(d,2);
   return ide_read8(c, r);
 }
 
@@ -685,7 +685,7 @@ void ide_write16(struct ide_controller *c, uint8_t r, uint16_t v)
     return;
   }
   if (r == ide_data)
-    ide_data_out(d, ntohs(v), 2);
+    ide_data_out(d, v, 2);
   else
     ide_write8(c, r, v);
 }
