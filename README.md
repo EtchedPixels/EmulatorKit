@@ -59,3 +59,36 @@ Compact flash images can be found at
 https://github.com/RC2014Z80/RC2014/tree/master/CPM
 
 Remember to unzip the image before putting it on the virtual cf card.
+
+## N8VEM Mark 2 Emulator
+
+This is a fairly minimal emulator for the N8VEM v2 system board. 
+
+https://retrobrewcomputers.org/doku.php?id=boards:sbc:sbc_v2:start
+
+Currently it only provides minimal emulation in order to boot ROMWBW. More emulations
+will be added over time.
+
+Currently the following are emulated: Memory mapping, 16x50 UART
+(minimally), 8255 PIO (minimally), 4UART (minimally).
+
+The goal is to add emulations for PPIDE, PropIOv2 as well as tidying up the
+interrupt logic including supporting the timer on an RS232 control line
+hack.
+
+The jumpers are not emulated. K7 is always assumed to be 1-2, K10 1-2 and
+K11 1-2.
+
+# To get actual hardware see
+
+https://retrobrewcomputers.org
+
+# For ROM images see
+
+https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start
+
+# Usage
+
+Options:
+- -r path	path to ROM image
+- -i path	path to IDE image (not yet used)
