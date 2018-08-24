@@ -16,12 +16,15 @@
  *	Interrupt jumper (ECB v 16x50)
  *	16x50 interrupts	(partly done)
  *	ECB and timer via UART interrupt hack (timer done)
- *	DS1302 burst mode
+ *	DS1302 burst mode for memory
+ *	Do we care about DS1302 writes ?
  *	Whine/break on invalid PPIDE sequences to help debug code
  *	Memory jumpers (is it really 16/48 or 48/16 ?)
  *	Z80 CTC card (ECB)
  *	4UART needs connecting to something as does uart0 when in PropIO
  *	SCG would be fun but major work (does provide vblank though)
+ *
+ *	Fix usage!
  */
 
 #include <stdio.h>
@@ -59,6 +62,7 @@ static volatile int done;
 #define TRACE_RTC	16
 #define TRACE_PPIDE	32
 #define TRACE_PROP	64
+#define TRACE_BANK	128
 
 static int trace = 0;/* TRACE_MEM|TRACE_IO|TRACE_UNK; */
 
@@ -356,10 +360,10 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
         /* lsr */
         r = check_chario();
         uptr->lsr = 0;
-        if (r & 1)
-            uptr->lsr |= 0x01;	/* Data ready */
+        if (!prop && (r & 1))
+             uptr->lsr |= 0x01;	/* Data ready */
         if (r & 2)
-            uptr->lsr |= 0x60;	/* TX empty | holding empty */
+             uptr->lsr |= 0x60;	/* TX empty | holding empty */
         /* Reading the LSR causes these bits to clear */
         r = uptr->lsr;
         uptr->lsr &= 0xF0;
@@ -394,13 +398,15 @@ static void timer_pulse(void)
  */
 static uint8_t rtcw;
 static uint8_t rtcst;
-static uint8_t rtcr;
+static uint16_t rtcr;
 static uint8_t rtccnt;
 static uint8_t rtcstate;
 static uint8_t rtcreg;
 static uint8_t rtcram[32];
 static uint8_t rtcwp = 0x80;
 static uint8_t rtc24 = 1;
+static uint8_t rtcbp = 0;
+static uint8_t rtcbc = 0;
 static struct tm *rtc_tm;
 
 static uint8_t rtc_read(void)
@@ -410,9 +416,66 @@ static uint8_t rtc_read(void)
     return 0xFF;
 }
 
+static uint16_t rtcregread(uint8_t reg)
+{
+    uint8_t val, v;
+
+    switch(reg)
+    {
+        case 0:
+            val = (rtc_tm->tm_sec % 10) +
+                   ((rtc_tm->tm_sec / 10) << 4);
+            break;
+        case 1:
+            val = (rtc_tm->tm_min % 10) +
+                   ((rtc_tm->tm_min / 10) << 4);
+            break;
+        case 2:
+            v = rtc_tm->tm_hour;
+            if (!rtc24) {
+                v %= 12;
+                v++;
+            }
+            val = (v % 10) + ((v / 10) << 4);
+            if (!rtc24) {
+                if (rtc_tm->tm_hour > 11)
+                    val |= 0x20;
+                val |= 0x80;
+            }
+            break;
+        case 3:
+            val = (rtc_tm->tm_mday % 10) +
+                   ((rtc_tm->tm_mday / 10) << 4);
+            break;
+        case 4:
+            val = ((rtc_tm->tm_mon + 1) % 10) +
+                   (((rtc_tm->tm_mon + 1) / 10) << 4);
+            break;
+        case 5:
+            val = rtc_tm->tm_wday + 1;
+            break;
+        case 6:
+            v = rtc_tm->tm_year % 100;
+            val = (v % 10) + ((v / 10) << 4);
+            break;
+        case 7:
+            val = rtcwp ? 0x80 : 0x00;
+            break;
+        case 8:
+            val = 0;
+            break;
+        default:
+            val = 0xFF;
+            /* Check */
+            break;
+    }
+    if (trace & TRACE_RTC)
+        fprintf(stderr, "RTCreg %d = %02X\n", reg, val);
+    return val;
+}
+
 static void rtcop(void)
 {
-    unsigned int v;
     if (trace & TRACE_RTC)
         fprintf(stderr, "rtcbyte %02X\n", rtcw);
     /* The emulated task asked us to write a byte, and has now provided
@@ -438,7 +501,17 @@ static void rtcop(void)
         if (trace & TRACE_RTC)
             fprintf(stderr, "rtcw makes no sense %d\n", rtcw);
         rtcstate = 0;
-        rtcr = 0xFF;
+        rtcr = 0x1FF;
+        return;
+    }
+    /* Clock burst ? : for now we only emulate time burst */
+    if (rtcw == 0xBF) {
+        rtcstate = 3;
+        rtcbp = 0;
+        rtcbc = 0;
+        rtcr = rtcregread(rtcbp++) << 1;
+        if (trace & TRACE_RTC)
+            fprintf(stderr, "rtc command BF: burst clock read.\n");
         return;
     }
     /* A write request */
@@ -447,7 +520,7 @@ static void rtcop(void)
             fprintf(stderr, "rtc write request, waiting byte 2.\n");
         rtcstate = 2;
         rtcreg = (rtcw >> 1) & 0x3F;
-        rtcr = 0xFF;
+        rtcr = 0x1FF;
         return;
     }
     /* A read request */
@@ -455,61 +528,14 @@ static void rtcop(void)
     if (rtcw & 0x40) {
         /* RAM */
         if (rtcw != 0xFE)
-            rtcr = rtcram[(rtcw >> 1) & 0x1F];
+            rtcr = rtcram[(rtcw >> 1) & 0x1F] << 1;
         if (trace & TRACE_RTC)
             fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n",
                     (rtcw >> 1) & 0xFF, rtcr);
         return;
     }
     /* Register read */
-    switch((rtcw >> 1) & 0x1F) {
-        case 0:
-            rtcr = (rtc_tm->tm_sec % 10) +
-                   ((rtc_tm->tm_sec / 10) << 4);
-            break;
-        case 1:
-            rtcr = (rtc_tm->tm_min % 10) +
-                   ((rtc_tm->tm_min / 10) << 4);
-            break;
-        case 2:
-            v = rtc_tm->tm_hour;            
-            if (!rtc24) {
-                v %= 12;
-                v++;
-            }
-            rtcr = (v % 10) + ((v / 10) << 4);
-            if (!rtc24) {
-                if (rtc_tm->tm_hour > 11)
-                    rtcr |= 0x20;
-                rtcr |= 0x80;
-            }
-            break;
-        case 3:
-            rtcr = (rtc_tm->tm_mday % 10) +
-                   ((rtc_tm->tm_mday / 10) << 4);
-            break;
-        case 4:
-            rtcr = ((rtc_tm->tm_mon + 1) % 10) +
-                   (((rtc_tm->tm_mon + 1) / 10) << 4);
-            break;
-        case 5:
-            rtcr = rtc_tm->tm_wday + 1;
-            break;
-        case 6:
-            v = rtc_tm->tm_year % 100;
-            rtcr = (v % 10) + ((v / 10) << 4);
-            break;
-        case 7:
-            rtcr = rtcwp ? 0x80 : 0x00;
-            break;
-        case 8:
-            rtcr = 0;
-            break;
-        default:
-            rtcr = 0xFF;
-            /* Check */
-            break;
-    }
+    rtcr = rtcregread((rtcw >> 1) & 0x1F) << 1;
     if (trace & TRACE_RTC)
         fprintf(stderr, "RTC read of time register %d is %d\n",
             (rtcw >> 1) & 0x1F, rtcr);
@@ -530,6 +556,12 @@ static void rtc_write(uint8_t val)
             fprintf(stderr, "RTC clock low.\n");
         if (!(val & 0x40)) {
             rtcr >>= 1;
+            /* Burst read of time */
+            rtcbc++;
+            if (rtcbc == 8 && rtcbp) {
+                rtcr = rtcregread(rtcbp++) << 1;
+                rtcbc = 0;
+            }
             if (trace & TRACE_RTC)
                 fprintf(stderr, "rtcr now %02X\n", rtcr);
         } else {
@@ -826,10 +858,18 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         uart_write(&uart[0], addr & 7, val);
     else if (addr >= 0x70 && addr <= 0x77)
         rtc_write(val);
-    else if (addr >= 0x78 && addr <= 0x79)
+    else if (addr >= 0x78 && addr <= 0x79) {
+        if (trace & TRACE_BANK)
+            fprintf(stderr, "RAM bank to %02X\n", val);
         rambank = val;
-    else if (addr >= 0x7C && addr <= 0x7F)
+    } else if (addr >= 0x7C && addr <= 0x7F) {
+        if (trace & TRACE_BANK) {
+            fprintf(stderr, "ROM bank to %02X\n", val);
+            if (val & 0x80)
+                fprintf(stderr, "Using RAM bank %d\n", rambank & 0x1F);
+        }
         rombank = val;
+    }
     else if (prop && addr >= 0xA8 && addr <= 0xAF)
         prop_write(addr & 0x07, val);
     else if (addr >= 0xC0 && addr <= 0xDF)
@@ -949,9 +989,11 @@ int main(int argc, char *argv[])
 	atexit(exit_cleanup);
 	signal(SIGINT, cleanup);
 	signal(SIGQUIT, cleanup);
+	signal(SIGPIPE, cleanup);
 	term.c_lflag &= ~(ICANON|ECHO);
 	term.c_cc[VMIN] = 1;
 	term.c_cc[VTIME] = 0;
+	term.c_cc[VINTR] = 0;
 	tcsetattr(0, TCSADRAIN, &term);
     }
 
@@ -971,6 +1013,7 @@ int main(int argc, char *argv[])
         Z80ExecuteTStates(&cpu_z80, 800000);
 	/* Do 20ms of I/O and delays */
 	nanosleep(&tc, NULL);
+	uart_event(uart);
 	timer_pulse();
     }
     exit(0);
