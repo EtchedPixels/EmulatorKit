@@ -63,6 +63,7 @@ static volatile int done;
 #define TRACE_PPIDE	32
 #define TRACE_PROP	64
 #define TRACE_BANK	128
+#define TRACE_UART	256
 
 static int trace = 0;/* TRACE_MEM|TRACE_IO|TRACE_UNK; */
 
@@ -166,6 +167,8 @@ static void pio_write(uint8_t addr, uint8_t val)
             break;
         case 2:	/* Port C - address/control lines */
             pioreg[addr] = val;
+            if (!ide0)
+                return;
             if (val & 0x80) {
                 if (trace & TRACE_PPIDE)
                     fprintf(stderr, "ide in reset.\n");
@@ -298,19 +301,83 @@ static void uart_event(struct uart16x50 *uptr)
         uart_interrupt(uptr, TEMT);
 }
 
+static void show_settings(struct uart16x50 *uptr)
+{
+    uint32_t baud;
+
+    if (!(trace & TRACE_UART))
+        return;
+
+    baud = uptr->ls + (uptr->ms << 8);
+    if (baud == 0)
+        baud = 1843200;
+    baud = 1843200 / baud;
+    baud /= 16;
+    fprintf(stderr, "[%d:%d",
+            baud, (uptr->lcr &3) + 5);
+    switch(uptr->lcr & 0x38) {
+        case 0x00:
+        case 0x10:
+        case 0x20:
+        case 0x30:
+            fprintf(stderr, "N");
+            break;
+        case 0x08:
+            fprintf(stderr, "O");
+            break;
+        case 0x18:
+            fprintf(stderr, "E");
+            break;
+        case 0x28:
+            fprintf(stderr, "M");
+            break;
+        case 0x38:
+            fprintf(stderr, "S");
+            break;
+    }
+    fprintf(stderr, "%d ",
+            (uptr->lcr & 4) ? 2 : 1);
+
+    if (uptr->lcr & 0x40)
+        fprintf(stderr, "break ");
+    if (uptr->lcr & 0x80)
+        fprintf(stderr, "dlab ");
+    if (uptr->mcr & 1)
+        fprintf(stderr, "DTR ");
+    if (uptr->mcr & 2)
+        fprintf(stderr, "RTS ");
+    if (uptr->mcr & 4)
+        fprintf(stderr, "OUT1 ");
+    if (uptr->mcr & 8)
+        fprintf(stderr, "OUT2 ");
+    if (uptr->mcr & 16)
+        fprintf(stderr, "LOOP ");
+    fprintf(stderr, "ier %02x]\n", uptr->ier);
+}
+
 static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
 {
     switch(addr) {
     case 0:	/* If dlab = 0, then write else LS*/
-        if (uptr->dlab == 0 && uptr == &uart[0]) {
-            putchar(val);
-            fflush(stdout);
+        if (uptr->dlab == 0) {
+            if (uptr == &uart[0]) {
+                putchar(val);
+                fflush(stdout);
+            }
             uart_clear_interrupt(uptr, TEMT);
             uart_interrupt(uptr, TEMT);
+        } else {
+            uptr->ls = val;
+            show_settings(uptr);
         }
         break;
-    case 1:	/* If dlab = 0, then IER (ro) */
-        uptr->ier = val & 0x0F;
+    case 1:	/* If dlab = 0, then IER */
+        if (uptr->dlab) {
+            uptr->ms= val;
+            show_settings(uptr);
+        }
+        else
+            uptr->ier = val;
         break;
     case 2:	/* FCR */
         uptr->fcr = val & 0x9F;
@@ -318,9 +385,11 @@ static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
     case 3:	/* LCR */
         uptr->lcr = val;
         uptr->dlab = (uptr->lcr & 0x80);
+        show_settings(uptr);
         break;
     case 4:	/* MCR */
         uptr->mcr = val & 0x3F;
+        show_settings(uptr);
         break;
     case 5:	/* LSR (r/o) */
         break;
@@ -979,10 +1048,10 @@ int main(int argc, char *argv[])
     uart_init(&uart[3]);
     uart_init(&uart[4]);
 
-    /* 20ms - it's a balance between nice behaviour and simulation
-       smoothness */
+    /* No real need for interrupt accuracy so just go with the timer. If we
+       ever do the UART as timer hack it'll need addressing! */
     tc.tv_sec = 0;
-    tc.tv_nsec = 20000000L;
+    tc.tv_nsec = 100000000L;
 
     if (tcgetattr(0, &term) == 0) {
 	saved_term = term;
@@ -1010,8 +1079,8 @@ int main(int argc, char *argv[])
 
     /* 4MHz Z80 - 4,000,000 tstates / second */
     while (!done) {
-        Z80ExecuteTStates(&cpu_z80, 800000);
-	/* Do 20ms of I/O and delays */
+        Z80ExecuteTStates(&cpu_z80, 400000);
+	/* Do 100ms of I/O and delays */
 	nanosleep(&tc, NULL);
 	uart_event(uart);
 	timer_pulse();
