@@ -60,9 +60,9 @@ https://github.com/RC2014Z80/RC2014/tree/master/CPM
 
 Remember to unzip the image before putting it on the virtual cf card.
 
-## N8VEM Mark 2 Emulator
+## RBC (ex N8VEM) Mark 2 Emulator
 
-This is a fairly basic emulator for the N8VEM v2 system board.
+This is a fairly basic emulator for the RBC v2 system board.
 
 https://retrobrewcomputers.org/doku.php?id=boards:sbc:sbc_v2:start
 

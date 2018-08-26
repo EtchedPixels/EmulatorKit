@@ -463,7 +463,6 @@ static void timer_pulse(void)
    Give the host time and don't emulate time setting except for
    the 24/12 hour setting.
    
-   Doesn't emulate burst mode which we need to fix for ROMWBW
  */
 static uint8_t rtcw;
 static uint8_t rtcst;
@@ -963,7 +962,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-    fprintf(stderr, "n8vem: [-r rompath] [-i idepath]\n");
+    fprintf(stderr, "rcbv2: [-r rompath] [-i idepath] [-t] [-p] [-s sdcardpath] [-d tracemask]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -984,7 +983,7 @@ int main(int argc, char *argv[])
                 break;
             case 'i':
                 if (ide == 2)
-                    fprintf(stderr, "n8vem2: only two disks per controller.\n");
+                    fprintf(stderr, "sbcv2: only two disks per controller.\n");
                 else
                     idepath[ide++] = optarg;
                 break;
@@ -1013,7 +1012,7 @@ int main(int argc, char *argv[])
     }
     for (i = 0; i < 16; i++) {
         if (read(fd, ramrom[i], 32768) != 32768) {
-            fprintf(stderr, "n8vem2: banked rom image should be 512K.\n");
+            fprintf(stderr, "sbcv2: banked rom image should be 512K.\n");
             exit(EXIT_FAILURE);
         }
     }
