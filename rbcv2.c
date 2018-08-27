@@ -439,7 +439,10 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
         return r;
     case 6:
         /* msr */
-        return uptr->msr;
+        r = uptr->msr;
+        /* Reading clears the delta bits */
+        uptr->msr &= 0xF0;
+        return r;
     case 7:
         return uptr->scratch;
     }
@@ -452,7 +455,7 @@ static void timer_pulse(void)
 {
     struct uart16x50 *uptr = uart;
     if (timerhack) {
-        uptr->msr ^= 0x40;	/* DSR toggles */
+        uptr->msr ^= 0x20;	/* DSR toggles */
         uptr->msr |= 0x02;	/* DSR delta */
         uart_interrupt(uptr, MODEM);
     }
