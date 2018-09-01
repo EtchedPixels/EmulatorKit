@@ -1065,6 +1065,8 @@ int main(int argc, char *argv[])
 	term.c_cc[VMIN] = 1;
 	term.c_cc[VTIME] = 0;
 	term.c_cc[VINTR] = 0;
+	term.c_cc[VSUSP] = 0;
+	term.c_cc[VSTOP] = 0;
 	tcsetattr(0, TCSADRAIN, &term);
     }
 
