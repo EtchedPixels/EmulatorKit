@@ -28,10 +28,15 @@ partial decode all over the place and clash with everyone.
 0x8C-0x8F	SC102 CTC second card
 0x90-0x93	Scott Baker CTC
 
+0xA0		Z280RC boot mode switch
+
 0xC0		Scott Baker Real Time Clock
 0xC0		Ancient Computing 16550A
+0xC0		RC2014/Ed Brindley DS1302 RTC
+0xC0-0xCF	Z280RC IDE
 0xD0-0xD3	Ed Brindley YM-AY
 0xE0-0xE7	Scott Baker CF Adapter
+0xE0-0xE7	RC2014/Ed Brindley PPIDE
 
 
 With no assumed default I can find documented
