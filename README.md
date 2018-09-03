@@ -1,17 +1,15 @@
 ## RC2014 Emulator
 
-This is an emulator (prototype) for the RC2014 Z80 system. Currently it
-emulates the Z80 (via libz80) and fully emulates the 6850 ACIA including
-partial decodes and interrupts.
+This is an emulator for the RC2014 Z80 system.
 
-The goal is to emulate
-- Z80 CPU (mostly done, time sync wants work)
-- ROM and switchable ROM cards (done)
-- 6850 ACIA (done)
-- Z80 SIO/2 (async polled done, needs interrupt support)
-- 512K RAM/512K ROM card (done, untested)
-- CF adapter (done)
-- Real time clock (in progress)
+The emulation includes
+- Z80 CPU (time sync wants work)
+- ROM and switchable ROM cards
+- 6850 ACIA
+- Z80 SIO/2
+- 512K RAM/512K ROM card
+- CF adapter
+- DS1302 real time clock (time setting not supported)
 - CTC at 0x90 (untested)
 
 At this point in time the ACIA emulation is complete and sufficient to run
@@ -21,8 +19,11 @@ ACIA serial I/O card. This also corresponds to the RC2014 Mini.
 
 With the right options and ROM image you can also boot CP/M on it via the
 emulated compact flash adapter. This corresponds to the RC2014 with the
-switchable ROM, 64K RAM card, ACIA card and Compact Flash card. SIO is not
-yet fully functional.
+switchable ROM, 64K RAM card, ACIA card and Compact Flash card.
+
+In 512K mode the emulator can run the ROMWBW 512K image for the RC2014
+system providing an SIO is selected. With ACIA it crashes for reasons not
+yet understood.
 
 # To get actual hardware see
 
@@ -31,6 +32,7 @@ https://rc2014.co.uk/
 # For ROM images see
 
 https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
+https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start
 
 # Usage
 
@@ -38,12 +40,15 @@ Options:
 - -a		enable 6850 ACIA
 - -b		512K ROM/512K RAM board
 - -c		CTC card present (not yet tested)
-- -e n		Execute ROM bank n (0-7)
+- -d n		Turn on debug flags
+- -e n		Execute ROM bank n (0-7) (not used with -b)
+- -f		Fast mode (run flat out)
 - -i path	Enable IDE and use this file
 - -m board	Board type (z80 for default rc2014 or sc108)
 - -p		Pageable ROM (needed for CP/M)
 - -r path	Load the ROM image from this path
-- -s		Enable the SIO/2 (no IRQ support yet)
+- -s		Enable the SIO/2
+- -R		Enable the DS1302 RTC
 
 To build a disk image
 

@@ -8,6 +8,12 @@
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
  *	RTC at 0xC0
+ *
+ *	Known bugs
+ *	ROMWBW crashes in ACIA mode
+ *	Not convinced we have all the INT clear cases right for SIO error
+ *
+ *	Really ought to wire RETI / SIO etc up properly
  */
 
 #include <stdio.h>
@@ -32,6 +38,8 @@ static uint8_t switchrom = 1;
 static uint8_t cpuboard = 0;
 static uint8_t have_ctc = 0;
 static uint8_t port38 = 0;
+static uint8_t rtc = 0;
+static uint8_t fast = 0;
 
 static Z80Context cpu_z80;
 
@@ -43,6 +51,8 @@ static volatile int done;
 #define TRACE_UNK	8
 #define TRACE_SIO	16
 #define TRACE_512	32
+#define TRACE_RTC	64
+#define TRACE_ACIA	128
 
 static int trace = 0;/*TRACE_512|TRACE_MEM|TRACE_IO|TRACE_UNK; */
 
@@ -191,8 +201,11 @@ static uint8_t acia;
 
 static void acia_irq_compute(void)
 {
-    if (acia_config & acia_status & 0x80)
+    if (acia_config & acia_status & 0x80) {
+        if (trace & TRACE_ACIA)
+            fprintf(stderr, "ACIA interrupt.\n");
         Z80INT(&cpu_z80, 0xFF);	/* FIXME probably last data or bus noise */
+    }
 }
 
 static void acia_receive(void)
@@ -225,6 +238,8 @@ static void acia_timer(void)
 /* Very crude for initial testing ! */
 static uint8_t acia_read(uint8_t addr)
 {
+    if (trace & TRACE_ACIA)
+        fprintf(stderr, "acia_read %d ", addr);
     switch (addr) {
     case 0:
 	/* bits 7: irq pending, 6 parity error, 5 rx over
@@ -232,15 +247,24 @@ static uint8_t acia_read(uint8_t addr)
 	 * Bits are set on char arrival and cleared on next not by
 	 * user
 	 */
+        if (trace & TRACE_ACIA)
+            fprintf(stderr, "acia_status %d\n", acia_status);
 	return acia_status;
     case 1:
         acia_status &= ~0x81;	/* No IRQ, rx empty */
+        if (trace & TRACE_ACIA)
+            fprintf(stderr, "acia_char %d\n", acia_char);
 	return acia_char;
+    default:
+        fprintf(stderr, "acia: bad addr.\n");
+        exit(1);
     }
 }
 
 static void acia_write(uint16_t addr, uint8_t val)
 {
+    if (trace & TRACE_ACIA)
+        fprintf(stderr, "acia_write %d %d\n", addr, val);
     switch (addr) {
     case 0:
 	/* bit 7 enables interrupts, buits 5-6 are tx control
@@ -295,6 +319,8 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
     uint8_t new = (chan->intbits ^ m) & m;
     uint8_t vector;
     chan->intbits |= m;
+    if (trace & TRACE_SIO)
+        fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
     if (new) {
         if (!sio->irq) {
             sio->irq = 1;
@@ -323,28 +349,37 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
  */
 static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
 {
+    if (trace & TRACE_SIO)
+        fprintf(stderr, "SIO %d queue %d: ", (int)(chan - sio), c);
     /* Receive disabled */
-    if (!(chan->wr[3] & 1))
+    if (!(chan->wr[3] & 1)) {
+        fprintf(stderr, "RX disabled.\n");
         return;
+    }
     /* Overrun */
     if (chan->dptr == 2) {
+        if (trace & TRACE_SIO)
+            fprintf(stderr, "Overrun.\n");
         chan->data[2] = c;
         chan->rr[1] |= 0x20;	/* Overrun flagged */
         /* What are the rules for overrun delivery FIXME */
         sio2_raise_int(chan, INT_ERR);
     } else {
         /* FIFO add */
+        if (trace & TRACE_SIO)
+            fprintf(stderr, "Queued %d (mode %d)\n", chan->dptr,
+                chan->wr[1] & 0x18);
         chan->data[chan->dptr++] = c;
         chan->rr[0] |= 1;
         switch(chan->wr[1] & 0x18) {
-            case 0:
+            case 0x00:
                 break;
-            case 1:
+            case 0x08:
                 if (chan->dptr == 1)
                     sio2_raise_int(chan, INT_RX);
                 break;
-            case 2:
-            case 3:
+            case 0x10:
+            case 0x18:
                 sio2_raise_int(chan, INT_RX);
                 break;
         }
@@ -528,35 +563,95 @@ static void my_ide_write(uint16_t addr, uint8_t val)
    Give the host time and don't emulate time setting except for
    the 24/12 hour setting.
    
-   Doesn't emulate burst mode
  */
 static uint8_t rtcw;
 static uint8_t rtcst;
-static uint8_t rtcr;
+static uint16_t rtcr;
 static uint8_t rtccnt;
 static uint8_t rtcstate;
 static uint8_t rtcreg;
 static uint8_t rtcram[32];
 static uint8_t rtcwp = 0x80;
 static uint8_t rtc24 = 1;
+static uint8_t rtcbp = 0;
+static uint8_t rtcbc = 0;
 static struct tm *rtc_tm;
 
-static int rtc;
-
-static uint8_t rtc_read(uint16_t addr)
+static uint8_t rtc_read(void)
 {
     if (rtcst & 0x30)
-        return rtcr & 0x80;
-    return 0x80;
+        return (rtcr & 0x01) ? 1 : 0;
+    return 0xFF;
+}
+
+static uint16_t rtcregread(uint8_t reg)
+{
+    uint8_t val, v;
+
+    switch(reg)
+    {
+        case 0:
+            val = (rtc_tm->tm_sec % 10) +
+                   ((rtc_tm->tm_sec / 10) << 4);
+            break;
+        case 1:
+            val = (rtc_tm->tm_min % 10) +
+                   ((rtc_tm->tm_min / 10) << 4);
+            break;
+        case 2:
+            v = rtc_tm->tm_hour;
+            if (!rtc24) {
+                v %= 12;
+                v++;
+            }
+            val = (v % 10) + ((v / 10) << 4);
+            if (!rtc24) {
+                if (rtc_tm->tm_hour > 11)
+                    val |= 0x20;
+                val |= 0x80;
+            }
+            break;
+        case 3:
+            val = (rtc_tm->tm_mday % 10) +
+                   ((rtc_tm->tm_mday / 10) << 4);
+            break;
+        case 4:
+            val = ((rtc_tm->tm_mon + 1) % 10) +
+                   (((rtc_tm->tm_mon + 1) / 10) << 4);
+            break;
+        case 5:
+            val = rtc_tm->tm_wday + 1;
+            break;
+        case 6:
+            v = rtc_tm->tm_year % 100;
+            val = (v % 10) + ((v / 10) << 4);
+            break;
+        case 7:
+            val = rtcwp ? 0x80 : 0x00;
+            break;
+        case 8:
+            val = 0;
+            break;
+        default:
+            val = 0xFF;
+            /* Check */
+            break;
+    }
+    if (trace & TRACE_RTC)
+        fprintf(stderr, "RTCreg %d = %02X\n", reg, val);
+    return val;
 }
 
 static void rtcop(void)
 {
-    unsigned int v;
+    if (trace & TRACE_RTC)
+        fprintf(stderr, "rtcbyte %02X\n", rtcw);
     /* The emulated task asked us to write a byte, and has now provided
        the data byte to go with it */
     if (rtcstate == 2) {
         if (!rtcwp) {
+            if (trace & TRACE_RTC)
+                fprintf(stderr, "RTC write %d as %d\n", rtcreg, rtcw);
             /* We did a real write! */
             /* Not yet tackled burst mode */
             if (rtcreg != 0x3F && (rtcreg & 0x20))	/* NVRAM */
@@ -571,15 +666,29 @@ static void rtcop(void)
     }
     /* Check for broken requests */
     if (!(rtcw & 0x80)) {
+        if (trace & TRACE_RTC)
+            fprintf(stderr, "rtcw makes no sense %d\n", rtcw);
         rtcstate = 0;
-        rtcr = 0xFF;
+        rtcr = 0x1FF;
+        return;
+    }
+    /* Clock burst ? : for now we only emulate time burst */
+    if (rtcw == 0xBF) {
+        rtcstate = 3;
+        rtcbp = 0;
+        rtcbc = 0;
+        rtcr = rtcregread(rtcbp++) << 1;
+        if (trace & TRACE_RTC)
+            fprintf(stderr, "rtc command BF: burst clock read.\n");
         return;
     }
     /* A write request */
-    if (rtcw & 0x01) {
+    if (!(rtcw & 0x01)) {
+        if (trace & TRACE_RTC)
+            fprintf(stderr, "rtc write request, waiting byte 2.\n");
         rtcstate = 2;
         rtcreg = (rtcw >> 1) & 0x3F;
-        rtcr = 0xFF;
+        rtcr = 0x1FF;
         return;
     }
     /* A read request */
@@ -587,88 +696,72 @@ static void rtcop(void)
     if (rtcw & 0x40) {
         /* RAM */
         if (rtcw != 0xFE)
-            rtcr = rtcram[(rtcw >> 1) & 0x1F];
+            rtcr = rtcram[(rtcw >> 1) & 0x1F] << 1;
+        if (trace & TRACE_RTC)
+            fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n",
+                    (rtcw >> 1) & 0xFF, rtcr);
         return;
     }
     /* Register read */
-    switch((rtcw >> 1) & 0x1F) {
-        case 0:
-            rtcr = (rtc_tm->tm_sec % 10) +
-                   ((rtc_tm->tm_sec / 10) << 4);
-            break;
-        case 1:
-            rtcr = (rtc_tm->tm_min % 10) +
-                   ((rtc_tm->tm_min / 10) << 4);
-            break;
-        case 2:
-            v = rtc_tm->tm_hour;            
-            if (!rtc24) {
-                v %= 12;
-                v++;
-            }
-            rtcr = (v % 10) + ((v / 10) << 4);
-            if (!rtc24) {
-                if (rtc_tm->tm_hour > 11)
-                    rtcr |= 0x20;
-                rtcr |= 0x80;
-            }
-            break;
-        case 3:
-            rtcr = (rtc_tm->tm_mday % 10) +
-                   ((rtc_tm->tm_mday / 10) << 4);
-            break;
-        case 4:
-            rtcr = ((rtc_tm->tm_mon + 1) % 10) +
-                   (((rtc_tm->tm_mon + 1) / 10) << 4);
-            break;
-        case 5:
-            rtcr = rtc_tm->tm_wday + 1;
-            break;
-        case 6:
-            v = rtc_tm->tm_year % 100;
-            rtcr = (v % 10) + ((v / 10) << 4);
-            break;
-        case 7:
-            rtcr = rtcwp ? 0x80 : 0x00;
-            break;
-        case 8:
-            rtcr = 0;
-            break;
-        default:
-            rtcr = 0xFF;
-            /* Check */
-            break;
-    }
+    rtcr = rtcregread((rtcw >> 1) & 0x1F) << 1;
+    if (trace & TRACE_RTC)
+        fprintf(stderr, "RTC read of time register %d is %d\n",
+            (rtcw >> 1) & 0x1F, rtcr);
 }
 
-static void rtc_write(uint16_t addr, uint8_t val)
+static void rtc_write(uint8_t val)
 {
     uint8_t changed = val ^ rtcst;
+    uint8_t is_read;
+    /* Direction */
+    if ((trace & TRACE_RTC) && (changed & 0x20))
+        fprintf(stderr, "RTC direction now %s.\n", (val & 0x20)?"read":"write");
+    is_read = val & 0x20;
     /* Clock */
-    if (changed & 040) {
+    if (changed & 0x40) {
         /* The rising edge samples, the falling edge clocks receive */
-        if (!(val & 0x40))
-            rtcr <<= 1;
-        else {
-            rtcw <<= 1;
+        if (trace & TRACE_RTC)
+            fprintf(stderr, "RTC clock low.\n");
+        if (!(val & 0x40)) {
+            rtcr >>= 1;
+            /* Burst read of time */
+            rtcbc++;
+            if (rtcbc == 8 && rtcbp) {
+                rtcr = rtcregread(rtcbp++) << 1;
+                rtcbc = 0;
+            }
+            if (trace & TRACE_RTC)
+                fprintf(stderr, "rtcr now %02X\n", rtcr);
+        } else {
+            if (trace & TRACE_RTC)
+                fprintf(stderr, "RTC clock high.\n");
+            rtcw >>= 1;
             if ((val & 0x30) == 0x10)
-                rtcw |= (val & 0x80) ? 1 : 0;
+                rtcw |= val & 0x80;
             else
-                rtcw |= 1;
+                rtcw |= 0xFF;
             rtccnt++;
-            if (rtccnt == 8)
+            if (trace & TRACE_RTC)
+                fprintf(stderr, "rtcw now %02x (%d)\n", rtcw, rtccnt);
+            if (rtccnt == 8 && !is_read)
                 rtcop();
         }
     }
     /* CE */
     if (changed & 0x10) {
         if (rtcst & 0x10) {
+            if (trace & TRACE_RTC)
+                fprintf(stderr, "RTC CE dropped.\n");
             rtccnt = 0;
+            rtcr = 0;
+            rtcw = 0;
             rtcstate = 0;
         } else {
             /* Latch imaginary registers on rising edge */
             time_t t= time(NULL);
             rtc_tm = localtime(&t);
+            if (trace & TRACE_RTC)
+                fprintf(stderr, "RTC CE raised and latched time.\n");
         }
     }
     rtcst = val;
@@ -869,7 +962,7 @@ static uint8_t io_read(int unused, uint16_t addr)
     if ((addr >= 0x10 && addr <= 0x17) && ide)
 	return my_ide_read(addr & 7);
     if (addr == 0xC0 && rtc)
-	return rtc_read(addr);
+	return rtc_read();
     /* Scott Baker is 0x90-93, suggested defaults for the
        Stephen Cousins boards at 0x88-0x8B. No doubt we'll get
        an official CTC board at another address  */
@@ -900,7 +993,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
             fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en":"dis");
 	bankenable = val & 1;
     } else if (addr == 0xC0 && rtc)
-	rtc_write(addr, val);
+	rtc_write(val);
     else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
         ctc_write(addr & 3, val);
     else if (switchrom && addr == 0x38)
@@ -929,7 +1022,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-    fprintf(stderr, "rc2014: [-a] [-b] [-c] [-m mainboard] [-r bank] [-e rombank] [-s]\n");
+    fprintf(stderr, "rc2014: [-a] [-b] [-c] [-f] [-R] [-m mainboard] [-r bank] [-e rombank] [-s] [-d debug]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -943,7 +1036,7 @@ int main(int argc, char *argv[])
     char *rompath = "rc2014.rom";
     char *idepath;
 
-    while((opt = getopt(argc, argv, "abce:i:m:pr:s")) != -1) {
+    while((opt = getopt(argc, argv, "abcd:e:fi:m:pr:sR")) != -1) {
         switch(opt) {
             case 'a':
                 acia = 1;
@@ -984,6 +1077,15 @@ int main(int argc, char *argv[])
                     fputs("rc2014: supported cpu types z80, sc108.\n", stderr);
                     exit(EXIT_FAILURE);
                 }
+                break;
+            case 'd':
+                trace = atoi(optarg);
+                break;
+            case 'f':
+                fast = 1;
+                break;
+            case 'R':
+                rtc = 1;
                 break;
             default:
                 usage();
@@ -1067,9 +1169,13 @@ int main(int argc, char *argv[])
 	atexit(exit_cleanup);
 	signal(SIGINT, cleanup);
 	signal(SIGQUIT, cleanup);
+	signal(SIGPIPE, cleanup);
 	term.c_lflag &= ~(ICANON|ECHO);
-	term.c_cc[VMIN] = 1;
-	term.c_cc[VTIME] = 0;
+	term.c_cc[VMIN] = 0;
+	term.c_cc[VTIME] = 1;
+	term.c_cc[VINTR] = 0;
+	term.c_cc[VSUSP] = 0;
+	term.c_cc[VSTOP] = 0;
 	tcsetattr(0, TCSADRAIN, &term);
     }
 
@@ -1097,7 +1203,8 @@ int main(int argc, char *argv[])
                 ctc_tick(364);
         }
 	/* Do 5ms of I/O and delays */
-	nanosleep(&tc, NULL);
+	if (!fast)
+	    nanosleep(&tc, NULL);
     }
     exit(0);
 }
