@@ -50,6 +50,7 @@ static struct ide_controller *ide0;
 static char *sdcard_path = "sdcard.img";
 static uint8_t prop;
 static uint8_t timerhack;
+static uint8_t fast;
 
 static Z80Context cpu_z80;
 
@@ -978,7 +979,7 @@ int main(int argc, char *argv[])
     char *idepath[2] = { NULL, NULL };
     int i;
 
-    while((opt = getopt(argc, argv, "r:i:s:ptd:")) != -1) {
+    while((opt = getopt(argc, argv, "r:i:s:ptd:f")) != -1) {
         switch(opt) {
             case 'r':
                 rompath = optarg;
@@ -1000,6 +1001,9 @@ int main(int argc, char *argv[])
                 break;
             case 'd':
                 trace = atoi(optarg);
+                break;
+            case 'f':
+                fast = 1;
                 break;
             default:
                 usage();
@@ -1085,7 +1089,8 @@ int main(int argc, char *argv[])
     while (!done) {
         Z80ExecuteTStates(&cpu_z80, 400000);
 	/* Do 100ms of I/O and delays */
-	nanosleep(&tc, NULL);
+	if (!fast)
+	    nanosleep(&tc, NULL);
 	uart_event(uart);
 	timer_pulse();
     }
