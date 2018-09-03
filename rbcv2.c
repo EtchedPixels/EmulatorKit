@@ -36,6 +36,8 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/mman.h>
 #include "libz80/z80.h"
 #include "ide.h"
 
@@ -899,6 +901,67 @@ static void prop_write(uint8_t addr, uint8_t val)
     }
 }
 
+static int ramf;
+static int ramf_fd;
+static const char *ramf_path = "ramf.disk";
+static uint8_t *ramf_addr;
+static uint8_t ramf_port[2][2];
+static uint16_t ramf_count[2];
+
+static void ramf_init(void)
+{
+    ramf_fd = open(ramf_path, O_RDWR|O_CREAT, 0600);
+    if(ramf_fd == -1) {
+        perror(ramf_path);
+        ramf = 0;
+        return;
+    }
+    ramf_addr = mmap(NULL, 8192 * 1024, PROT_READ|PROT_WRITE,
+        MAP_SHARED, ramf_fd, 0L);
+    if (ramf_addr == MAP_FAILED) {
+        perror("mmap");
+        close(ramf_fd);
+        ramf = 0;
+        return;
+    }
+}
+
+static uint8_t *ramaddr(uint8_t high)
+{
+    uint32_t offset = high ? 4096 * 1024 : 0;
+    offset += (ramf_port[high][0] & 0x1F) << 17;
+    offset += ramf_port[high][1] << 9;
+    offset += ramf_count[high]++;
+    return ramf_addr + offset;
+}
+
+static void ramf_write(uint8_t addr, uint8_t val)
+{
+    uint8_t high = (addr & 4) ? 1 : 0;
+    fprintf(stderr, "RAMF write %d = %d\n", addr, val);
+    addr &= 3;
+    if (addr == 0)
+        *ramaddr(high) = val;
+    else if (addr == 3)
+        return;
+    else {
+        ramf_port[high][addr & 1] = val;
+        ramf_count[high] = 0;
+    }
+}
+
+static uint8_t ramf_read(uint8_t addr)
+{
+    uint8_t high = (addr & 4) ? 1 : 0;
+    fprintf(stderr, "RAMF read %d\n", addr);
+    addr &= 3;
+    if (addr == 0)
+        return *ramaddr(high);
+    if (addr == 3)
+        return 0;	/* or 1 for write protected */
+    return ramf_port[high][addr];
+}
+
 static uint8_t io_read(int unused, uint16_t addr)
 {
     if (trace & TRACE_IO)
@@ -910,6 +973,8 @@ static uint8_t io_read(int unused, uint16_t addr)
         return uart_read(&uart[0], addr & 7);
     if (addr >= 0x70 && addr <= 0x77)
         return rtc_read();
+    if (ramf && (addr >= 0xA0 && addr <= 0xA7))
+        return ramf_read(addr & 7);
     if (prop && (addr >= 0xA8 && addr <= 0xAF))
         return prop_read(addr & 7);
     if (addr >= 0xC0 && addr <= 0xDF)
@@ -942,6 +1007,8 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         }
         rombank = val;
     }
+    else if (ramf &&& addr >=0xA0 && addr <=0xA7)
+        ramf_write(addr & 0x07, val);
     else if (prop && addr >= 0xA8 && addr <= 0xAF)
         prop_write(addr & 0x07, val);
     else if (addr >= 0xC0 && addr <= 0xDF)
@@ -966,7 +1033,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-    fprintf(stderr, "rcbv2: [-r rompath] [-i idepath] [-t] [-p] [-s sdcardpath] [-d tracemask]\n");
+    fprintf(stderr, "rcbv2: [-r rompath] [-i idepath] [-t] [-p] [-s sdcardpath] [-d tracemask] [-R]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -979,7 +1046,7 @@ int main(int argc, char *argv[])
     char *idepath[2] = { NULL, NULL };
     int i;
 
-    while((opt = getopt(argc, argv, "r:i:s:ptd:f")) != -1) {
+    while((opt = getopt(argc, argv, "r:i:s:ptd:fR")) != -1) {
         switch(opt) {
             case 'r':
                 rompath = optarg;
@@ -1004,6 +1071,9 @@ int main(int argc, char *argv[])
                 break;
             case 'f':
                 fast = 1;
+                break;
+            case 'R':
+                ramf = 1;
                 break;
             default:
                 usage();
@@ -1047,6 +1117,11 @@ int main(int argc, char *argv[])
     }
 
     prop_init();
+
+    ramf_init();
+
+    if (ramf)
+        ramf_init();
 
     uart_init(&uart[0]);
     uart_init(&uart[1]);

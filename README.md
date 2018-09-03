@@ -11,6 +11,7 @@ The emulation includes
 - CF adapter
 - DS1302 real time clock (time setting not supported)
 - CTC at 0x90 (untested)
+- RAMF at 0xA0/0xA4 (untested)
 
 At this point in time the ACIA emulation is complete and sufficient to run
 the standard ROM environment with BASIC. This represents the basic
