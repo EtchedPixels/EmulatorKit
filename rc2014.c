@@ -14,6 +14,7 @@
  *	Not convinced we have all the INT clear cases right for SIO error
  *
  *	Really ought to wire RETI / SIO etc up properly
+ *	Add support for using real CF card
  */
 
 #include <stdio.h>
@@ -27,6 +28,7 @@
 #include <unistd.h>
 #include "libz80/z80.h"
 #include "ide.h"
+#include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
@@ -40,8 +42,11 @@ static uint8_t have_ctc = 0;
 static uint8_t port38 = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
+static uint8_t wiznet = 0;
 
 static Z80Context cpu_z80;
+
+static nic_w5100_t *wiz;
 
 static volatile int done;
 
@@ -54,7 +59,7 @@ static volatile int done;
 #define TRACE_RTC	64
 #define TRACE_ACIA	128
 
-static int trace = 0;/*TRACE_512|TRACE_MEM|TRACE_IO|TRACE_UNK; */
+static int trace = 0;
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
@@ -961,6 +966,8 @@ static uint8_t io_read(int unused, uint16_t addr)
 	return sio2_read(addr & 3);
     if ((addr >= 0x10 && addr <= 0x17) && ide)
 	return my_ide_read(addr & 7);
+    if (addr >= 0x28 && addr <= 0x2C && wiznet)
+        return nic_w5100_read(wiz, addr & 3);
     if (addr == 0xC0 && rtc)
 	return rtc_read();
     /* Scott Baker is 0x90-93, suggested defaults for the
@@ -984,6 +991,9 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	sio2_write(addr & 3, val);
     else if ((addr >= 0x10 && addr <= 0x17) && ide)
 	my_ide_write(addr & 7, val);
+    else if (addr >= 0x28 && addr <= 0x2C && wiznet)
+        nic_w5100_write(wiz, addr & 3, val);
+    /* FIXME: real bank512 alias at 0x70-77 for 78-7F */
     else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 	bankreg[addr & 3] = val;
 	if (trace & TRACE_512)
@@ -1036,7 +1046,7 @@ int main(int argc, char *argv[])
     char *rompath = "rc2014.rom";
     char *idepath;
 
-    while((opt = getopt(argc, argv, "abcd:e:fi:m:pr:sR")) != -1) {
+    while((opt = getopt(argc, argv, "abcd:e:fi:m:pr:sRw")) != -1) {
         switch(opt) {
             case 'a':
                 acia = 1;
@@ -1086,6 +1096,9 @@ int main(int argc, char *argv[])
                 break;
             case 'R':
                 rtc = 1;
+                break;
+            case 'w':
+                wiznet = 1;
                 break;
             default:
                 usage();
@@ -1159,6 +1172,11 @@ int main(int argc, char *argv[])
     if (have_ctc)
         ctc_init();
 
+    if (wiznet) {
+        wiz = nic_w5100_alloc();
+        nic_w5100_reset(wiz);
+    }
+
     /* 50ms - it's a balance between nice behaviour and simulation
        smoothness */
     tc.tv_sec = 0;
@@ -1202,6 +1220,8 @@ int main(int argc, char *argv[])
             if (have_ctc)
                 ctc_tick(364);
         }
+        if (wiznet)
+            w5100_process(wiz);
 	/* Do 5ms of I/O and delays */
 	if (!fast)
 	    nanosleep(&tc, NULL);

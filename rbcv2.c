@@ -40,6 +40,7 @@
 #include <sys/mman.h>
 #include "libz80/z80.h"
 #include "ide.h"
+#include "w5100.h"
 
 #define HIRAM	63
 
@@ -53,8 +54,11 @@ static char *sdcard_path = "sdcard.img";
 static uint8_t prop;
 static uint8_t timerhack;
 static uint8_t fast;
+static uint8_t wiznet;
 
 static Z80Context cpu_z80;
+
+static nic_w5100_t *wiz;
 
 static volatile int done;
 
@@ -68,7 +72,7 @@ static volatile int done;
 #define TRACE_BANK	128
 #define TRACE_UART	256
 
-static int trace = 0;/* TRACE_MEM|TRACE_IO|TRACE_UNK; */
+static int trace = 0;
 
 static uint8_t mem_read(int unused, uint16_t addr)
 {
@@ -967,6 +971,8 @@ static uint8_t io_read(int unused, uint16_t addr)
     if (trace & TRACE_IO)
         fprintf(stderr, "read %02x\n", addr);
     addr &= 0xFF;
+    if (addr >= 0x28 && addr <= 0x2C && wiznet)
+        return nic_w5100_read(wiz, addr & 3);
     if (addr >= 0x60 && addr <= 0x67) 	/* Aliased */
         return pio_read(addr & 3);
     if (addr >= 0x68 && addr < 0x70)
@@ -989,7 +995,9 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     if (trace & TRACE_IO)
         fprintf(stderr, "write %02x <- %02x\n", addr & 0xFF, val);
     addr &= 0xFF;
-    if (addr >= 0x60 && addr <= 0x67)	/* Aliased */
+    if (addr >= 0x28 && addr <= 0x2C && wiznet)
+        nic_w5100_write(wiz, addr & 3, val);
+    else if (addr >= 0x60 && addr <= 0x67)	/* Aliased */
         pio_write(addr & 3, val);
     else if (addr >= 0x68 && addr < 0x70)
         uart_write(&uart[0], addr & 7, val);
@@ -1007,7 +1015,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         }
         rombank = val;
     }
-    else if (ramf &&& addr >=0xA0 && addr <=0xA7)
+    else if (ramf && addr >=0xA0 && addr <=0xA7)
         ramf_write(addr & 0x07, val);
     else if (prop && addr >= 0xA8 && addr <= 0xAF)
         prop_write(addr & 0x07, val);
@@ -1075,6 +1083,9 @@ int main(int argc, char *argv[])
             case 'R':
                 ramf = 1;
                 break;
+            case 'w':
+                wiznet = 1;
+                break;
             default:
                 usage();
         }
@@ -1129,6 +1140,11 @@ int main(int argc, char *argv[])
     uart_init(&uart[3]);
     uart_init(&uart[4]);
 
+    if (wiznet) {
+        wiz = nic_w5100_alloc();
+        nic_w5100_reset(wiz);
+    }
+
     /* No real need for interrupt accuracy so just go with the timer. If we
        ever do the UART as timer hack it'll need addressing! */
     tc.tv_sec = 0;
@@ -1168,6 +1184,8 @@ int main(int argc, char *argv[])
 	    nanosleep(&tc, NULL);
 	uart_event(uart);
 	timer_pulse();
+        if (wiznet)
+            w5100_process(wiz);
     }
     exit(0);
 }
