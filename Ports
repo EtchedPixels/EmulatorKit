@@ -6,7 +6,7 @@ partial decode all over the place and clash with everyone.
 
 0x00-0x03	RC2014 DigitalI/O
 0x00-0x01	Scott Baker VFD
-0x10-0x17	RC2014 CF Adapter
+0x10-0x17	RC2014 CF Adapter	(ghosts at 0x90)
 
 0x20		Scott Baker Speech Synthesizer
 0x38		RC2014 pageable ROM
