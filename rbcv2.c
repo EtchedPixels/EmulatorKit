@@ -81,7 +81,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
     if (addr > 32767) {
         if (trace & TRACE_MEM)
             fprintf(stderr, "HR %04X<-%02X\n",
-                addr & 0x7FFF, ramrom[32][addr & 0x7FFF]);
+                addr & 0x7FFF, ramrom[HIRAM][addr & 0x7FFF]);
         return ramrom[HIRAM][addr & 0x7FFF];
     }
     if (rombank & 0x80) {
