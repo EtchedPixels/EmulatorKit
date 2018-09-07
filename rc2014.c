@@ -973,7 +973,7 @@ static uint8_t io_read(int unused, uint16_t addr)
     /* Scott Baker is 0x90-93, suggested defaults for the
        Stephen Cousins boards at 0x88-0x8B. No doubt we'll get
        an official CTC board at another address  */
-    if (addr >= 0x90 && addr <= 0x93 && have_ctc)
+    if (addr >= 0x88 && addr <= 0x8B && have_ctc)
         return ctc_read(addr & 3);
     if (trace & TRACE_UNK)
         fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -1032,7 +1032,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-    fprintf(stderr, "rc2014: [-a] [-b] [-c] [-f] [-R] [-m mainboard] [-r bank] [-e rombank] [-s] [-d debug]\n");
+    fprintf(stderr, "rc2014: [-a] [-b] [-c] [-f] [-R] [-m mainboard] [-r bank] [-e rombank] [-s] [-w] [-d debug]\n");
     exit(EXIT_FAILURE);
 }
 

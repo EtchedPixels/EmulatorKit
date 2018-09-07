@@ -10,7 +10,7 @@ The emulation includes
 - 512K RAM/512K ROM card
 - CF adapter
 - DS1302 real time clock (time setting not supported)
-- CTC at 0x90 (untested)
+- CTC at 0x88 (untested)
 - RAMF at 0xA0/0xA4 (untested)
 
 At this point in time the ACIA emulation is complete and sufficient to run
