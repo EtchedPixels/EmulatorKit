@@ -1054,7 +1054,7 @@ int main(int argc, char *argv[])
     char *idepath[2] = { NULL, NULL };
     int i;
 
-    while((opt = getopt(argc, argv, "r:i:s:ptd:fR")) != -1) {
+    while((opt = getopt(argc, argv, "r:i:s:ptd:fRw")) != -1) {
         switch(opt) {
             case 'r':
                 rompath = optarg;
