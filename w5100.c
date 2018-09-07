@@ -1,6 +1,7 @@
-/* w5100.c: Wiznet W5100 emulation - main code
+/*
    
-   Chopped up by Alan Cox out of the W5100 emulation layer for FUSE:
+   Chopped up by Alan Cox out of the W5100 emulation layer for FUSE. Added
+   indirect mode support.
    
    Emulates a minimal subset of the Wiznet W5100 TCP/IP controller.
 
@@ -34,6 +35,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -55,6 +57,8 @@ typedef enum w5100_socket_state {
 
   W5100_SOCKET_STATE_INIT = 0x13,
   W5100_SOCKET_STATE_LISTEN,
+  W5100_SOCKET_STATE_CONNECTING,
+  W5100_SOCKET_STATE_ACCEPTING,
   W5100_SOCKET_STATE_ESTABLISHED = 0x17,
   W5100_SOCKET_STATE_CLOSE_WAIT = 0x1c,
 
@@ -104,6 +108,9 @@ typedef struct nic_w5100_socket_t {
 
   uint8_t ir;      /* Interrupt register */
 
+  uint8_t ptr_low;
+  uint8_t mr;
+
   uint8_t port[2]; /* Source port */
 
   uint8_t dip[4];  /* Destination IP address */
@@ -143,7 +150,8 @@ struct nic_w5100_t {
   uint8_t sub[4];  /* Our subnet mask */
   uint8_t sha[6];  /* MAC address */
   uint8_t sip[4];  /* Our IP address */
-
+  uint8_t mr;
+  uint16_t ar;
   nic_w5100_socket_t socket[4];
 };
 
@@ -156,8 +164,11 @@ void nic_w5100_error( int severity, const char *format, ... );
 
 enum w5100_registers {
   W5100_MR = 0x000,
+  W5100_IDM_AR0 = 0x001,
+  W5100_IDM_AR1 = 0x002,
+  W5100_IDM_DR = 0x003,
 
-  W5100_GWR0,
+  W5100_GWR0 = 0x001,
   W5100_GWR1,
   W5100_GWR2,
   W5100_GWR3,
@@ -179,11 +190,13 @@ enum w5100_registers {
   W5100_SIPR2,
   W5100_SIPR3,
 
+  W5100_IR = 0x015,
   W5100_IMR = 0x016,
 
   W5100_RMSR = 0x01a,
   W5100_TMSR,
 };
+
 
 
 void
@@ -337,16 +350,14 @@ w5100_socket_open( nic_w5100_socket_t *socket_obj )
         description, socket_obj->id, errno, strerror(errno) );
       return;
     }
+    fcntl(socket_obj->fd, F_SETFL, FNDELAY);
 
-#ifndef WIN32
-    /* Windows warning: this could forcibly bind sockets already in use */
     if( setsockopt( socket_obj->fd, SOL_SOCKET, SO_REUSEADDR, &one,
       sizeof(one) ) == -1 ) {
       fprintf(stderr,
         "w5100: failed to set SO_REUSEADDR on socket %d; errno %d: %s\n",
         socket_obj->id, errno , strerror(errno) );
     }
-#endif
 
     socket_obj->state = final_state;
 
@@ -398,8 +409,6 @@ w5100_socket_listen( nic_w5100_t *self, nic_w5100_socket_t *socket )
     socket->state = W5100_SOCKET_STATE_LISTEN;
 
     nic_w5100_debug( "w5100: listening on socket %d\n", socket->id );
-
-//FIXME    compat_socket_selfpipe_wake( self->selfpipe );
   }
 }
 
@@ -419,31 +428,24 @@ w5100_socket_connect( nic_w5100_t *self, nic_w5100_socket_t *socket )
     memcpy( &sa.sin_addr.s_addr, socket->dip, 4 );
 
     if( connect( socket->fd, (struct sockaddr*)&sa, sizeof(sa) ) == -1 ) {
-      fprintf(stderr,
-        "w5100: failed to connect socket %d to 0x%08x:0x%04x; errno %d: %s\n",
-        socket->id, ntohl(sa.sin_addr.s_addr), ntohs(sa.sin_port),
-        errno, strerror(errno) );
+      if (errno != EINPROGRESS) {
+        fprintf(stderr,
+          "w5100: failed to connect socket %d to 0x%08x:0x%04x; errno %d: %s\n",
+          socket->id, ntohl(sa.sin_addr.s_addr), ntohs(sa.sin_port),
+          errno, strerror(errno) );
 
-      socket->ir |= 1 << 3;
-      socket->state = W5100_SOCKET_STATE_CLOSED;
+        socket->ir |= 1 << 3;
+        socket->state = W5100_SOCKET_STATE_CLOSED;
+        return;
+      }
+      nic_w5100_debug("w5100: socket %d moves to connecting.\n", socket->id);
+      socket->state = W5100_SOCKET_STATE_CONNECTING;
       return;
     }
 
+    nic_w5100_debug("w5100: socket %d moves directly to connected.\n", socket->id);
     socket->ir |= 1 << 0;
     socket->state = W5100_SOCKET_STATE_ESTABLISHED;
-  }
-}
-
-static void
-w5100_socket_discon( nic_w5100_t *self, nic_w5100_socket_t *socket )
-{
-  if( socket->state == W5100_SOCKET_STATE_ESTABLISHED ||
-    socket->state == W5100_SOCKET_STATE_CLOSE_WAIT ) {
-    socket->ir |= 1 << 1;
-    socket->state = W5100_SOCKET_STATE_CLOSED;
-//FIXME    compat_socket_selfpipe_wake( self->selfpipe );
-
-    nic_w5100_debug( "w5100: disconnected socket %d\n", socket->id );
   }
 }
 
@@ -456,8 +458,22 @@ w5100_socket_close( nic_w5100_t *self, nic_w5100_socket_t *socket )
     socket->socket_bound = 0;
     socket->ok_for_io = 0;
     socket->state = W5100_SOCKET_STATE_CLOSED;
-//FIXME    compat_socket_selfpipe_wake( self->selfpipe );
     nic_w5100_debug( "w5100: closed socket %d\n", socket->id );
+  }
+}
+
+static void
+w5100_socket_discon( nic_w5100_t *self, nic_w5100_socket_t *socket )
+{
+  if( socket->state == W5100_SOCKET_STATE_ESTABLISHED) {
+    socket->state = W5100_SOCKET_STATE_CLOSE_WAIT;
+    shutdown(socket->fd, SHUT_WR);
+  }
+  else if (socket->state == W5100_SOCKET_STATE_CLOSE_WAIT ) {
+    socket->ir |= 1 << 1;
+    socket->state = W5100_SOCKET_STATE_CLOSED;
+    nic_w5100_debug( "w5100: disconnected socket %d\n", socket->id );
+    w5100_socket_close(self, socket);
   }
 }
 
@@ -474,11 +490,9 @@ w5100_socket_send( nic_w5100_t *self, nic_w5100_socket_t *socket )
       socket->tx_wr - socket->last_send;
     socket->last_send = socket->tx_wr;
     socket->write_pending = 1;
-//FIXME    compat_socket_selfpipe_wake( self->selfpipe );
   }
   else if( socket->state == W5100_SOCKET_STATE_ESTABLISHED ) {
     socket->write_pending = 1;
-//FIXME    compat_socket_selfpipe_wake( self->selfpipe );
   }
 }
 
@@ -486,12 +500,12 @@ static void
 w5100_socket_recv( nic_w5100_t *self, nic_w5100_socket_t *socket )
 {
   if( socket->state == W5100_SOCKET_STATE_UDP ||
-    socket->state == W5100_SOCKET_STATE_ESTABLISHED ) {
+    socket->state == W5100_SOCKET_STATE_ESTABLISHED ||
+    socket->state == W5100_SOCKET_STATE_CLOSE_WAIT ) {
     socket->rx_rsr -= socket->rx_rd - socket->old_rx_rd;
     socket->old_rx_rd = socket->rx_rd;
     if( socket->rx_rsr != 0 )
       socket->ir |= 1 << 2;
-//FIXME    compat_socket_selfpipe_wake( self->selfpipe );
   }
 }
 
@@ -539,7 +553,6 @@ w5100_write_socket_port( nic_w5100_t *self, nic_w5100_socket_t *socket, int whic
         socket->bind_count = 0;
         return;
       }
-//FIXME      compat_socket_selfpipe_wake( self->selfpipe );
     }
     socket->bind_count = 0;
   }
@@ -554,6 +567,7 @@ nic_w5100_socket_read( nic_w5100_t *self, uint16_t reg )
   uint16_t fsr;
   uint8_t b;
 
+  /* FIXME: add indirect mode logic */
   switch( socket_reg ) {
     case W5100_SOCKET_MR:
       b = socket->mode;
@@ -611,6 +625,7 @@ nic_w5100_socket_write( nic_w5100_t *self, uint16_t reg, uint8_t b )
   nic_w5100_socket_t *socket = &self->socket[(reg >> 8) - 4];
   int socket_reg = reg & 0xff;
 
+  /* FIXME: add indirect mode logic */
   switch( socket_reg ) {
     case W5100_SOCKET_MR:
       w5100_write_socket_mr( socket, b );
@@ -703,7 +718,7 @@ nic_w5100_socket_add_to_sets( nic_w5100_socket_t *socket, fd_set *readfds,
       nic_w5100_debug( "w5100: checking for read on socket %d with fd %d; max fd %d\n", socket->id, socket->fd, *max_fd );
     }
 
-    if( socket->write_pending ) {
+    if( socket->write_pending || socket->state == W5100_SOCKET_STATE_CONNECTING) {
       FD_SET( socket->fd, writefds );
       if( socket->fd > *max_fd )
         *max_fd = socket->fd;
@@ -735,7 +750,7 @@ w5100_socket_process_accept( nic_w5100_socket_t *socket )
 }
 
 static void
-w5100_socket_process_read( nic_w5100_socket_t *socket )
+w5100_socket_process_read( nic_w5100_socket_t *socket , nic_w5100_t *self)
 {
   uint8_t buffer[0x800];
   int bytes_free = 0x800 - socket->rx_rsr;
@@ -783,9 +798,14 @@ w5100_socket_process_read( nic_w5100_socket_t *socket )
     }
   }
   else if( bytes_read == 0 ) {  /* TCP */
-    socket->state = W5100_SOCKET_STATE_CLOSE_WAIT;
-    nic_w5100_debug( "w5100: EOF on %s socket %d; errno %d: %s\n",
-                     description, socket->id, errno, strerror(errno));
+    if (socket->state == W5100_SOCKET_STATE_CLOSE_WAIT) {
+      socket->ir |= 1 << 1;
+      w5100_socket_close(self, socket);
+    }
+    else
+      socket->state = W5100_SOCKET_STATE_CLOSE_WAIT;
+    nic_w5100_debug( "w5100: EOF on %s socket %d\n",
+                     description, socket->id);
   }
   else {
     nic_w5100_debug( "w5100: error %d reading from %s socket %d: %s\n",
@@ -871,26 +891,50 @@ w5100_socket_process_tcp_write( nic_w5100_socket_t *socket )
                      errno, socket->id, strerror(errno));
 }
 
+void w5100_socket_process_connect(nic_w5100_socket_t *socket)
+{
+    struct sockaddr_in sa;
+    memset( &sa, 0, sizeof(sa) );
+    sa.sin_family = AF_INET;
+    memcpy( &sa.sin_port, socket->dport, 2 );
+    memcpy( &sa.sin_addr.s_addr, socket->dip, 4 );
+    if (connect(socket->fd,  (struct sockaddr *)&sa, sizeof(sa)) == 0) {
+      socket->state = W5100_SOCKET_STATE_ESTABLISHED;
+      socket->ir |= (1 << 0);
+      nic_w5100_debug( "w5100: socket %d moves to established.\n", socket->id);
+    } else {
+      nic_w5100_socket_reset(socket);
+      nic_w5100_debug("w5100: socket %d connect failed.\n", socket->id);
+      socket->ir |= (1 << 0);
+    }
+}
+
 void
 nic_w5100_socket_process_io( nic_w5100_socket_t *socket, fd_set readfds,
-  fd_set writefds )
+  fd_set writefds, nic_w5100_t *self )
 {
   /* Process only if we're an open socket, and we haven't been closed and
      re-opened since the select() started */
   if( socket->fd != -1 && socket->ok_for_io ) {
+//    printf("Socket %d scan\n", socket->id);
     if( FD_ISSET( socket->fd, &readfds ) ) {
+      printf("Read ready on socket %d\n", socket->id);
       if( socket->state == W5100_SOCKET_STATE_LISTEN )
         w5100_socket_process_accept( socket );
       else
-        w5100_socket_process_read( socket );
+        w5100_socket_process_read( socket , self);
     }
 
     if( FD_ISSET( socket->fd, &writefds ) ) {
+      fprintf(stderr, "Write ready on socket %d\n", socket->id);
       if( socket->state == W5100_SOCKET_STATE_UDP ) {
         w5100_socket_process_udp_write( socket );
       }
       else if( socket->state == W5100_SOCKET_STATE_ESTABLISHED ) {
         w5100_socket_process_tcp_write( socket );
+      }
+      else if (socket->state == W5100_SOCKET_STATE_CONNECTING) {
+        w5100_socket_process_connect( socket );
       }
     }
   }
@@ -933,15 +977,15 @@ void w5100_process(nic_w5100_t *self)
        offending socket will not be added to the sets again as it's now been
        closed */
 
-    nic_w5100_debug( "w5100: io thread select\n" );
+//    nic_w5100_debug( "w5100: io thread select\n" );
 
     active = select( max_fd + 1, &readfds, &writefds, NULL, &nowait );
 
-    nic_w5100_debug( "w5100: io thread wake; %d active\n", active );
+//    nic_w5100_debug( "w5100: io thread wake; %d active\n", active );
 
     if( active != -1 ) {
       for( i = 0; i < 4; i++ )
-        nic_w5100_socket_process_io( &self->socket[i], readfds, writefds );
+        nic_w5100_socket_process_io( &self->socket[i], readfds, writefds , self);
     }
     else if( errno = EBADF ) {
       /* Do nothing - just loop again */
@@ -955,7 +999,6 @@ void w5100_process(nic_w5100_t *self)
 
 nic_w5100_t *nic_w5100_alloc( void )
 {
-  int error;
   int i;
   
   nic_w5100_t *self = calloc(1, sizeof(*self));
@@ -981,15 +1024,41 @@ nic_w5100_free( nic_w5100_t *self )
   }
 }
 
+static uint8_t nic_w5100_compute_ir(nic_w5100_t *self)
+{
+  uint8_t r = 0x00;
+  int i;
+  for (i = 0; i < 4; i++)
+    if (self->socket[i].ir)
+      r |= (1 << i);
+  return r;
+}
+
 uint8_t nic_w5100_read( nic_w5100_t *self, uint16_t reg )
 {
   uint8_t b;
 
+  if (self->mr & 0x01) {
+    switch(reg) {
+      case W5100_MR:
+        return self->mr;
+      case W5100_IDM_AR0:
+        return self->ar >> 8;
+      case W5100_IDM_AR1:
+        return self->ar;
+      case W5100_IDM_DR:
+        reg = self->ar;
+        if (self->mr & 0x02)
+          self->ar++;
+      }
+  }
+//  if (reg != W5100_IR)
+//    printf("w5100: Read %04X\n", reg);
+
   if( reg < 0x030 ) {
     switch( reg ) {
       case W5100_MR:
-        /* We don't support any flags, so we always return zero here */
-        b = 0x00;
+        b = self->mr;
         nic_w5100_debug( "w5100: reading 0x%02x from MR\n", b );
         break;
       case W5100_GWR0: case W5100_GWR1: case W5100_GWR2: case W5100_GWR3:
@@ -1008,6 +1077,11 @@ uint8_t nic_w5100_read( nic_w5100_t *self, uint16_t reg )
       case W5100_SIPR0: case W5100_SIPR1: case W5100_SIPR2: case W5100_SIPR3:
         b = self->sip[reg - W5100_SIPR0];
         nic_w5100_debug( "w5100: reading 0x%02x from SIPR%d\n", b, reg - W5100_SIPR0 );
+        break;
+      case W5100_IR:
+        b = nic_w5100_compute_ir(self);
+        if (b)
+          nic_w5100_debug( "w5100: reading 0x%02x from IR\n", b);
         break;
       case W5100_IMR:
         /* We support only "allow all" */
@@ -1048,8 +1122,9 @@ w5100_write_mr( nic_w5100_t *self, uint8_t b )
 
   if( b & 0x80 )
     nic_w5100_reset( self );
+  self->mr = b;
 
-  if( b & 0x7f )
+  if( b & 0x3C)
     fprintf( stderr,
                      "w5100: unsupported value 0x%02x written to MR\n", b );
 }
@@ -1058,7 +1133,7 @@ static void
 w5100_write_imr( nic_w5100_t *self, uint8_t b )
 {
   nic_w5100_debug( "w5100: writing 0x%02x to IMR\n", b );
-
+  /* FIXME */
   if( b != 0xef )
     fprintf( stderr, 
                      "w5100: unsupported value 0x%02x written to IMR\n", b );
@@ -1081,6 +1156,30 @@ w5100_write__msr( nic_w5100_t *self, uint16_t reg, uint8_t b )
 void
 nic_w5100_write( nic_w5100_t *self, uint16_t reg, uint8_t b )
 {
+  if (self->mr & 0x01) {
+    switch(reg) {
+      case W5100_MR:
+        w5100_write_mr(self, b);
+        return;
+      case W5100_IDM_AR0:
+        self->ar &= 0xFF;
+        self->ar |= ((uint16_t) b) << 8;
+        return;
+      case W5100_IDM_AR1:
+        self->ar &= 0xFF00;
+        self->ar |= b;
+        return;
+      case W5100_IDM_DR:
+        reg = self->ar;
+        if (self->mr & 0x02)
+          self->ar++;
+        break;
+      default:
+        fprintf(stderr, "Invalid reg in indirect mode %d\n", reg);
+        return;
+      }
+  }
+//  printf("w5100: Write %04X=%02X\n", reg, b);
   if( reg < 0x030 ) {
     switch( reg ) {
       case W5100_MR:
