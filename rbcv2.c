@@ -1021,6 +1021,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         prop_write(addr & 0x07, val);
     else if (addr >= 0xC0 && addr <= 0xDF)
         uart_write(&uart[((addr - 0xC0) >> 3) + 1], addr & 7, val);
+    else if (addr == 0xFD) {
+        printf("trace set to %d\n", val);
+        trace = val;
+    }
     else if (trace & TRACE_UNK)
         fprintf(stderr, "Unknown write to port %02X of %02X\n",
             addr & 0xFF, val);
