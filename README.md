@@ -11,7 +11,6 @@ The emulation includes
 - CF adapter
 - DS1302 real time clock (time setting not supported)
 - CTC at 0x88 (untested)
-- RAMF at 0xA0/0xA4 (untested)
 
 At this point in time the ACIA emulation is complete and sufficient to run
 the standard ROM environment with BASIC. This represents the basic
@@ -25,6 +24,8 @@ switchable ROM, 64K RAM card, ACIA card and Compact Flash card.
 In 512K mode the emulator can run the ROMWBW 512K image for the RC2014
 system providing an SIO is selected. With ACIA it crashes for reasons not
 yet understood.
+
+To exit use ctrl-backslash
 
 # To get actual hardware see
 
@@ -50,6 +51,7 @@ Options:
 - -r path	Load the ROM image from this path
 - -s		Enable the SIO/2
 - -R		Enable the DS1302 RTC
+- -w		WizNET 5100 at 0x28-0x2B (works but buggy)
 
 To build a disk image
 
@@ -76,6 +78,11 @@ Currently the following are emulated: 512K ROM, 512K RAM, memory mapping,
 16x50 UART (minimally), 8255 PIO (PPIDE), 4UART (minimally), PropIOv2 (SD and
 console), timer on serial hack but not yet ECB interrupt via serial hack.
 
+The emulator also supports the RAMF card (not yet tested), a WizNET 5100 at
+0x28-0x2B in indirect mode (buggy but works for socket 0 at this point),
+and a debug port. Writing to 0xFD sets the debug value so you can trace
+pieces of code.
+
 The jumpers are not emulated. K7 is always assumed to be 1-2, K10 1-2 and
 K11 1-2 giving a 32K/32K split.
 
@@ -96,5 +103,44 @@ Options:
 - -p		enable PropIOv2
 - -t		enable timer hack
 - -d n		set debug trace bits
+- -f		fast (run flat out)
+- -R		RAMFS ECB module (not yet tested
+- -w		WizNET 5100 at 0x28-0x2B (works but buggy)
 
 The sd card image is just a raw file of the blocks at this point.
+
+## Grant Searle SBC Emulator
+
+This is an emulator for the Grant Searle 9 chip CP/M computer. This is a
+Z80 machine with 128K of RAM (64K accessible), 16K of boot ROM, dual serial
+and a simple 8bit IDE CF interface.
+
+# To build yourself an actual system see
+
+http://searle.hostei.com/grant/cpm/
+
+# For ROM images
+
+Get the zip file from the web page above.
+
+makebin -s 16384 ROM.HEX >searle.rom
+
+You can build the CP/M bootable image and put it onto an IDE image using
+
+cat hexFiles/CPM22.HEX | makebin -s 65535 >1.rom
+cat hexFiles/CBIOS64.HEX | makebin -s 65535 >2.rom
+dd if=2.rom of=1.rom bs=58880 skip=1 seek=1 conv=notrunc
+dd if=1.rom of=3.rom bs=1 skip=53248
+dd if=/tmp/2.rom of=searle.cf bs=512 seek=2 conv=notrunc
+
+cpmtools can then be used to manipulate it further.
+
+# Usage
+
+Options:
+- -r path	path to ROM image (default searle.rom)
+- -i path	path to IDE image (default searle.cf)
+- -d n		set debug trace bits
+- -f		fast (run flat out)
+- -t		external 10Hz timer on DCD (not yet accurate to 10Hz)
+- -b		A16 of RAM is controlled by UART RTS line
