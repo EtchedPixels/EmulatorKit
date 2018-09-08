@@ -405,6 +405,12 @@ static void sio2_channel_timer(struct z80_sio_chan *chan, uint8_t ab)
                     sio2_raise_int(chan, INT_TX);
             }
         }
+    } else {
+	if (!(chan->rr[0] & 0x04)) {
+	    chan->rr[0] |= 0x04;
+            if (chan->wr[1] & 0x02)
+	        sio2_raise_int(chan, INT_TX);
+        }
     }
 }
 
