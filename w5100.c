@@ -465,11 +465,8 @@ w5100_socket_close( nic_w5100_t *self, nic_w5100_socket_t *socket )
 static void
 w5100_socket_discon( nic_w5100_t *self, nic_w5100_socket_t *socket )
 {
-  if( socket->state == W5100_SOCKET_STATE_ESTABLISHED) {
-    socket->state = W5100_SOCKET_STATE_CLOSE_WAIT;
-    shutdown(socket->fd, SHUT_WR);
-  }
-  else if (socket->state == W5100_SOCKET_STATE_CLOSE_WAIT ) {
+  if( socket->state == W5100_SOCKET_STATE_ESTABLISHED ||
+        socket->state == W5100_SOCKET_STATE_CLOSE_WAIT ) {
     socket->ir |= 1 << 1;
     socket->state = W5100_SOCKET_STATE_CLOSED;
     nic_w5100_debug( "w5100: disconnected socket %d\n", socket->id );
@@ -918,7 +915,7 @@ nic_w5100_socket_process_io( nic_w5100_socket_t *socket, fd_set readfds,
   if( socket->fd != -1 && socket->ok_for_io ) {
 //    printf("Socket %d scan\n", socket->id);
     if( FD_ISSET( socket->fd, &readfds ) ) {
-      printf("Read ready on socket %d\n", socket->id);
+//      printf("Read ready on socket %d\n", socket->id);
       if( socket->state == W5100_SOCKET_STATE_LISTEN )
         w5100_socket_process_accept( socket );
       else
@@ -926,7 +923,7 @@ nic_w5100_socket_process_io( nic_w5100_socket_t *socket, fd_set readfds,
     }
 
     if( FD_ISSET( socket->fd, &writefds ) ) {
-      fprintf(stderr, "Write ready on socket %d\n", socket->id);
+//      fprintf(stderr, "Write ready on socket %d\n", socket->id);
       if( socket->state == W5100_SOCKET_STATE_UDP ) {
         w5100_socket_process_udp_write( socket );
       }
