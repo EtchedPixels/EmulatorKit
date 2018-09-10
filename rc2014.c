@@ -1129,7 +1129,7 @@ int main(int argc, char *argv[])
             exit(EXIT_FAILURE);
         }
         bankreg[0] = 0;
-        bankreg[1] = 0;
+        bankreg[1] = 1;
         bankreg[2] = 32;
         bankreg[3] = 33;
         if (lseek(fd, 8192 * rombank, SEEK_SET) < 0) {
