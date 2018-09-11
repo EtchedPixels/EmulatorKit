@@ -1183,10 +1183,10 @@ int main(int argc, char *argv[])
         nic_w5100_reset(wiz);
     }
 
-    /* 50ms - it's a balance between nice behaviour and simulation
+    /* 5ms - it's a balance between nice behaviour and simulation
        smoothness */
     tc.tv_sec = 0;
-    tc.tv_nsec = 50000000L;
+    tc.tv_nsec = 5000000L;
 
     if (tcgetattr(0, &term) == 0) {
 	saved_term = term;
@@ -1214,11 +1214,14 @@ int main(int argc, char *argv[])
        matched with that. The scheme here works fine except when the host
        is loaded though */
 
+    /* We run 7372000 t-states per second */
+    /* We run 369 cycles per I/O check, do that 100 times then poll the
+       slow stuff and nap for 5ms. */
     while (!done) {
         int i;
         /* 36400 T states */
         for (i = 0;i < 100; i++) {
-            Z80ExecuteTStates(&cpu_z80, 364);
+            Z80ExecuteTStates(&cpu_z80, 369);
             if (acia)
 	        acia_timer();
 	    if (sio2)
