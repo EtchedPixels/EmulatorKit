@@ -267,7 +267,7 @@ static void uart_recalc_iir(struct uart16x50 *uptr)
     /* Ok so we have an event, do we need to waggle the line */
     if (uptr->irqline)
         return;
-    uptr->irqline = 1;
+    uptr->irqline = uptr->irq;
     Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
     
 }
@@ -434,21 +434,25 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
         return uptr->mcr;
     case 5:
         /* lsr */
-        r = check_chario();
-        uptr->lsr = 0;
-        if (!prop && (r & 1))
-             uptr->lsr |= 0x01;	/* Data ready */
-        if (r & 2)
-             uptr->lsr |= 0x60;	/* TX empty | holding empty */
-        /* Reading the LSR causes these bits to clear */
-        r = uptr->lsr;
-        uptr->lsr &= 0xF0;
-        return r;
+        if (!prop) {
+            r = check_chario();
+            uptr->lsr = 0;
+            if (!prop && (r & 1))
+                 uptr->lsr |= 0x01;	/* Data ready */
+            if (r & 2)
+                 uptr->lsr |= 0x60;	/* TX empty | holding empty */
+            /* Reading the LSR causes these bits to clear */
+            r = uptr->lsr;
+            uptr->lsr &= 0xF0;
+            return r;
+        }
+        return 0x60;
     case 6:
         /* msr */
         r = uptr->msr;
         /* Reading clears the delta bits */
         uptr->msr &= 0xF0;
+        uart_clear_interrupt(uptr, MODEM);
         return r;
     case 7:
         return uptr->scratch;
