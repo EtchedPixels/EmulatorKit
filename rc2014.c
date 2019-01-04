@@ -39,6 +39,7 @@ static uint8_t bank512 = 0;
 static uint8_t switchrom = 1;
 static uint8_t cpuboard = 0;
 static uint8_t have_ctc = 0;
+static uint8_t port30 = 0;
 static uint8_t port38 = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
@@ -135,6 +136,37 @@ static void mem_write108(uint16_t addr, uint8_t val)
     ramrom[aphys] = val;
 }
 
+static uint8_t mem_read114(uint16_t addr)
+{
+    uint32_t aphys;
+    if (addr < 0x8000 && !(port38 & 0x01))
+        aphys = addr;
+    else if (port30 & 0x01)
+        aphys = addr + 131072;
+    else
+        aphys = addr + 65536;
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "R %04X = %02X\n", addr, ramrom[aphys]);
+    return ramrom[aphys];
+}
+
+static void mem_write114(uint16_t addr, uint8_t val)
+{
+    uint32_t aphys;
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "W: %04X = %02X\n", addr, val);
+    if (addr < 0x8000 && !(port38 & 0x01)) {
+        if (trace & TRACE_MEM)
+            fprintf(stderr,"[Discarded: ROM]\n");
+        return;
+    }
+    else if (port30 & 0x01)
+        aphys = addr + 131072;
+    else
+        aphys = addr + 65536;
+    ramrom[aphys] = val;
+}
+
 static uint8_t mem_read(int unused, uint16_t addr)
 {
     switch(cpuboard) {
@@ -142,6 +174,8 @@ static uint8_t mem_read(int unused, uint16_t addr)
         return mem_read0(addr);
     case 1:
         return mem_read108(addr);
+    case 2:
+        return mem_read114(addr);
     default:
         fputs("invalid cpu type.\n", stderr);
         exit(1);
@@ -156,6 +190,9 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
         break;
     case 1:
         mem_write108(addr, val);
+        break;
+    case 2:
+        mem_write114(addr, val);
         break;
     default:
         fputs("invalid cpu type.\n", stderr);
@@ -203,12 +240,14 @@ static uint8_t acia_status = 2;
 static uint8_t acia_config;
 static uint8_t acia_char;
 static uint8_t acia;
+static uint8_t acia_inint = 0;
 
 static void acia_irq_compute(void)
 {
-    if (acia_config & acia_status & 0x80) {
+    if (!acia_inint && (acia_config & acia_status & 0x80)) {
         if (trace & TRACE_ACIA)
             fprintf(stderr, "ACIA interrupt.\n");
+        acia_inint = 1;
         Z80INT(&cpu_z80, 0xFF);	/* FIXME probably last data or bus noise */
     }
 }
@@ -220,13 +259,18 @@ static void acia_receive(void)
     if (old_status & 1)
         acia_status |= 0x20;
     acia_char = next_char();
+    if (trace & TRACE_ACIA)
+         fprintf(stderr, "ACIA rx.\n");
     acia_status |= 0x81;	/* IRQ, and rx data full */
 }
         
 static void acia_transmit(void)
 {
-    if (!(acia_status & 2))
+    if (!(acia_status & 2)) {
+        if (trace & TRACE_ACIA)
+             fprintf(stderr, "ACIA tx is clear.\n");
         acia_status |= 0x82;	/* IRQ, and tx data empty */
+    }
 }
         
 static void acia_timer(void)
@@ -252,11 +296,14 @@ static uint8_t acia_read(uint8_t addr)
 	 * Bits are set on char arrival and cleared on next not by
 	 * user
 	 */
+	acia_status &= ~0x80;
+        acia_inint = 0;
         if (trace & TRACE_ACIA)
             fprintf(stderr, "acia_status %d\n", acia_status);
 	return acia_status;
     case 1:
         acia_status &= ~0x81;	/* No IRQ, rx empty */
+        acia_inint = 0;
         if (trace & TRACE_ACIA)
             fprintf(stderr, "acia_char %d\n", acia_char);
 	return acia_char;
@@ -272,12 +319,14 @@ static void acia_write(uint16_t addr, uint8_t val)
         fprintf(stderr, "acia_write %d %d\n", addr, val);
     switch (addr) {
     case 0:
-	/* bit 7 enables interrupts, buits 5-6 are tx control
-	   bits 2-4 select the world size and 0-1 counter divider
+	/* bit 7 enables interrupts, bits 5-6 are tx control
+	   bits 2-4 select the word size and 0-1 counter divider
 	   except 11 in them means reset */
 	acia_config = val;
-	if ((acia_config & 3) == 3)
+	if ((acia_config & 3) == 3) {
 	    acia_status = 2;
+	    acia_inint = 0;
+        }
         acia_irq_compute();
 	return;
      case 1:
@@ -961,7 +1010,7 @@ static void toggle_rom(void)
     }
 }
 
-static uint8_t io_read(int unused, uint16_t addr)
+static uint8_t io_read_2014(uint16_t addr)
 {
     if (trace & TRACE_IO)
         fprintf(stderr, "read %02x\n", addr);
@@ -986,7 +1035,7 @@ static uint8_t io_read(int unused, uint16_t addr)
     return 0xFF;
 }
 
-static void io_write(int unused, uint16_t addr, uint8_t val)
+static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 {
     if (trace & TRACE_IO)
         fprintf(stderr, "write %02x <- %02x\n", addr, val);
@@ -1001,7 +1050,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         nic_w5100_write(wiz, addr & 3, val);
     /* FIXME: real bank512 alias at 0x70-77 for 78-7F */
     else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
-	bankreg[addr & 3] = val;
+	bankreg[addr & 3] = val & 0x3F;
 	if (trace & TRACE_512)
             fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
     } else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
@@ -1014,13 +1063,101 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         ctc_write(addr & 3, val);
     else if (switchrom && addr == 0x38)
         toggle_rom();
-    else if (cpuboard == 1 && addr == 0x38) {
+    else if (addr == 0xFD) {
+        printf("trace set to %d\n", val);
+        trace = val;
+    } else if (!known && (trace & TRACE_UNK))
+        fprintf(stderr, "Unknown write to port %04X of %02X\n",
+            addr, val);
+}
+
+static void io_write_1(uint16_t addr, uint8_t val)
+{
+    if ((addr & 0xFF) == 0x38) {
         if (trace & TRACE_ROM)
             fprintf(stderr, "Bank set to %02X\n", val);
         port38 = val;
-    } else if (trace & TRACE_UNK)
-        fprintf(stderr, "Unknown write to port %04X of %02X\n",
-            addr, val);
+        return;
+    }
+    io_write_2014(addr, val, 0);
+}
+
+static uint8_t io_read_2(uint16_t addr)
+{
+    switch(addr & 0xFC) {
+    case 0x28:
+        return 0x80;
+    default:
+        return io_read_2014(addr);
+    }
+}
+
+static void io_write_2(uint16_t addr, uint8_t val)
+{
+    uint16_t r = addr & 0xFC;	/* bits 0/1 not decoded */
+    uint8_t known = 0;
+
+    switch(r) {
+    case 0x08:
+        if (val & 1)
+            printf("[LED off]\n");
+        else
+            printf("[LED on]\n");
+        return;
+    case 0x20:
+        if (val & 1)
+            printf("[RTS high]\n");
+        else
+            printf("[RTS low]\n");
+        known = 1;
+        break;
+    case 0x28:
+        known = 1;
+        break;
+    case 0x30:
+        if (trace & TRACE_ROM)
+            fprintf(stderr, "RAM Bank set to %02X\n", val);
+        port30 = val;
+        return;
+    case 0x38:
+        if (trace & TRACE_ROM)
+            fprintf(stderr, "ROM Bank set to %02X\n", val);
+        port38 = val;
+        return;
+    }
+    io_write_2014(addr, val, known);
+}
+
+static void io_write(int unused, uint16_t addr, uint8_t val)
+{
+    switch(cpuboard) {
+    case 0:
+        io_write_2014(addr, val, 0);
+        break;
+    case 1:
+        io_write_1(addr, val);
+        break;
+    case 2:
+        io_write_2(addr, val);
+        break;
+    default:
+        fprintf(stderr, "bad cpuboard\n");
+        exit(1);
+    }
+}
+
+static uint8_t io_read(int unused, uint16_t addr)
+{
+    switch(cpuboard) {
+    case 0:
+    case 1:
+        return io_read_2014(addr);
+    case 2:
+        return io_read_2(addr);
+    default:
+        fprintf(stderr, "bad cpuboard\n");
+        exit(1);
+    }
 }
 
 static struct termios saved_term, term;
@@ -1038,7 +1175,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-    fprintf(stderr, "rc2014: [-a] [-b] [-c] [-f] [-R] [-m mainboard] [-r bank] [-e rombank] [-s] [-w] [-d debug]\n");
+    fprintf(stderr, "rc2014: [-a] [-b] [-c] [-f] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -1089,6 +1226,10 @@ int main(int argc, char *argv[])
                     switchrom = 0;
                     bank512 = 0;
                     cpuboard = 1;
+                } else if (strcmp(optarg, "sc114") == 0) {
+                    switchrom = 0;
+                    bank512 = 0;
+                    cpuboard = 2;
                 } else {
                     fputs("rc2014: supported cpu types z80, sc108.\n", stderr);
                     exit(EXIT_FAILURE);
