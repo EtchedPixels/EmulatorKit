@@ -4,6 +4,9 @@ This is an emulator for the RC2014 Z80 system.
 
 The emulation includes
 - Z80 CPU (time sync wants work)
+- Standard RC2014 CPU card
+- SC108 CPU card with 128K banked RAM and 32K ROM
+- SC114 CPU card with 128K banked RAM and 32K ROM
 - ROM and switchable ROM cards
 - 6850 ACIA
 - Z80 SIO/2
@@ -12,7 +15,7 @@ The emulation includes
 - DS1302 real time clock (time setting not supported)
 - CTC at 0x88 (untested)
 
-At this point in time the ACIA emulation is complete and sufficient to run
+At this point in time the serial emulation is complete and sufficient to run
 the standard ROM environment with BASIC. This represents the basic
 configuration of Z80 CPU card, 32K RAM card, 8K or switchable ROM card and
 ACIA serial I/O card. This also corresponds to the RC2014 Mini.
@@ -22,7 +25,7 @@ emulated compact flash adapter. This corresponds to the RC2014 with the
 switchable ROM, 64K RAM card, ACIA card and Compact Flash card.
 
 In 512K mode the emulator can run the ROMWBW 512K image for the RC2014
-system providing an SIO is selected. With ACIA it crashes for reasons not
+system providing an SIO is selected. With ACIA ROMWBW fails for reasons not
 yet understood.
 
 To exit use ctrl-backslash
@@ -30,11 +33,13 @@ To exit use ctrl-backslash
 # To get actual hardware see
 
 https://rc2014.co.uk/
+https://smallcomputercentral.wordpress.com/
 
 # For ROM images see
 
 https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
 https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start
+https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/
 
 # Usage
 
@@ -46,7 +51,7 @@ Options:
 - -e n		Execute ROM bank n (0-7) (not used with -b)
 - -f		Fast mode (run flat out)
 - -i path	Enable IDE and use this file
-- -m board	Board type (z80 for default rc2014 or sc108)
+- -m board	Board type (z80 for default rc2014, sc108 or sc114)
 - -p		Pageable ROM (needed for CP/M)
 - -r path	Load the ROM image from this path
 - -s		Enable the SIO/2
