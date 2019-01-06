@@ -676,7 +676,9 @@ static void do_execute(Z80Context* ctx)
 		}
 		else
 		{
+			ctx->M1 = 1;
 			opcode = read8(ctx, ctx->PC + offset);
+			ctx->M1 = 0;
 			ctx->PC++;
 			ctx->tstates += 1;
 		}
@@ -802,6 +804,7 @@ void Z80Debug (Z80Context* ctx, char* dump, char* decode)
 	do
 	{
 		opcode = read8(ctx, PC + offset);
+
 		size++;
 		
 		PC++;
@@ -867,6 +870,7 @@ void Z80RESET (Z80Context* ctx)
 	ctx->int_req = 0;
 	ctx->defer_int = 0;
 	ctx->exec_int_vector = 0;
+	ctx->M1 = 0;
 }
 
 
