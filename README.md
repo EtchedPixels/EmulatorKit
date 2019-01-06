@@ -149,3 +149,33 @@ Options:
 - -f		fast (run flat out)
 - -t		external 10Hz timer on DCD (not yet accurate to 10Hz)
 - -b		A16 of RAM is controlled by UART RTS line
+
+## LiNC 80 SBC
+
+This is an emulator for the LiNC80 system with optional expanded memory. It
+emulates the 64K ROM, 64K base RAM, optional banked RAM, memory mapping
+control, Z80 SIO UART, Z80 CTC and onboard IDE. The PIO is only minimally
+emulated.
+
+Additionally a board mod to allow the top 32K to be banked is also supported
+in emulation.
+
+It has been tested with SCMon, CP/M and Fuzix.
+
+# To get actual hardware see
+
+http://linc.no
+
+# For ROM images see
+
+http://linc.no/products/linc80-sbc1/software-for-the-linc80/
+
+# Usage
+
+Options:
+- -r path	path to ROM (default linc80.rom)
+- -i path	path to IDE image (default linc80.ide)
+- -b n		number of banks (must be a power of two, default 1 - unbanked)
+- -d n		set debug trace bits
+- -f		fast (run flat out)
+- -x		emulate the 32K banking mod

@@ -2,9 +2,9 @@
  *	Platform features
  *
  *	Z80 at 7.372MHz						DONE
- *	IM2 interrupt chain					IN PROGRESS
+ *	IM2 interrupt chain					DONE
  *	Zilog SIO/2 at 0x00-0x03				DONE
- *	Zilog CTC at 0x08-0x0B					IN PROGRESS
+ *	Zilog CTC at 0x08-0x0B					DONE
  *	Zilog PIO at 0x18-0x1B					MINIMAL
  *	IDE at 0x10-0x17 no high or control access		DONE
  *	Control register at 0x38-0x3F				DONE
@@ -12,11 +12,7 @@
  *	Additional optional peripherals (own and RC2014)	ABSENT
  *
  *	TODO:
- *	- debug CTC emulation
- *	- debug interrupts
- *	- debug IM2 chain emulation
  *	- debug interrupt blocking
- *	- debug RETI hook
  *	- Z80 PIO
  *	? SD card on Z80 PIO bitbang
  *
@@ -73,6 +69,7 @@ static Z80Context cpu_z80;
 #define TRACE_UNK	8
 #define TRACE_SIO	16
 #define TRACE_IRQ	32
+#define TRACE_CTC	64
 
 static int trace = 0;
 
@@ -369,7 +366,7 @@ static uint8_t sio2_read(uint16_t addr)
 
 		if (trace & TRACE_SIO)
 			fprintf(stderr, "sio%c read reg %d = ",
-				(addr & 2) ? 'b' : 'a', r);
+				(addr & 1) ? 'b' : 'a', r);
 		switch (r) {
 		case 0:
 		case 1:
@@ -402,7 +399,7 @@ static uint8_t sio2_read(uint16_t addr)
 		chan->rr[1] &= 0x3F;
 		if (trace & TRACE_SIO)
 			fprintf(stderr, "sio%c read data %d\n",
-				(addr & 2) ? 'b' : 'a', c);
+				(addr & 1) ? 'b' : 'a', c);
 		if (chan->dptr && (chan->wr[1] & 0x10))
 			sio2_raise_int(chan, INT_RX);
 		return c;
@@ -417,7 +414,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		if (trace & TRACE_SIO)
 			fprintf(stderr,
 				"sio%c write reg %d with %02X\n",
-				(addr & 2) ? 'b' : 'a',
+				(addr & 1) ? 'b' : 'a',
 				chan->wr[0] & 7, val);
 		switch (chan->wr[0] & 007) {
 		case 0:
@@ -484,7 +481,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		sio2_clear_int(chan, INT_TX);
 		if (trace & TRACE_SIO)
 			fprintf(stderr, "sio%c write data %d\n",
-				(addr & 2) ? 'b' : 'a', val);
+				(addr & 1) ? 'b' : 'a', val);
 		write(1, &val, 1);
 	}
 }
@@ -547,6 +544,8 @@ static void ctc_interrupt(struct z80_ctc *c)
 		if (!(ctc_irqmask & (1 << i))) {
 			ctc_irqmask |= 1 << i;
 			recalc_interrupts();
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d wants to interrupt.\n", i);
 		}
 	}
 }
@@ -565,12 +564,12 @@ static int ctc_check_im2(void)
 {
 	if (ctc_irqmask) {
 		int i;
-		for (i = 0; i < 3; i++) {	/* FIXME: correct order ? */
+		for (i = 0; i < 4; i++) {	/* FIXME: correct order ? */
 			if (ctc_irqmask & (1 << i)) {
 				uint8_t vector = ctc[0].vector & 0xF8;
-				vector |= i << 1;
+				vector += 2 * i;
 				if (trace & TRACE_IRQ)
-					fprintf(stderr, "New live interrupt is from CTC %d.\n", i);
+					fprintf(stderr, "New live interrupt is from CTC %d vector %x.\n", i, vector);
 				live_irq = IRQ_CTC + i;
 				Z80INT(&cpu_z80, vector);
 				return 1;
@@ -585,9 +584,9 @@ static void ctc_receive_pulse(int i);
 
 static void ctc_pulse(int i)
 {
-	/* Model CTC 0 chained into CTC 1 */
-	if (i == 0)
-		ctc_receive_pulse(1);
+	/* Model CTC 2 chained into CTC 3 */
+	if (i == 2)
+		ctc_receive_pulse(3);
 }
 
 /* We don't worry about edge directions just a logical pulse model */
@@ -597,8 +596,9 @@ static void ctc_receive_pulse(int i)
 	if (c->ctrl & CTC_COUNTER) {
 		if (CTC_STOPPED(c))
 			return;
-		c->count -= 0x100;	/* No scaling on pulses */
-		if (c->count == 0) {
+		if (c->count >= 0x0100)
+			c->count -= 0x100;	/* No scaling on pulses */
+		if ((c->count & 0xFF00) == 0) {
 			ctc_interrupt(c);
 			ctc_pulse(i);
 			c->count = c->reload << 8;
@@ -622,27 +622,13 @@ static void ctc_tick(unsigned int clocks)
 		if (CTC_STOPPED(c))
 			continue;
 		/* Pulse trigger mode */
-		if (c->ctrl & CTC_COUNTER) {
-			/* We work in 1/256ths of a count so that we can correctly
-			   deal with abitrary numbers of clocks per 'tick' */
-			switch (i) {
-			case 0:	/* clocked by system */
-				decby = clocks << 8;
-				break;
-				/* 1 has no clocking input as it's chained */
-			case 1:
-				/* We model 2 and 3 unused - SIO speed etc */
-			case 2:
-			case 3:
-				break;
-			}
-		} else {
-			/* 256x downscaled */
-			decby = clocks;
-			/* 16x not 256x downscale - so increase by 16x */
-			if (!(c->ctrl & CTC_PRESCALER))
-				decby <<= 4;
-		}
+		if (c->ctrl & CTC_COUNTER)
+			continue;
+		/* 256x downscaled */
+		decby = clocks;
+		/* 16x not 256x downscale - so increase by 16x */
+		if (!(c->ctrl & CTC_PRESCALER))
+			decby <<= 4;
 		/* Now iterate over the events. We need to deal with wraps
 		   because we might have something counters chained */
 		n = c->count - decby;
@@ -650,11 +636,6 @@ static void ctc_tick(unsigned int clocks)
 			ctc_interrupt(c);
 			ctc_pulse(i);
 			n += c->reload << 8;
-			if (c->ctrl & CTC_COUNTER) {
-				c->count = c->reload << 8;
-				c->ctrl |= CTC_RESET;
-				return;
-			}
 		}
 		c->count = n;
 	}
@@ -664,6 +645,8 @@ static void ctc_write(uint8_t channel, uint8_t val)
 {
 	struct z80_ctc *c = ctc + channel;
 	if (c->ctrl & CTC_TCONST) {
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d constant loaded with %02X\n", channel, val);
 		c->ctrl &= ~CTC_TCONST;
 		c->reload = val;
 		/* FIXME: sort out the correct logic for the count reload
@@ -671,21 +654,29 @@ static void ctc_write(uint8_t channel, uint8_t val)
 		if (!(c->ctrl & CTC_PULSE)
 		    && !(c->ctrl & CTC_COUNTER)) {
 			c->count = c->reload;
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
 	} else if (val & CTC_CONTROL) {
 		/* We don't yet model the weirdness around edge wanted
 		   toggling and clock starts */
 		/* Check rule on resets */
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d control loaded with %02X\n", channel, val);
 		c->ctrl = val;
 	} else {
-		/* The vector on channel 1 is ignored */
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
 		c->vector = val;
 	}
 }
 
 static uint8_t ctc_read(uint8_t channel)
 {
-	return ctc[channel].count >> 8;
+	uint8_t val = ctc[channel].count >> 8;
+	if (trace & TRACE_CTC)
+		fprintf(stderr, "CTC %d reads %02x\n", channel, val);
+	return val;
 }
 
 struct z80_pio {
@@ -695,8 +686,8 @@ struct z80_pio {
 	uint8_t intmask[2];
 	uint8_t icw[2];
 	uint8_t mpend[2];
-	uint8_t irq;
-	uint8_t vector;
+	uint8_t irq[2];
+	uint8_t vector[2];
 };
 
 static struct z80_pio pio[1];
@@ -745,7 +736,7 @@ static void pio_write(uint8_t addr, uint8_t val)
 			return;
 		}
 		if (!(val & 1)) {
-			pio->vector = val;
+			pio->vector[pio_port] = val;
 			return;
 		}
 		if ((val & 0x0F) == 0x0F) {
@@ -826,7 +817,8 @@ static void pio_reset(void)
 	pio->icw[0] = 0;
 	pio->icw[1] = 0;
 	/* No interrupt */
-	pio->irq = 0;
+	pio->irq[0] = 0;
+	pio->irq[1] = 0;
 }
 	
 static void memory_control(uint8_t val)
@@ -1088,7 +1080,8 @@ int main(int argc, char *argv[])
 			/* Clear this after because reti_event may set the
 			   flags to indicate there is more happening. We will
 			   pick up the next state changes on the reti if so */
-			int_recalc = 0;
+			if (!(cpu_z80.IFF1|cpu_z80.IFF2))
+				int_recalc = 0;
 		}
 	}
 	exit(0);
