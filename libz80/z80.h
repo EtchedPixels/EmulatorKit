@@ -85,6 +85,7 @@ typedef struct
 	byte	IFF1;	/**< Interrupt Flipflop 1 */
 	byte	IFF2;	/**< Interrupt Flipflop 2 */
 	byte	IM;		/**< Instruction mode */
+	byte	M1;		/**< M1 line state (only for ifetch) */
 	
 	Z80DataIn	memRead;
 	Z80DataOut	memWrite;
