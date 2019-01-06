@@ -5,7 +5,7 @@
  *	IM2 interrupt chain					IN PROGRESS
  *	Zilog SIO/2 at 0x00-0x03				DONE
  *	Zilog CTC at 0x08-0x0B					IN PROGRESS
- *	Zilog PIO at 0x18-0x1B					ABSENT
+ *	Zilog PIO at 0x18-0x1B					MINIMAL
  *	IDE at 0x10-0x17 no high or control access		DONE
  *	Control register at 0x38-0x3F				DONE
  *
@@ -19,6 +19,16 @@
  *	- debug RETI hook
  *	- Z80 PIO
  *	? SD card on Z80 PIO bitbang
+ *
+ *	Currently we model
+ *
+ *	- The Linc80 as it arrives
+ *
+ *	- The Linc80 with 32K banking (lift pin 9 of the 74LSO4 (IN1D) and
+ *	  wire it directly to pin 6 (IN1C output or !BANK0) - or indeed just
+ *	  with that 32K removed and a 512K SRAM wired for the top 32K with
+ *	  A18/17/16/15 wired to CFG6, BKS 2-0 giving 512K usable memory
+ *	  (16 x 32K banks).
  */
 
 #include <stdio.h>
@@ -35,7 +45,7 @@
 
 static uint8_t rom[65536];
 static uint8_t ram[65536];	/* We never use the banked 16K */
-static uint8_t altram[8][16384];
+static uint8_t altram[16][32768];	/* 16K for Linc80, 32 for Linc80X */
 
 static uint8_t romsel;
 static uint8_t ramsel;
@@ -43,6 +53,10 @@ static uint8_t romdis;
 static uint8_t intdis;
 static uint8_t fast;
 static uint8_t int_recalc;
+static uint8_t linc80x;
+static uint16_t banktop = 0xBFFF;
+static uint16_t bankmask = 0x3FFF;
+static uint8_t rsmask;
 
 static uint8_t live_irq;
 
@@ -72,9 +86,15 @@ static uint8_t mem_read(int unused, uint16_t addr)
 
 	if (addr < 0x4000 && !romdis)
 		r = rom[addr + 0x4000 * romsel];
-	else if (addr >= 0x8000 && addr < 0xC000)
-		r = altram[ramsel][addr & 0x3FFF];
-	else
+	else if (addr >= 0x8000 && addr <= banktop) {
+		/* Simulate tight decode providing crap for absent banks */
+		if (ramsel > rsmask) {	/* This works as mask is power of 2 - 1 */
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "[Read from invalid bank %d]\n", ramsel);
+			r = rand();
+		} else
+			r = altram[ramsel & rsmask][addr & bankmask];
+	} else
 		r = ram[addr];
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X = %02X\n", addr, r);
@@ -108,8 +128,13 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 		ram[addr] = val;
 		return;
 	}
-	if (addr >= 0x8000 && addr < 0xC000)
-		altram[ramsel][addr & 0x3FFF] = val;
+	if (addr >= 0x8000 && addr <= banktop) {
+		if (ramsel > rsmask) {
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "[Write to invalid bank %d]\n", ramsel);
+		} else
+			altram[ramsel & rsmask][addr & bankmask] = val;
+	}
 	else
 		ram[addr] = val;
 }
@@ -812,13 +837,20 @@ static void memory_control(uint8_t val)
 	/* IRQ unmasked - recalculate state */
 	if (oldint && !intdis)
 		recalc_interrupts();
-	if (val & 0x40)
+	if (!linc80x && (val & 0x40))
 		fprintf(stderr, "[Warning: wrote reserved 0x38 bit as 1]\n");
 	ramsel = (val >> 1) & 0x07;
 	romsel = (val >> 4) & 0x03;
-	if (trace & TRACE_PAGE)
+	if (linc80x) {
+		if (val & 0x40)
+			ramsel |= 0x8;
+	}
+	if (trace & TRACE_PAGE) {
 		fprintf(stderr, "memory control: romdis %d intdis %d ramsel %d romsel %d.\n",
 			romdis, intdis, ramsel, romsel);
+		if (ramsel > rsmask)
+			fprintf(stderr, "[Warning: selected invalid ram bank]\n");
+	}
 }
 
 static uint8_t io_read(int unused, uint16_t addr)
@@ -832,7 +864,6 @@ static uint8_t io_read(int unused, uint16_t addr)
 		return ctc_read(addr & 3);
 	if (addr >= 0x10 && addr <= 0x17)
 		return my_ide_read(addr & 7);
-	/* TODO: Z80 PIO at 0x18-0x1B */
 	if (addr >= 0x18 && addr <= 0x1F)
 		return pio_read(addr & 3);
 	if (trace & TRACE_UNK)
@@ -851,7 +882,6 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		ctc_write(addr & 3, val);
 	else if (addr >= 0x10 && addr <= 0x17)
 		my_ide_write(addr & 7, val);
-	/* TODO PIO at 0x18-0x1B */
 	else if (addr >= 0x18 && addr <= 0x1F)
 		pio_write(addr & 3, val);
 	else if (addr >= 0x38 && addr <= 0x3F)
@@ -918,7 +948,7 @@ static void exit_cleanup(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"linc80: [-f] [-r rompath] [-i idepath] [-d debug]\n");
+		"linc80: [-x] [-f] [-r rompath] [-i idepath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -929,8 +959,9 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "linc80.rom";
 	char *idepath = "linc80.ide";
+	int banks = 1;
 
-	while ((opt = getopt(argc, argv, "abcd:e:fi:m:pr:sRw")) != -1) {
+	while ((opt = getopt(argc, argv, "r:i:d:fxb:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -944,12 +975,37 @@ int main(int argc, char *argv[])
 		case 'f':
 			fast = 1;
 			break;
+		case 'x':
+			linc80x = 1;
+			banktop = 0xFFFF;
+			bankmask = 0x7FFF;
+			break;
+		case 'b':
+			banks = atoi(optarg);
+			break;
 		default:
 			usage();
 		}
 	}
 	if (optind < argc)
 		usage();
+
+	if (banks == 1)
+		rsmask = 0;
+	else if (banks == 2)
+		rsmask = 1;
+	else if (banks == 4)
+		rsmask = 3;
+	else if (banks == 8)
+		rsmask = 7;
+	else if (banks == 16 && linc80x)
+		rsmask = 15;
+	else if (banks == 32 && linc80x)
+		rsmask = 31;
+	else {
+		fprintf(stderr, "linc80: invalid number of banks.\n");
+		exit(1);
+	}
 
 	fd = open(rompath, O_RDONLY);
 	if (fd == -1) {
