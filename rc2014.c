@@ -59,8 +59,12 @@ static volatile int done;
 #define TRACE_512	32
 #define TRACE_RTC	64
 #define TRACE_ACIA	128
+#define TRACE_CTC	256
 
 static int trace = 0;
+
+static void reti_event(void);
+
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
@@ -169,17 +173,33 @@ static void mem_write114(uint16_t addr, uint8_t val)
 
 static uint8_t mem_read(int unused, uint16_t addr)
 {
+    static uint8_t rstate = 0;
+    uint8_t r;
+
     switch(cpuboard) {
     case 0:
-        return mem_read0(addr);
+        r = mem_read0(addr);
+        break;
     case 1:
-        return mem_read108(addr);
+        r = mem_read108(addr);
+        break;
     case 2:
-        return mem_read114(addr);
+        r = mem_read114(addr);
+        break;
     default:
         fputs("invalid cpu type.\n", stderr);
         exit(1);
     }
+    /* Look for ED with M1, followed directly by 4D and if so trigger
+	   the interrupt chain */
+    if (r == 0xED && cpu_z80.M1) {
+	rstate = 1;
+	return r;
+    }
+    if (r == 0x4D && rstate == 1)
+        reti_event();
+    rstate = 0;
+    return r;
 }
 
 static void mem_write(int unused, uint16_t addr, uint8_t val)
@@ -395,6 +415,14 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
             Z80INT(&cpu_z80, vector);
         }
     }
+}
+
+static void sio2_reti(struct z80_sio_chan *chan)
+{
+	if (chan->irq)
+		chan->irq = 0;
+	/* Recalculate the pending state and vectors */
+	sio2_raise_int(chan, 0);
 }
 
 /*
@@ -827,15 +855,16 @@ static void rtc_write(uint8_t val)
     rtcst = val;
 }
 
+
 /*
  *	Z80 CTC
  */
 
 struct z80_ctc {
-    uint16_t count;
-    uint16_t reload;
-    uint8_t vector;
-    uint8_t ctrl;
+	uint16_t count;
+	uint16_t reload;
+	uint8_t vector;
+	uint8_t ctrl;
 #define CTC_IRQ		0x80
 #define CTC_COUNTER	0x40
 #define CTC_PRESCALER	0x20
@@ -844,6 +873,9 @@ struct z80_ctc {
 #define CTC_TCONST	0x04
 #define CTC_RESET	0x02
 #define CTC_CONTROL	0x01
+	uint8_t irq;		/* Only valid for channel 0, so we know
+				   if we must wait for a RETI before doing
+				   a further interrupt */
 };
 
 #define CTC_STOPPED(c)	((c)->ctrl & (CTC_TCONST|CTC_RESET))
@@ -853,141 +885,157 @@ uint8_t ctc_irqmask;
 
 static void ctc_reset(struct z80_ctc *c)
 {
-    c->vector = 0;
-    c->ctrl = CTC_RESET;
+	c->vector = 0;
+	c->ctrl = CTC_RESET;
 }
 
 static void ctc_init(void)
 {
-    ctc_reset(ctc);
-    ctc_reset(ctc + 1);
-    ctc_reset(ctc + 2);
-    ctc_reset(ctc + 3);
+	ctc_reset(ctc);
+	ctc_reset(ctc + 1);
+	ctc_reset(ctc + 2);
+	ctc_reset(ctc + 3);
+}
+
+static int ctc_check_int(void)
+{
+	if (ctc_irqmask && !ctc[0].irq) {
+		int i;
+		for (i = 0; i < 4; i++) {	/* FIXME: correct order ? */
+			if (ctc_irqmask & (1 << i)) {
+				uint8_t vector = ctc[0].vector & 0xF8;
+				vector += 2 * i;
+				Z80INT(&cpu_z80, vector);
+				ctc[0].irq = 1 + i;
+				return 1;
+			}
+		}
+	}
+	return 0;
 }
 
 static void ctc_interrupt(struct z80_ctc *c)
 {
-    if (c->ctrl & CTC_IRQ) {
-        uint8_t vector = ctc[0].vector & 0xF8;
-        int i = c - ctc;
-        vector |= i << 1;
-        /* In general here we need to implement IE0/IE1 emulation
-           and also internal pending interrupts */
-/*        Z80INT(&cpu_z80, vector); */
-        if (!(ctc_irqmask & (1 << i))) {
-            ctc_irqmask |= 1 << i;
-//          recalc_interrupts();
+	int i = c - ctc;
+	if (c->ctrl & CTC_IRQ) {
+		if (!(ctc_irqmask & (1 << i))) {
+			ctc_irqmask |= 1 << i;
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d wants to interrupt.\n", i);
+			ctc_check_int();
+		}
+	}
+}
+
+static void ctc_reti(void)
+{
+        if (ctc[0].irq) {
+            ctc_irqmask &= ~(1 << (ctc[0].irq - 1));
+            ctc[0].irq = 0;
+            ctc_check_int();
         }
-    }
 }
 
 /* Model the chains between the CTC devices */
-
 static void ctc_receive_pulse(int i);
 
 static void ctc_pulse(int i)
 {
-    /* Model CTC 0 chained into CTC 1 */
-    if (i == 0)
-        ctc_receive_pulse(1);
+	/* Model CTC 2 chained into CTC 3 */
+	if (i == 2)
+		ctc_receive_pulse(3);
 }
 
 /* We don't worry about edge directions just a logical pulse model */
 static void ctc_receive_pulse(int i)
 {
-    struct z80_ctc *c = ctc + i;
-    if (c->ctrl & CTC_COUNTER) {
-        if (CTC_STOPPED(c))
-            return;
-        c->count-= 0x100;	/* No scaling on pulses */
-        if (c->count == 0) {
-            ctc_interrupt(c);
-            ctc_pulse(i);
-            c->count = c->reload << 8;
-        }
-    } else {
-        if (c->ctrl & CTC_PULSE)
-            c->ctrl &= ~CTC_PULSE;
-    }
+	struct z80_ctc *c = ctc + i;
+	if (c->ctrl & CTC_COUNTER) {
+		if (CTC_STOPPED(c))
+			return;
+		if (c->count >= 0x0100)
+			c->count -= 0x100;	/* No scaling on pulses */
+		if ((c->count & 0xFF00) == 0) {
+			ctc_interrupt(c);
+			ctc_pulse(i);
+			c->count = c->reload << 8;
+		}
+	} else {
+		if (c->ctrl & CTC_PULSE)
+			c->ctrl &= ~CTC_PULSE;
+	}
 }
 
 /* Model counters */
 static void ctc_tick(unsigned int clocks)
 {
-    struct z80_ctc *c = ctc;
-    int i;
-    int n;
-    int decby;
+	struct z80_ctc *c = ctc;
+	int i;
+	int n;
+	int decby;
 
-    for (i = 0; i < 4; i++, c++) {
-        /* Waiting a value */
-        if (CTC_STOPPED(c))
-            continue;
-        /* Pulse trigger mode */
-        if (c->ctrl & CTC_COUNTER) {
-            /* We work in 1/256ths of a count so that we can correctly
-               deal with abitrary numbers of clocks per 'tick' */
-            switch(i) {
-                case 0:	/* clocked by system */
-                    decby = clocks << 8;
-                    break;
-                    /* 1 has no clocking input as it's chained */
-                case 1:
-                    /* We model 2 and 3 unused - SIO speed etc */
-                case 2:
-                case 3:
-                    break;
-            }
-        } else {
-            /* 256x downscaled */
-            decby = clocks;
-            /* 16x not 256x downscale - so increase by 16x */
-            if (!(c->ctrl & CTC_PRESCALER))
-                decby <<= 4;
-        }
-        /* Now iterate over the events. We need to deal with wraps
-           because we might have something counters chained */
-        n = c->count - decby;
-        while(n < 0) {
-            ctc_interrupt(c);
-            ctc_pulse(i);
-            n += c->reload << 8;
-            if (c->ctrl & CTC_COUNTER) {
-                c->count = c->reload << 8;
-                c->ctrl |= CTC_RESET;
-                return;
-            }
-        }
-        c->count = n;
-    }
+	for (i = 0; i < 4; i++, c++) {
+		/* Waiting a value */
+		if (CTC_STOPPED(c))
+			continue;
+		/* Pulse trigger mode */
+		if (c->ctrl & CTC_COUNTER)
+			continue;
+		/* 256x downscaled */
+		decby = clocks;
+		/* 16x not 256x downscale - so increase by 16x */
+		if (!(c->ctrl & CTC_PRESCALER))
+			decby <<= 4;
+		/* Now iterate over the events. We need to deal with wraps
+		   because we might have something counters chained */
+		n = c->count - decby;
+		while (n < 0) {
+			ctc_interrupt(c);
+			ctc_pulse(i);
+			n += c->reload << 8;
+		}
+		c->count = n;
+	}
 }
 
 static void ctc_write(uint8_t channel, uint8_t val)
 {
-    struct z80_ctc *c = ctc + channel;
-    if (c->ctrl & CTC_TCONST) {
-        c->ctrl &= ~CTC_TCONST;
-        c->reload = val;
-        /* FIXME: sort out the correct logic for the count reload
-           and reset clear rule */
-        if (!(c->ctrl & CTC_PULSE) && !(c->ctrl & CTC_COUNTER)) {
-                c->count = c->reload;
-        }
-    } else if (val & CTC_CONTROL) {
-        /* We don't yet model the weirdness around edge wanted
-           toggling and clock starts */
-        /* Check rule on resets */
-        c->ctrl = val;
-    } else {
-        /* The vector on channel 1 is ignored */
-        c->vector = val;
-    }
+	struct z80_ctc *c = ctc + channel;
+	if (c->ctrl & CTC_TCONST) {
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d constant loaded with %02X\n", channel, val);
+		c->ctrl &= ~CTC_TCONST;
+		c->reload = val;
+		/* FIXME: sort out the correct logic for the count reload
+		   and reset clear rule */
+		if (!(c->ctrl & CTC_PULSE)
+		    && !(c->ctrl & CTC_COUNTER)) {
+			c->count = c->reload;
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
+		}
+	} else if (val & CTC_CONTROL) {
+		/* We don't yet model the weirdness around edge wanted
+		   toggling and clock starts */
+		/* Check rule on resets */
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d control loaded with %02X\n", channel, val);
+		c->ctrl = val;
+	} else {
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
+		c->vector = val;
+	}
 }
 
 static uint8_t ctc_read(uint8_t channel)
 {
-    return ctc[channel].count >> 8;
+	uint8_t val = ctc[channel].count >> 8;
+	if (trace & TRACE_CTC)
+		fprintf(stderr, "CTC %d reads %02x\n", channel, val);
+	return val;
 }
+
 
 /*
  *	Emulate the switchable ROM card. We switch between the ROM and
@@ -1158,6 +1206,16 @@ static uint8_t io_read(int unused, uint16_t addr)
         fprintf(stderr, "bad cpuboard\n");
         exit(1);
     }
+}
+
+static void reti_event(void)
+{
+    if (sio2) {
+        sio2_reti(sio);
+        sio2_reti(sio + 1);
+    }
+    if (have_ctc)
+        ctc_reti();
 }
 
 static struct termios saved_term, term;
