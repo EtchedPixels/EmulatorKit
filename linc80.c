@@ -70,6 +70,8 @@ static Z80Context cpu_z80;
 #define TRACE_SIO	16
 #define TRACE_IRQ	32
 #define TRACE_CTC	64
+#define TRACE_SPI	128
+#define TRACE_SD	256
 
 static int trace = 0;
 
@@ -113,6 +115,12 @@ static uint8_t mem_read(int unused, uint16_t addr)
 
 static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
+#if 0
+	if (cpu_z80.PC >= 0x0C00 && cpu_z80.PC < 0x8000 && romdis && ramsel == 1 &&
+		addr > 0x8000)
+		printf("PC=%04X Wrote oddly to %04X with %02X\n",
+			cpu_z80.PC, addr, val);
+#endif
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W: %04X = %02X\n", addr, val);
 	if (addr < 0x4000) {
@@ -679,6 +687,154 @@ static uint8_t ctc_read(uint8_t channel)
 	return val;
 }
 
+static int sd_mode = 0;
+static int sd_cmdp = 0;
+static int sd_ext = 0;
+static uint8_t sd_cmd[6];
+static uint8_t sd_in[520];
+static int sd_inlen, sd_inp;
+static uint8_t sd_out[520];
+static int sd_outlen, sd_outp;
+static int sd_fd = -1;
+static off_t sd_lba;
+static const uint8_t sd_csd[17] = {
+
+	0xFE,		/* Sync byte before CSD */
+	/* Taken from a Toshiba 64MB card c/o softgun */
+	0x00, 0x2D, 0x00, 0x32,
+	0x13, 0x59, 0x83, 0xB1,
+	0xF6, 0xD9, 0xCF, 0x80,
+	0x16, 0x40, 0x00, 0x00
+};
+
+static uint8_t sd_process_command(void)
+{
+	if (sd_ext) {
+		sd_ext = 0;
+		switch(sd_cmd[0]) {
+		default:
+			return 0xFF;
+		}
+	}
+	if (trace & TRACE_SD)
+		fprintf(stderr, "Command received %x\n", sd_cmd[0]);
+	switch(sd_cmd[0]) {
+	case 0x40+0:		/* CMD 0 */
+		return 0x01;	/* Just respond 0x01 */
+	case 0x40+1:		/* CMD 1 - leave idle */
+		return 0x00;	/* Immediately indicate we did */
+	case 0x40+9:		/* CMD 9 - read thye CSD */
+		memcpy(sd_out,sd_csd, 17);
+		sd_outlen = 17;
+		sd_mode = 2;
+		return 0x00;
+	case 0x40+16:		/* CMD 16 - set block size */
+		/* Should check data is 512 !! FIXME */
+		return 0x00;	/* Sure */
+	case 0x40+17:		/* Read */
+		sd_outlen = 514;
+		sd_outp = 0;
+		/* Sync mark then data */
+		sd_out[0] = 0xFF;
+		sd_out[1] = 0xFE;
+		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
+			16777216 * sd_cmd[1];
+		if (trace & TRACE_SD)
+			fprintf(stderr, "Read LBA %lx\n", sd_lba);
+		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 || read(sd_fd, sd_out + 2, 512) != 512) {
+			if (trace & TRACE_SD)
+				fprintf(stderr, "Read LBA failed.\n");
+			return 0x01;
+		}
+		sd_mode = 2;
+		/* Result */
+		return 0x00;
+	case 0x40+24:		/* Write */
+		/* Will send us FE data FF FF */
+		if (trace & TRACE_SD)
+			fprintf(stderr, "Write LBA %lx\n", sd_lba);
+		sd_inlen = 514;	/* Data FF FF */
+		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
+			16777216 * sd_cmd[1];
+		sd_inp = 0;
+		sd_mode = 4;	/* Send a pad then go to mode 3 */
+		return 0x00;	/* The expected OK */
+	case 0x40+55:
+		sd_ext = 1;
+		return 0x01;
+	default:
+		return 0x7F;
+	}
+}
+
+static uint8_t sd_process_data(void)
+{
+	switch(sd_cmd[0]) {
+	case 0x40+24:		/* Write */
+		sd_mode = 0;
+		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 ||
+			write(sd_fd, sd_in, 512) != 512) {
+			if (trace & TRACE_SD)
+				fprintf(stderr, "Write failed.\n");
+			return 0x1E;	/* Need to look up real values */
+		}
+		return 0x05;	/* Indicate it worked */
+	default:
+		sd_mode = 0;
+		return 0xFF;
+	}
+}
+
+static uint8_t sd_card_byte(uint8_t in)
+{
+	/* No card present */
+	if (sd_fd == -1)
+		return 0xFF;
+
+	if (sd_mode == 0) {
+		if (in != 0xFF) {
+			sd_mode = 1;	/* Command wait */
+			sd_cmdp = 1;
+			sd_cmd[0] = in;
+		}
+		return 0xFF;
+	}
+	if (sd_mode == 1) {
+		sd_cmd[sd_cmdp++] = in;
+		if (sd_cmdp == 6) {	/* Command complete */
+			sd_cmdp = 0;
+			sd_mode = 0;
+			/* Reply with either a stuff byte (CMD12) or a
+			   status */
+			return sd_process_command();
+		}
+		/* Keep talking */
+		return 0xFF;
+	}
+	/* Writing out the response */
+	if (sd_mode == 2) {
+		if (sd_outp + 1 == sd_outlen)
+			sd_mode = 0;
+		return sd_out[sd_outp++];
+	}
+	/* Commands that need input blocks first */
+	if (sd_mode == 3) {
+		sd_in[sd_inp++] = in;
+		if (sd_inp == sd_inlen)
+			return sd_process_data();
+		/* Keep sending */
+		return 0xFF;
+	}
+	/* Sync up before data flow starts */
+	if (sd_mode == 4) {
+		/* Sync */
+		if (in == 0xFE)
+			sd_mode = 3;
+		return 0xFF;
+	}
+	return 0xFF;
+}
+
 struct z80_pio {
 	uint8_t data[2];
 	uint8_t mask[2];
@@ -688,14 +844,65 @@ struct z80_pio {
 	uint8_t mpend[2];
 	uint8_t irq[2];
 	uint8_t vector[2];
+	uint8_t in[2];
 };
 
 static struct z80_pio pio[1];
+
+/* Software SPI test: one device for now */
+
+static uint8_t spi_byte_sent(uint8_t val)
+{
+	uint8_t r = sd_card_byte(val);
+	if (trace & TRACE_SPI)
+		fprintf(stderr,	"[SPI %02X:%02X]\n", val, r);
+	fflush(stdout);
+	return r;
+}
+
+static void bitbang_spi(uint8_t val)
+{
+	static uint8_t old = 0xFF;
+	static uint8_t bits;
+	static uint8_t bitct;
+	static uint8_t rxbits = 0xFF;
+	uint8_t delta = val ^ old;
+	old = val;
+
+	if (val & 0x08) {		/* CS high - deselected */
+		if ((trace & TRACE_SPI) && (delta & 0x08))
+			fprintf(stderr,	"[Raised \\CS]\n");
+		bits = 0;
+		sd_mode = 0;	/* FIXME: layering */
+		return;
+	}
+	if ((trace & TRACE_SPI) && (delta & 0x08))
+		fprintf(stderr, "[Lowered \\CS]\n");
+	/* Capture clock edge */
+	if (delta & 0x02) {		/* Clock edge */
+		if (val & 0x02) {	/* Rising - capture in SPI0 */
+			bits <<= 1;
+			bits |= (val & 0x04) ? 1 : 0;
+			bitct++;
+			if (bitct == 8) {
+				rxbits = spi_byte_sent(bits);
+				bitct = 0;
+			}
+		} else {
+			/* Falling edge */
+			pio->in[1] = (rxbits & 0x80) ? 0x01 : 0x00;
+			rxbits <<= 1;
+			rxbits |= 0x01;
+		}
+	}
+}
 
 /* Bus emulation helpers */
 
 void pio_data_write(struct z80_pio *pio, uint8_t port, uint8_t val)
 {
+	if (port == 1)
+		bitbang_spi(val);
 }
 
 void pio_strobe(struct z80_pio *pio, uint8_t port)
@@ -704,7 +911,7 @@ void pio_strobe(struct z80_pio *pio, uint8_t port)
 
 uint8_t pio_data_read(struct z80_pio *pio, uint8_t port)
 {
-	return 0xFF;
+	return pio->in[port];
 }
 
 static void pio_recalc(void)
@@ -732,7 +939,7 @@ static void pio_write(uint8_t addr, uint8_t val)
 		if (pio->mpend[pio_port]) {
 			pio->mask[pio_port] = val;
 			pio_recalc();
-			pio->icw[pio_port] &= ~1;
+			pio->mpend[pio_port] = 0;
 			return;
 		}
 		if (!(val & 1)) {
@@ -940,7 +1147,7 @@ static void exit_cleanup(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"linc80: [-x] [-f] [-r rompath] [-i idepath] [-d debug]\n");
+		"linc80: [-x] [-f] [-r rompath] [-i idepath] [-s sdcard] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -951,15 +1158,19 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "linc80.rom";
 	char *idepath = "linc80.ide";
+	char *sdpath = NULL;
 	int banks = 1;
 
-	while ((opt = getopt(argc, argv, "r:i:d:fxb:")) != -1) {
+	while ((opt = getopt(argc, argv, "r:i:d:fxb:s:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
 			break;
 		case 'i':
 			idepath = optarg;
+			break;
+		case 's':
+			sdpath = optarg;
 			break;
 		case 'd':
 			trace = atoi(optarg);
@@ -1023,6 +1234,15 @@ int main(int argc, char *argv[])
 		} else
 			exit(1);
 	}
+
+	if (sdpath) {
+		sd_fd = open(sdpath, O_RDWR);
+		if (fd == -1) {
+			perror(sdpath);
+			exit(1);
+		}
+	}
+
 	sio_reset();
 	ctc_init();
 	pio_reset();
