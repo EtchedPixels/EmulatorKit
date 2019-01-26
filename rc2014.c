@@ -26,6 +26,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 #include "libz80/z80.h"
 #include "ide.h"
 #include "w5100.h"
@@ -269,6 +270,8 @@ static int check_chario(void)
 	tv.tv_usec = 0;
 
 	if (select(2, &i, NULL, NULL, &tv) == -1) {
+		if (errno == EINTR)
+			return 0;
 		perror("select");
 		exit(1);
 	}
