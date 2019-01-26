@@ -51,7 +51,8 @@ Options:
 - -e n		Execute ROM bank n (0-7) (not used with -b)
 - -f		Fast mode (run flat out)
 - -i path	Enable IDE and use this file
-- -m board	Board type (z80 for default rc2014, sc108 or sc114)
+- -m board	Board type (z80 for default rc2014, sc108, sc114, z80sbc64,
+z80mb64)
 - -p		Pageable ROM (needed for CP/M)
 - -r path	Load the ROM image from this path
 - -s		Enable the SIO/2
@@ -72,6 +73,14 @@ Compact flash images can be found at
 https://github.com/RC2014Z80/RC2014/tree/master/CPM
 
 Remember to unzip the image before putting it on the virtual cf card.
+
+The Z80MB64 and Z80SBC are built around a battery backed RAM image rather
+than a ROM. To start copy the Z80SBCLD.BIN file to your 'ROM' file and then
+bootstrap as per the instructions. At any point when you use ctrl-\ to exit
+the system will save the full memory image back to the ROM file (unless
+marked read only), so you can do the full bootstrap. Alternatively you can
+start from the SCM monitor or similar. These boards default to the bitbang
+serial interface, unless an SIO or ACIA is specified.
 
 ## RBC (ex N8VEM) Mark 2 Emulator
 

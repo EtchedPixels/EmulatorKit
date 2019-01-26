@@ -44,6 +44,9 @@ static uint8_t port38 = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
+static uint8_t cpld_serial = 0;
+
+static uint16_t tstate_steps = 369;	/* RC2014 speed */
 
 static Z80Context cpu_z80;
 
@@ -60,6 +63,7 @@ static volatile int done;
 #define TRACE_RTC	64
 #define TRACE_ACIA	128
 #define TRACE_CTC	256
+#define TRACE_CPLD	512
 
 static int trace = 0;
 
@@ -165,6 +169,37 @@ static void mem_write114(uint16_t addr, uint8_t val)
 	ramrom[aphys] = val;
 }
 
+/* I think this right
+   0: sets the lower bank to the lowest 32K of the 128K
+   1: sets the lower bank to the 32K-64K range
+   2: sets the lower bank to the 64K-96K range
+   3: sets the lower bank to the 96K-128K range
+   where the upper memory is always bank 1.
+   
+   Power on is 3, which is why the bootstrap lives in 3. */
+
+static uint8_t mem_read64(uint16_t addr)
+{
+	uint8_t r;
+	if (addr >= 0x8000)
+		r = ramrom[addr];
+	else
+		r = ramrom[bankreg[0] * 0x8000 + addr];
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04x = %02X\n", addr, r);
+	return r;
+}
+
+static void mem_write64(uint16_t addr, uint8_t val)
+{
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W %04x = %02X\n", addr, val);
+	if (addr >= 0x8000)
+		ramrom[addr] = val;
+	else
+		ramrom[bankreg[0] * 0x8000 + addr] = val;
+}
+
 static uint8_t mem_read(int unused, uint16_t addr)
 {
 	static uint8_t rstate = 0;
@@ -179,6 +214,9 @@ static uint8_t mem_read(int unused, uint16_t addr)
 		break;
 	case 2:
 		r = mem_read114(addr);
+		break;
+	case 3:
+		r = mem_read64(addr);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -207,6 +245,9 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case 2:
 		mem_write114(addr, val);
+		break;
+	case 3:
+		mem_write64(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -1040,6 +1081,89 @@ static void toggle_rom(void)
 	}
 }
 
+/*
+ *	Emulate the Z80SBC64 CPLD
+ */
+ 
+static uint8_t sbc64_cpld_status;
+static uint8_t sbc64_cpld_char;
+
+static void sbc64_cpld_timer(void)
+{
+	/* Don't allow overruns - hack for convenience when pasting hex files */
+	if (!(sbc64_cpld_status & 1)) {
+		if (check_chario() & 1) {
+			sbc64_cpld_status |= 1;
+			sbc64_cpld_char = next_char();
+		}
+	}
+}
+
+static uint8_t sbc64_cpld_uart_rx(void)
+{
+	sbc64_cpld_status &= ~1;
+	if (trace & TRACE_CPLD)
+		fprintf(stderr, "CPLD rx %02X.\n", sbc64_cpld_char);
+	return sbc64_cpld_char;
+}
+
+static uint8_t sbc64_cpld_uart_status(void)
+{
+//	if (trace & TRACE_CPLD)
+//		fprintf(stderr, "CPLD status %02X.\n", sbc64_cpld_status);
+	return sbc64_cpld_status;
+}
+
+static void sbc64_cpld_uart_ctrl(uint8_t val)
+{
+	if (trace & TRACE_CPLD)
+		fprintf(stderr, "CPLD control %02X.\n", val);
+}
+
+static void sbc64_cpld_uart_tx(uint8_t val)
+{
+	static uint16_t bits;
+	static uint8_t bitcount;
+	/* This is umm... fun. We should do a clock based analysis and
+	   bit recovery. For the moment cheat to get it tested */
+	val &= 1;
+	if (bitcount == 0) {
+		if (val & 1)
+			return;
+		/* Look mummy a start a bit */
+		bitcount = 1;
+		bits = 0;
+		if (trace & TRACE_CPLD)
+			fprintf(stderr, "[start]");
+		return;
+	}
+	/* This works because all the existing code does one write per bit */
+	if (bitcount == 9) {
+		if (val & 1) {
+			if (trace & TRACE_CPLD)
+				fprintf(stderr, "[stop]");
+			putchar(bits);
+			fflush(stdout);
+		} else	/* Framing error should be a stop bit */
+			putchar('?');
+		bitcount = 0;
+		bits = 0;
+		return;
+	}
+	bits >>= 1;
+	bits |= val ? 0x80: 0x00;
+	if (trace & TRACE_CPLD)
+		fprintf(stderr, "[%d]", val);
+	bitcount++;
+}
+
+static void sbc64_cpld_bankreg(uint8_t val)
+{
+	if (trace & TRACE_CPLD)
+		fprintf(stderr, "Bank set to %02X\n", val);
+	bankreg[0] = val & 3;
+}
+
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -1111,11 +1235,41 @@ static void io_write_1(uint16_t addr, uint8_t val)
 	io_write_2014(addr, val, 0);
 }
 
+static void io_write_3(uint16_t addr, uint8_t val)
+{
+	switch(addr & 0xFF) {
+	case 0xf9:
+		sbc64_cpld_uart_tx(val);
+		break;
+	case 0xf8:
+		sbc64_cpld_uart_ctrl(val);
+		break;
+	case 0x1f:
+		sbc64_cpld_bankreg(val);
+		break;
+	default:
+		io_write_2014(addr, val, 0);
+		break;
+	}
+}
+
 static uint8_t io_read_2(uint16_t addr)
 {
 	switch (addr & 0xFC) {
 	case 0x28:
 		return 0x80;
+	default:
+		return io_read_2014(addr);
+	}
+}
+
+static uint8_t io_read_3(uint16_t addr)
+{
+	switch(addr & 0xFF) {
+	case 0xf9:
+		return sbc64_cpld_uart_rx();
+	case 0xf8:
+		return sbc64_cpld_uart_status();
 	default:
 		return io_read_2014(addr);
 	}
@@ -1169,6 +1323,9 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	case 2:
 		io_write_2(addr, val);
 		break;
+	case 3:
+		io_write_3(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -1183,6 +1340,8 @@ static uint8_t io_read(int unused, uint16_t addr)
 		return io_read_2014(addr);
 	case 2:
 		return io_read_2(addr);
+	case 3:
+		return io_read_3(addr);
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -1204,7 +1363,7 @@ static struct termios saved_term, term;
 static void cleanup(int sig)
 {
 	tcsetattr(0, TCSADRAIN, &saved_term);
-	exit(1);
+	done = 1;
 }
 
 static void exit_cleanup(void)
@@ -1227,6 +1386,7 @@ int main(int argc, char *argv[])
 	int rombank = 0;
 	char *rompath = "rc2014.rom";
 	char *idepath;
+	int save = 0;
 
 	while ((opt = getopt(argc, argv, "abcd:e:fi:m:pr:sRw")) != -1) {
 		switch (opt) {
@@ -1255,7 +1415,7 @@ int main(int argc, char *argv[])
 			idepath = optarg;
 			break;
 		case 'c':
-			have_ctc = 1;	/* TODO */
+			have_ctc = 1;
 			break;
 		case 'm':
 			/* Default Z80 board */
@@ -1269,8 +1429,21 @@ int main(int argc, char *argv[])
 				switchrom = 0;
 				bank512 = 0;
 				cpuboard = 2;
+			} else if (strcmp(optarg, "z80sbc64") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				cpuboard = 3;
+				bankreg[0] = 3;
+			} else if (strcmp(optarg, "z80mb64") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				cpuboard = 3;
+				bankreg[0] = 3;
+				/* Triple RC2014 rate */
+				tstate_steps = 123;
 			} else {
-				fputs("rc2014: supported cpu types z80, sc108.\n", stderr);
+				fputs("rc2014: supported cpu types z80, sc108, sc114, z80sbc64, z80mb64.\n",
+						stderr);
 				exit(EXIT_FAILURE);
 			}
 			break;
@@ -1294,15 +1467,18 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (acia == 0 && sio2 == 0) {
-		fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
-		acia = 1;
+		if (cpuboard != 3) {
+			fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
+			acia = 1;
+		} else
+			cpld_serial = 1;
 	}
 	if (rom == 0 && bank512 == 0) {
 		fprintf(stderr, "rc2014: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
 
-	if (rom) {
+	if (rom && cpuboard != 3) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
@@ -1323,6 +1499,43 @@ int main(int argc, char *argv[])
 		close(fd);
 	}
 
+	/* SBC64 has battery backed RAM and what really happens is that you
+	   use the CPLD to load a loader and then to load ZMON which in turn
+	   hides in bank 3. This is .. tedious .. with an emulator so we allow
+	   you to load bank 3 with the CPLD loader (so you can play with it
+	   and loading Zmon, or with Zmon loaded, or indeed anything else in
+	   the reserved space notably SCMonitor).
+	   
+	   Quitting saves the memory state. If you screw it all up then use
+	   the loader bin file instead to get going again.
+	   
+	   Mark states read only with chmod and it won't save back */
+
+	if (cpuboard == 3) {
+		int len;
+		save = 1;
+		fd = open(rompath, O_RDWR);
+		if (fd == -1) {
+			save = 0;
+			fd = open(rompath, O_RDONLY);
+			if (fd == -1) {
+				perror(rompath);
+				exit(EXIT_FAILURE);
+			}
+		}
+		/* Could be a short bank 3 save for bootstrapping or a full
+		   save from the emulator exit */
+		len = read(fd, ramrom, 4 * 0x8000);
+		if (len < 4 * 0x8000) {
+			if (len < 255) {
+				fprintf(stderr, "rc2014:short ram '%s'.\n", rompath);
+				exit(EXIT_FAILURE);
+			}
+			memmove(ramrom + 3 * 0x8000, ramrom, 32768);
+			printf("[loaded bank 3 only]\n");
+		}
+	}
+
 	if (bank512) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
@@ -1340,12 +1553,12 @@ int main(int argc, char *argv[])
 	if (ide) {
 		ide0 = ide_allocate("cf");
 		if (ide0) {
-			fd = open(idepath, O_RDWR);
-			if (fd == -1) {
+			int ide_fd = open(idepath, O_RDWR);
+			if (ide_fd == -1) {
 				perror(idepath);
 				ide = 0;
 			}
-			if (ide_attach(ide0, 0, fd) == 0) {
+			if (ide_attach(ide0, 0, ide_fd) == 0) {
 				ide = 1;
 				ide_reset_begin(ide0);
 			}
@@ -1401,19 +1614,29 @@ int main(int argc, char *argv[])
 		int i;
 		/* 36400 T states */
 		for (i = 0; i < 100; i++) {
-			Z80ExecuteTStates(&cpu_z80, 369);
+			Z80ExecuteTStates(&cpu_z80, tstate_steps);
 			if (acia)
 				acia_timer();
 			if (sio2)
 				sio2_timer();
+			if (cpld_serial)
+				sbc64_cpld_timer();
 			if (have_ctc)
-				ctc_tick(364);
+				ctc_tick(tstate_steps);
 		}
 		if (wiznet)
 			w5100_process(wiz);
 		/* Do 5ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+	}
+	if (cpuboard == 3 && save) {
+		lseek(fd, 0L, SEEK_SET);
+		if (write(fd, ramrom, 0x8000 * 4) != 0x8000 * 4) {
+			fprintf(stderr, "rc2014: state save failed.\n");
+			exit(1);
+		}
+		close(fd);
 	}
 	exit(0);
 }
