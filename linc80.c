@@ -204,7 +204,7 @@ struct z80_sio_chan {
 static struct z80_sio_chan sio[2];
 
 /*
- *	Interrupts. We don't handle IM2 yet.
+ *	Interrupts
  */
 
 static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
@@ -235,7 +235,8 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 			   external status change */
 			if (sio[1].wr[1] & 0x04) {
 				vector &= 0xF1;
-				vector |= (chan - sio) << 3;
+				if (chan == sio)
+					vector |= 1 << 3;
 				if (m & INT_RX)
 					vector |= 4;
 				else if (m & INT_ERR)
@@ -256,7 +257,7 @@ static void sio2_reti(struct z80_sio_chan *chan)
 		chan->irq = 0;
 	/* Recalculate the pending state and vectors */
 	sio2_raise_int(chan, 0);
-	if (trace & TRACE_IRQ)
+	if (trace & (TRACE_IRQ|TRACE_SIO))
 		fprintf(stderr, "Acked interrupt from SIO.\n");
 }
 
@@ -264,7 +265,7 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 {
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
-		if (trace & TRACE_IRQ)
+		if (trace & (TRACE_IRQ|TRACE_SIO))
 			fprintf(stderr, "New live interrupt pending is SIO.\n");
 		if (chan == sio)
 			live_irq = IRQ_SIOA;
@@ -449,6 +450,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 				break;
 			case 050:	/* Reset transmitter interrupt pending */
 				chan->txint = 0;
+				sio2_clear_int(sio, INT_TX);
 				break;
 			case 060:	/* Reset the error latches */
 				chan->rr[1] &= 0x8F;
