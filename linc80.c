@@ -528,7 +528,7 @@ struct z80_ctc {
 #define CTC_CONTROL	0x01
 };
 
-#define CTC_STOPPED(c)	((c)->ctrl & (CTC_TCONST|CTC_RESET))
+#define CTC_STOPPED(c)	(((c)->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET))
 
 struct z80_ctc ctc[4];
 uint8_t ctc_irqmask;
@@ -645,7 +645,10 @@ static void ctc_tick(unsigned int clocks)
 		while (n < 0) {
 			ctc_interrupt(c);
 			ctc_pulse(i);
-			n += c->reload << 8;
+			if (c->reload == 0)
+				n += 256 << 8;
+			else
+				n += c->reload << 8;
 		}
 		c->count = n;
 	}
@@ -657,16 +660,13 @@ static void ctc_write(uint8_t channel, uint8_t val)
 	if (c->ctrl & CTC_TCONST) {
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d constant loaded with %02X\n", channel, val);
-		c->ctrl &= ~CTC_TCONST;
 		c->reload = val;
-		/* FIXME: sort out the correct logic for the count reload
-		   and reset clear rule */
-		if (!(c->ctrl & CTC_PULSE)
-		    && !(c->ctrl & CTC_COUNTER)) {
-			c->count = c->reload;
+		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET)) {
+			c->count = c->reload << 8;
 			if (trace & TRACE_CTC)
 				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
+		c->ctrl &= ~CTC_TCONST|CTC_RESET;
 	} else if (val & CTC_CONTROL) {
 		/* We don't yet model the weirdness around edge wanted
 		   toggling and clock starts */
@@ -674,6 +674,11 @@ static void ctc_write(uint8_t channel, uint8_t val)
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d control loaded with %02X\n", channel, val);
 		c->ctrl = val;
+		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == CTC_RESET) {
+			c->count = c->reload << 8;
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
+		}
 	} else {
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
