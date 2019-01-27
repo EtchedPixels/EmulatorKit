@@ -128,7 +128,7 @@ static void mem_write108(uint16_t addr, uint8_t val)
 {
 	uint32_t aphys;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W: %04X = %02X\n", addr, val);
+		fprintf(stderr, "W: %04X = %02X (%02X)\n", addr, val);
 	if (addr < 0x8000 && !(port38 & 0x01)) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
@@ -298,6 +298,7 @@ static uint8_t acia_status = 2;
 static uint8_t acia_config;
 static uint8_t acia_char;
 static uint8_t acia;
+static uint8_t acia_input;
 static uint8_t acia_inint = 0;
 
 static void acia_irq_compute(void)
@@ -334,7 +335,7 @@ static void acia_transmit(void)
 static void acia_timer(void)
 {
 	int s = check_chario();
-	if (s & 1)
+	if ((s & 1) && acia_input)
 		acia_receive();
 	if (s & 2)
 		acia_transmit();
@@ -410,6 +411,7 @@ struct z80_sio_chan {
 };
 
 static int sio2;
+static int sio2_input;
 static struct z80_sio_chan sio[2];
 
 /*
@@ -431,7 +433,7 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 	uint8_t new = (chan->intbits ^ m) & m;
 	uint8_t vector;
 	chan->intbits |= m;
-	if (trace & TRACE_SIO)
+	if ((trace & TRACE_SIO) && new)
 		fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
 	if (new) {
 		if (!sio->irq) {
@@ -510,8 +512,11 @@ static void sio2_channel_timer(struct z80_sio_chan *chan, uint8_t ab)
 {
 	if (ab == 0) {
 		int c = check_chario();
-		if (c & 1)
-			sio2_queue(chan, next_char());
+
+		if (sio2_input) {
+			if (c & 1)
+				sio2_queue(chan, next_char());
+		}
 		if (c & 2) {
 			if (!(chan->rr[0] & 0x04)) {
 				chan->rr[0] |= 0x04;
@@ -556,6 +561,9 @@ static uint8_t sio2_read(uint16_t addr)
 		uint8_t r = chan->wr[0] & 007;
 		chan->wr[0] &= ~007;
 
+		chan->rr[0] &= ~2;
+		if (chan == sio && (sio[0].intbits | sio[1].intbits))
+			chan->rr[0] |= 2;
 		if (trace & TRACE_SIO)
 			fprintf(stderr, "sio%c read reg %d = ", (addr & 2) ? 'b' : 'a', r);
 		switch (r) {
@@ -904,7 +912,7 @@ struct z80_ctc {
 				   a further interrupt */
 };
 
-#define CTC_STOPPED(c)	((c)->ctrl & (CTC_TCONST|CTC_RESET))
+#define CTC_STOPPED(c)	(((c)->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET))
 
 struct z80_ctc ctc[4];
 uint8_t ctc_irqmask;
@@ -1018,7 +1026,10 @@ static void ctc_tick(unsigned int clocks)
 		while (n < 0) {
 			ctc_interrupt(c);
 			ctc_pulse(i);
-			n += c->reload << 8;
+			if (c->reload == 0)
+				n += 256 << 8;
+			else
+				n += c->reload << 8;
 		}
 		c->count = n;
 	}
@@ -1030,23 +1041,24 @@ static void ctc_write(uint8_t channel, uint8_t val)
 	if (c->ctrl & CTC_TCONST) {
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d constant loaded with %02X\n", channel, val);
-		c->ctrl &= ~CTC_TCONST;
 		c->reload = val;
-		/* FIXME: sort out the correct logic for the count reload
-		   and reset clear rule */
-		if (!(c->ctrl & CTC_PULSE)
-		    && !(c->ctrl & CTC_COUNTER)) {
-			c->count = c->reload;
+		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET)) {
+			c->count = c->reload << 8;
 			if (trace & TRACE_CTC)
 				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
+		c->ctrl &= ~CTC_TCONST|CTC_RESET;
 	} else if (val & CTC_CONTROL) {
 		/* We don't yet model the weirdness around edge wanted
 		   toggling and clock starts */
-		/* Check rule on resets */
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d control loaded with %02X\n", channel, val);
 		c->ctrl = val;
+		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == CTC_RESET) {
+			c->count = c->reload << 8;
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
+		}
 	} else {
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
@@ -1162,9 +1174,12 @@ static void sbc64_cpld_uart_tx(uint8_t val)
 
 static void sbc64_cpld_bankreg(uint8_t val)
 {
-	if (trace & TRACE_CPLD)
-		fprintf(stderr, "Bank set to %02X\n", val);
-	bankreg[0] = val & 3;
+	val &= 3;
+	if (bankreg[0] != val) {
+		if (trace & TRACE_CPLD)
+			fprintf(stderr, "Bank set to %02X\n", val);
+		bankreg[0] = val;
+	}
 }
 
 static uint8_t io_read_2014(uint16_t addr)
@@ -1230,7 +1245,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 static void io_write_1(uint16_t addr, uint8_t val)
 {
 	if ((addr & 0xFF) == 0x38) {
-		if (trace & TRACE_ROM)
+		val &= 0x81;
+		if (val != port38 && (trace & TRACE_ROM))
 			fprintf(stderr, "Bank set to %02X\n", val);
 		port38 = val;
 		return;
@@ -1395,12 +1411,16 @@ int main(int argc, char *argv[])
 		switch (opt) {
 		case 'a':
 			acia = 1;
+			acia_input = 1;
+			sio2 = 0;
 			break;
 		case 'r':
 			rompath = optarg;
 			break;
 		case 's':
 			sio2 = 1;
+			sio2_input = 1;
+			acia = 0;
 			break;
 		case 'e':
 			rombank = atoi(optarg);
@@ -1469,12 +1489,16 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	if (acia == 0 && sio2 == 0) {
+	if (cpuboard == 3) {
+		acia_input = 0;
+		sio2_input = 0;
+		cpld_serial = 1;
+	} else if (acia == 0 && sio2 == 0) {
 		if (cpuboard != 3) {
 			fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
 			acia = 1;
-		} else
-			cpld_serial = 1;
+			acia_input = 1;
+		}
 	}
 	if (rom == 0 && bank512 == 0) {
 		fprintf(stderr, "rc2014: no ROM\n");
