@@ -159,6 +159,22 @@ Options:
 - -t		external 10Hz timer on DCD (not yet accurate to 10Hz)
 - -b		A16 of RAM is controlled by UART RTS line
 
+## Tom's SBC Version C
+
+This is a close relative of the Grant Searle system except that it has up to
+64K of banked ROM. This is handled by the searle emulator when provided with
+a 64K or 32K ROM image. The only differences are the two ROM paging ports.
+The ROM can be paged back in.
+
+# To build yourself an actual system see
+
+https://easyeda.com/peabody1929
+
+# For ROM images
+
+Use either the Grant Searle ROM padded to 32K or the SCM firmware at
+https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/
+
 ## LiNC 80 SBC
 
 This is an emulator for the LiNC80 system with optional expanded memory. It

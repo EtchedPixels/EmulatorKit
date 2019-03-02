@@ -309,6 +309,7 @@ static void acia_irq_compute(void)
 		acia_inint = 1;
 		Z80INT(&cpu_z80, 0xFF);	/* FIXME probably last data or bus noise */
 	}
+	/* FIXME: clearing logic */
 }
 
 static void acia_receive(void)

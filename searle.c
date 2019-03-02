@@ -24,6 +24,9 @@
  *
  *	If it seems an awful lot like RC2014 then there's a reason for that
  *	because RC2014 draws heavily from it as well as Retrobrew/N8VEM
+ *
+ *	Tom Szolgya's system is also emulated. That adds ROM banking on
+ *	using ports 0x3E and 0x3F (bit 0 of each)
  */
 
 #include <stdio.h>
@@ -39,13 +42,16 @@
 #include "ide.h"
 
 static uint8_t ram[131072];
-static uint8_t rom[16384];
+static uint8_t rom[16384 * 4];
 
 static uint8_t romen = 1;
 static uint8_t banken = 0;
 static uint8_t fast = 0;
 static uint8_t timerhack = 0;
 static uint8_t bankhack = 0;
+
+static uint8_t rombank = 0;
+static uint8_t rombanken = 0;
 
 static Z80Context cpu_z80;
 
@@ -65,7 +71,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R");
 	if (addr < 0x4000 && romen)
-		r = rom[addr];
+		r = rom[rombank * 0x4000 + addr];
 	else if (banken == 1) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "H");
@@ -438,9 +444,12 @@ static void my_ide_write(uint16_t addr, uint8_t val)
  *	ROM control
  */
 
-static void control_rom(void)
+static void control_rom(uint8_t val)
 {
-	romen = 0;
+	if (rombanken)
+		romen = val & 1;
+	else
+		romen = 0;
 }
 
 static uint8_t io_read(int unused, uint16_t addr)
@@ -467,8 +476,14 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	else if (addr >= 0x10 && addr <= 0x17)
 		my_ide_write(addr & 7, val);
 	else if (addr == 0x38)
-		control_rom();
-	else if (trace & TRACE_UNK)
+		control_rom(val);
+	else if (addr == 0x3E && rombanken) {
+		rombank &= 1;
+		rombank |= (val & 1) ? 2 : 0;
+	} else if (addr == 0x3F && rombanken) {
+		rombank &= 2;
+		rombank |= (val & 1);
+	} else if (trace & TRACE_UNK)
 		fprintf(stderr,
 			"Unknown write to port %04X of %02X\n", addr, val);
 }
@@ -497,6 +512,7 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	int fd;
+	int l;
 	char *rompath = "searle.rom";
 	char *idepath = "searle.cf";
 
@@ -533,10 +549,20 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, rom, 16384) < 16384) {
+	l = read(fd, rom, 65536);
+	if (l < 16384) {
 		fprintf(stderr, "searle: short rom '%s'.\n", rompath);
 		exit(EXIT_FAILURE);
 	}
+	if (l != 16384 && l != 65536 && l != 32768) {
+		fprintf(stderr, "searle: ROM size must be 16K, 32K or 64K.\n");
+		exit(EXIT_FAILURE);
+	}
+	if (l > 16384)
+		rombanken = 1;
+	if (l == 32768)
+		memcpy(rom + 32768, rom ,32768);
+
 	close(fd);
 
 	ide0 = ide_allocate("cf");
