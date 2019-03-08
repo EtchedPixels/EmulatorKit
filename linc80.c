@@ -228,6 +228,7 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 		fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
 	if (chan->pending) {
 		if (!sio->irq) {
+			chan->irq = 1;
 			sio->irq = 1;
 			sio->rr[1] |= 0x02;
 			vector = sio[1].wr[2];
