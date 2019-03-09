@@ -211,10 +211,10 @@ static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
 	chan->intbits &= ~m;
 	chan->pending &= ~m;
-	/* Check me - does it auto clear down or do you have to reti it ? */
+
 	if (!(sio->intbits | sio[1].intbits)) {
 		sio->rr[1] &= ~0x02;
-		sio->irq = 0;
+		chan->irq = 0;
 	}
 }
 
@@ -229,7 +229,6 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 	if (chan->pending) {
 		if (!sio->irq) {
 			chan->irq = 1;
-			sio->irq = 1;
 			sio->rr[1] |= 0x02;
 			vector = sio[1].wr[2];
 			/* This is a subset of the real options. FIXME: add
@@ -238,15 +237,15 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 				vector &= 0xF1;
 				if (chan == sio)
 					vector |= 1 << 3;
-				if (m & INT_RX)
+				if (chan->intbits & INT_RX)
 					vector |= 4;
-				else if (m & INT_ERR)
+				else if (chan->intbits & INT_ERR)
 					vector |= 2;
 			}
-			if (trace & TRACE_SIO)
+			if (trace & (TRACE_SIO | TRACE_IRQ))
 				fprintf(stderr,
 					"SIO2 interrupt %02X\n", vector);
-			sio->vector = vector;
+			chan->vector = vector;
 			recalc_interrupts();
 		}
 	}
@@ -267,7 +266,8 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
 		if (trace & (TRACE_IRQ|TRACE_SIO))
-			fprintf(stderr, "New live interrupt pending is SIO.\n");
+			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
+				(int)(chan - sio), chan->vector);
 		if (chan == sio)
 			live_irq = IRQ_SIOA;
 		else
@@ -451,7 +451,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 				break;
 			case 050:	/* Reset transmitter interrupt pending */
 				chan->txint = 0;
-				sio2_clear_int(sio, INT_TX);
+				sio2_clear_int(chan, INT_TX);
 				break;
 			case 060:	/* Reset the error latches */
 				chan->rr[1] &= 0x8F;
