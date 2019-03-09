@@ -13,8 +13,13 @@
  *	ROMWBW crashes in ACIA mode
  *	Not convinced we have all the INT clear cases right for SIO error
  *
- *	Really ought to wire RETI / SIO etc up properly
  *	Add support for using real CF card
+ *
+ *	For the Easy-Z80 still need to update the CTC model
+ *	TRG0/1 CTC0 and CTC1 are fed from UART_CLK (1.8432MHz)
+ *	TRG2 is fed from CTC_CLK
+ *	TO2 feeds TRG3
+ *
  */
 
 #include <stdio.h>
@@ -446,14 +451,14 @@ static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
 	if (trace & TRACE_IRQ) {
 		fprintf(stderr, "Clear intbits %d %x\n",
-			chan - sio, m);
+			(int)(chan - sio), m);
 	}
 	chan->intbits &= ~m;
 	chan->pending &= ~m;
 	/* Check me - does it auto clear down or do you have to reti it ? */
 	if (!(sio->intbits | sio[1].intbits)) {
 		sio->rr[1] &= ~0x02;
-		sio->irq = 0;
+		chan->irq = 0;
 	}
 	recalc_interrupts();
 }
@@ -467,7 +472,7 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 		fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
 	if (new) {
 		if (!sio->irq) {
-			sio->irq = 1;
+			chan->irq = 1;
 			sio->rr[1] |= 0x02;
 			vector = sio[1].wr[2];
 			/* This is a subset of the real options. FIXME: add
@@ -476,14 +481,14 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 				vector &= 0xF1;
 				if (chan == sio)
 					vector |= 1 << 3;
-				if (m & INT_RX)
+				if (chan->intbits & INT_RX)
 					vector |= 4;
-				else if (m & INT_ERR)
+				else if (chan->intbits & INT_ERR)
 					vector |= 2;
 			}
 			if (trace & TRACE_SIO)
 				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
-			sio->vector = vector;
+			chan->vector = vector;
 			recalc_interrupts();
 		}
 	}
@@ -502,7 +507,8 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
 		if (trace & (TRACE_IRQ|TRACE_SIO))
-			fprintf(stderr, "New live interrupt pending is SIO.\n");
+			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
+				(int)(chan - sio), chan->vector);
 		if (chan == sio)
 			live_irq = IRQ_SIOA;
 		else
@@ -573,8 +579,8 @@ static void sio2_channel_timer(struct z80_sio_chan *chan, uint8_t ab)
 			}
 		}
 	} else {
-		if (!(chan->rr[0] & 0x04)) {
-			chan->rr[0] |= 0x04;
+		if (!(chan->rr[1] & 0x04)) {
+			chan->rr[1] |= 0x04;
 			if (chan->wr[1] & 0x02)
 				sio2_raise_int(chan, INT_TX);
 		}
@@ -682,6 +688,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 				break;
 			case 050:	/* Reset transmitter interrupt pending */
 				chan->txint = 0;
+				sio2_clear_int(chan, INT_TX);
 				break;
 			case 060:	/* Reset the error latches */
 				chan->rr[1] &= 0x8F;
@@ -1308,7 +1315,7 @@ static uint8_t io_read_4(uint16_t addr)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0xC0 && rtc)
 		return rtc_read();
-	if (addr >= 0x20 && addr <= 0x23)
+	if (addr >= 0x88 && addr <= 0x8B)
 		return ctc_read(addr & 3);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -1337,9 +1344,12 @@ static void io_write_4(uint16_t addr, uint8_t val)
 		bankenable = val & 1;
 	} else if (addr == 0xC0 && rtc)
 		rtc_write(val);
-	else if (addr >= 0x20 && addr <= 0x23)
+	else if (addr >= 0x88 && addr <= 0x8B)
 		ctc_write(addr & 3, val);
-	else if (addr == 0xFD) {
+	else if (addr == 0xFC) {
+		putchar(val);
+		fflush(stdout);
+	} else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
@@ -1622,7 +1632,7 @@ int main(int argc, char *argv[])
 				sio2 = 1;
 				sio2_input = 1;
 				has_im2 = 1;
-				tstate_steps = 200;
+				tstate_steps = 500;
 			} else {
 				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, z80sbc64, z80mb64.\n",
 						stderr);
@@ -1798,7 +1808,7 @@ int main(int argc, char *argv[])
 	   slow stuff and nap for 5ms. */
 	while (!done) {
 		int i;
-		/* 36400 T states */
+		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 100; i++) {
 			Z80ExecuteTStates(&cpu_z80, tstate_steps);
 			if (acia)
