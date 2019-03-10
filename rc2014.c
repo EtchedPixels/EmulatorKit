@@ -474,7 +474,7 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 		if (!sio->irq) {
 			chan->irq = 1;
 			sio->rr[1] |= 0x02;
-			vector = sio[1].wr[2];
+			vector = 0; /* sio[1].wr[2]; */
 			/* This is a subset of the real options. FIXME: add
 			   external status change */
 			if (sio[1].wr[1] & 0x04) {
@@ -506,6 +506,9 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 {
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
+		/* FIXME: quick fix for now but the vector calculation should all be
+		   done here it seems */
+		chan->vector += (sio[1].wr[2] & 0xF1);
 		if (trace & (TRACE_IRQ|TRACE_SIO))
 			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
 				(int)(chan - sio), chan->vector);
