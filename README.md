@@ -7,13 +7,15 @@ The emulation includes
 - Standard RC2014 CPU card
 - SC108 CPU card with 128K banked RAM and 32K ROM
 - SC114 CPU card with 128K banked RAM and 32K ROM
+- Easy-Z80 card with 512K banked RAM, 512K banked ROM and on board CTC and SIO
+- Z80BSC/Z80SBC64 with 128K banked battery backed RAM and simple CPLD UART
 - ROM and switchable ROM cards
 - 6850 ACIA
 - Z80 SIO/2
 - 512K RAM/512K ROM card
 - CF adapter
 - DS1302 real time clock (time setting not supported)
-- CTC at 0x88 (untested)
+- CTC at 0x88
 
 At this point in time the serial emulation is complete and sufficient to run
 the standard ROM environment with BASIC. This represents the basic
@@ -34,6 +36,7 @@ To exit use ctrl-backslash
 
 https://rc2014.co.uk/
 https://smallcomputercentral.wordpress.com/
+https://www.retrobrewcomputers.org/forum/index.php?t=msg&th=368&start=0&
 
 # For ROM images see
 
@@ -51,7 +54,7 @@ Options:
 - -e n		Execute ROM bank n (0-7) (not used with -b)
 - -f		Fast mode (run flat out)
 - -i path	Enable IDE and use this file
-- -m board	Board type (z80 for default rc2014, sc108, sc114, z80sbc64,
+- -m board	Board type (z80 for default rc2014, easy-z80, sc108, sc114, z80sbc64,
 z80mb64)
 - -p		Pageable ROM (needed for CP/M)
 - -r path	Load the ROM image from this path
@@ -204,3 +207,4 @@ Options:
 - -d n		set debug trace bits
 - -f		fast (run flat out)
 - -x		emulate the 32K banking mod
+
