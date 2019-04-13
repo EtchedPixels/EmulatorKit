@@ -326,6 +326,7 @@ static uint8_t acia_char;
 static uint8_t acia;
 static uint8_t acia_input;
 static uint8_t acia_inint = 0;
+static uint8_t acia_narrow;
 
 static void acia_irq_compute(void)
 {
@@ -1250,7 +1251,9 @@ static uint8_t io_read_2014(uint16_t addr)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
 	addr &= 0xFF;
-	if ((addr >= 0x80 && addr <= 0xBF) && acia)
+	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
+		return acia_read(addr & 1);
+	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		return acia_read(addr & 1);
 	if ((addr >= 0x80 && addr <= 0x83) && sio2)
 		return sio2_read(addr & 3);
@@ -1275,7 +1278,9 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	addr &= 0xFF;
-	if ((addr >= 0x80 && addr <= 0xBF) && acia)
+	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
+		acia_write(addr & 1, val);
+	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		acia_write(addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0x83) && sio2)
 		sio2_write(addr & 3, val);
@@ -1572,6 +1577,13 @@ int main(int argc, char *argv[])
 		switch (opt) {
 		case 'a':
 			acia = 1;
+			acia_input = 1;
+			acia_narrow = 0;
+			sio2 = 0;
+			break;
+		case 'A':
+			acia = 1;
+			acia_narrow = 1;
 			acia_input = 1;
 			sio2 = 0;
 			break;

@@ -10,7 +10,7 @@ The emulation includes
 - Easy-Z80 card with 512K banked RAM, 512K banked ROM and on board CTC and SIO
 - Z80BSC/Z80SBC64 with 128K banked battery backed RAM and simple CPLD UART
 - ROM and switchable ROM cards
-- 6850 ACIA
+- 6850 ACIA (narrow or wide decode)
 - Z80 SIO/2
 - 512K RAM/512K ROM card
 - CF adapter
@@ -47,7 +47,8 @@ https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/
 # Usage
 
 Options:
-- -a		enable 6850 ACIA
+- -a		enable 6850 ACIA with usual RC2014 wide decode (80-BF)
+- -A		enable 6850 ACIA with narrow decode (80-87)
 - -b		512K ROM/512K RAM board
 - -c		CTC card present (not yet tested)
 - -d n		Turn on debug flags
