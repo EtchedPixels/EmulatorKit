@@ -1113,7 +1113,7 @@ int main(int argc, char *argv[])
 	int fd;
 	int rom = 1;
 	int rombank = 0;
-	char *rompath = "rc2014.rom";
+	char *rompath = "rc2014-8085.rom";
 	char *idepath;
 
 	while ((opt = getopt(argc, argv, "abcd:e:fi:r:sRw")) != -1) {
