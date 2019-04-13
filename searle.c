@@ -11,6 +11,7 @@
  *	Optional
  *	1.	Support for the 'A16 via SIO' hack
  *	2.	Support for timer via SIO hack
+ *	3.	Support for A16 via ROM_PAGE15 on Tom's SBC
  *
  *	I/O is mapped as
  *	0 SIO A data
@@ -397,7 +398,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 			chan->wr[chan->wr[0] & 7] = val;
 			chan->wr[0] &= ~007;
 			/* A16 is wired to the RTS pin */
-			if (chan == sio && bankhack)
+			if (chan == sio && bankhack == 1)
 				banken = (chan->wr[5] & 2);
 			break;
 		}
@@ -479,7 +480,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		control_rom(val);
 	else if (addr == 0x3E && rombanken) {
 		rombank &= 1;
-		rombank |= (val & 1) ? 2 : 0;
+		if (bankhack == 2)
+			banken = val & 1;
+		else
+			rombank |= (val & 1) ? 2 : 0;
 	} else if (addr == 0x3F && rombanken) {
 		rombank &= 2;
 		rombank |= (val & 1);
@@ -516,7 +520,7 @@ int main(int argc, char *argv[])
 	char *rompath = "searle.rom";
 	char *idepath = "searle.cf";
 
-	while ((opt = getopt(argc, argv, "d:i:r:fbt")) != -1) {
+	while ((opt = getopt(argc, argv, "d:i:r:fbBt")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -536,6 +540,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'b':
 			bankhack = 1;
+			break;
+		case 'B':
+			bankhack = 2;
 			break;
 		default:
 			usage();
