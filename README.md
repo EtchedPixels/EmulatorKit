@@ -209,3 +209,32 @@ Options:
 - -f		fast (run flat out)
 - -x		emulate the 32K banking mod
 
+## RC2014 8085
+
+This is a model of the standard RC2014 system but fitted with Ben Chong
+(ancientcomputing)'s 8085 processor card and optionally the 16550A uart
+interface.
+
+# To build yourself an actual system see
+
+http://ancientcomputing.blogspot.com/
+
+# For ROM images
+
+The monitor ROM is available from Ben's github at
+https://github.com/ancientcomputing/rc2014
+
+# Usage
+- -1		enable 16550A UART
+- -a		enable 6850 ACIA with usual RC2014 wide decode (80-BF)
+- -A		enable 6850 ACIA with narrow decode (80-87)
+- -b		512K ROM/512K RAM board
+- -c		CTC card present (not yet tested)
+- -d n		Turn on debug flags
+- -e n		Execute ROM bank n (0-7) (not used with -b)
+- -f		Fast mode (run flat out)
+- -i path	Enable IDE and use this file
+- -r path	Load the ROM image from this path
+- -s		Enable the SIO/2
+- -R		Enable the DS1302 RTC (clashes with 16550A UART)
+- -w		WizNET 5100 at 0x28-0x2B (works but buggy)

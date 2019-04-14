@@ -1558,7 +1558,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-a] [-b] [-c] [-f] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014: [-a] [-A] [-b] [-c] [-f] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1573,7 +1573,7 @@ int main(int argc, char *argv[])
 	char *idepath;
 	int save = 0;
 
-	while ((opt = getopt(argc, argv, "abcd:e:fi:m:pr:sRw")) != -1) {
+	while ((opt = getopt(argc, argv, "Aabcd:e:fi:m:pr:sRw")) != -1) {
 		switch (opt) {
 		case 'a':
 			acia = 1;

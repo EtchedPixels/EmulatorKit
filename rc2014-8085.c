@@ -10,15 +10,10 @@
  *	Z80 CTC
  *	RTC at 0xC0
  *	8085 bitbang port also wired to the M1 line (to test an experimental idea)
- *
- *	Need to add 16550A
+ *	16550A at 0xC0 (can't be used with RTC present)
  *
  *	TODO:
- *	Sort out interrupt modelling for 8085 level triggered external
- *		interrupt line
- *	Clock speed
  *	Bitbang serial emulation
- *	16550A
  */
 
 #include <stdio.h>
@@ -48,7 +43,7 @@ static uint8_t wiznet = 0;
 
 static uint8_t fake_m1;
 
-static uint16_t tstate_steps = 369;	/* RC2014 speed */
+static uint16_t tstate_steps = 307;	/* RC2014 speed (6.144MHz)*/
 
 /* Who is pulling on the interrupt line */
 
@@ -1384,7 +1379,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-a] [-b] [-c] [-f] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-b] [-c] [-f] [-R] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1398,7 +1393,7 @@ int main(int argc, char *argv[])
 	char *rompath = "rc2014-8085.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "1abcd:e:fi:r:sRw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fi:r:sRw")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
