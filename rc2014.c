@@ -118,7 +118,7 @@ static void mem_write0(uint16_t addr, uint8_t val)
 	} else {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W: %04X = %02X\n", addr, val);
-		if (addr > 8192 && !bank512)
+		if (addr >= 8192 && !bank512)
 			ramrom[addr] = val;
 		else if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
