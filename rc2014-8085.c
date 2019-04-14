@@ -1489,7 +1489,7 @@ int main(int argc, char *argv[])
 			perror("lseek");
 			exit(1);
 		}
-		if (read(fd, ramrom, 65536) < 8192) {
+		if (read(fd, ramrom, 65536) < 2048) {
 			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
