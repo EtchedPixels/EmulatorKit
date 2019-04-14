@@ -1,7 +1,7 @@
 /*
  *	Platform features
  *
- *	6502 processor card for RC2014 set to invert bits 14/15 and an I/O window
+ *	6502 processor card for RC2014 set to invert A15 and an I/O window
  *	at $C000 (silly place for it but that is where the board put it)
  *	Zilog SIO/2 at 0x80-0x83
  *	Motorola 6850 repeats all over 0x40-0x7F (not recommended)
@@ -39,8 +39,8 @@ static uint8_t have_ctc = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
-static uint8_t iopage;
-static uint16_t addrinvert = 0xC000;
+static uint8_t iopage = 0xC0;
+static uint16_t addrinvert = 0x8000;
 
 static uint8_t fake_m1;
 
@@ -1311,8 +1311,8 @@ void write6502(uint16_t addr, uint8_t val)
 	} else {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W: %04X = %02X\n", addr, val);
-		if (xaddr >= 16384 && !bank512)
-			ramrom[addr] = val;
+		if (xaddr >= 32768 && !bank512)
+			ramrom[xaddr] = val;
 		else if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
 	}
@@ -1367,7 +1367,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-b] [-c] [-f] [-R] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-b] [-c] [-f] [-R] [-r rompath] [-s] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1377,11 +1377,10 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	int rom = 1;
-	int rombank = 0;
 	char *rompath = "rc2014-6502.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fi:r:sRw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:fi:r:sRw")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -1410,9 +1409,6 @@ int main(int argc, char *argv[])
 			sio2_input = 1;
 			acia = 0;
 			uart_16550a = 0;
-			break;
-		case 'e':
-			rombank = atoi(optarg);
 			break;
 		case 'b':
 			bank512 = 1;
@@ -1445,9 +1441,8 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (acia == 0 && sio2 == 0 && uart_16550a == 0) {
-		fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
-		acia = 1;
-		acia_input = 1;
+		fprintf(stderr, "rc2014: no UART selected, defaulting to 16550A\n");
+		uart_16550a = 1;
 	}
 	if (rtc && uart_16550a) {
 		fprintf(stderr, "rc2014: RTC and 16550A clash at 0xC0.\n");
@@ -1459,6 +1454,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (rom) {
+		int size;
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
@@ -1468,14 +1464,15 @@ int main(int argc, char *argv[])
 		bankreg[1] = 1;
 		bankreg[2] = 32;
 		bankreg[3] = 33;
-		if (lseek(fd, 8192 * rombank, SEEK_SET) < 0) {
-			perror("lseek");
-			exit(1);
-		}
-		if (read(fd, ramrom, 65536) < 2048) {
+		if ((size = read(fd, ramrom, 65536)) < 16384) {
 			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
+		/* Set the jumpers for the user... */
+		if (size <= 16384)
+			addrinvert = 0xC000;
+		else
+			addrinvert = 0x8000;
 		close(fd);
 	}
 
