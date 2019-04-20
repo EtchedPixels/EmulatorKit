@@ -525,6 +525,9 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		case 5:
 		case 6:
 		case 7:
+			if (trace & TRACE_SIO)
+				fprintf(stderr, "sio%c: wrote r%d to %02X\n",
+					(addr & 2) ? 'b' : 'a', chan->wr[0] & 7, val);
 			chan->wr[chan->wr[0] & 7] = val;
 			chan->wr[0] &= ~007;
 			break;
@@ -1158,7 +1161,7 @@ static void ctc_write(uint8_t channel, uint8_t val)
 			fprintf(stderr, "CTC %d constant loaded with %02X\n", channel, val);
 		c->reload = val;
 		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET)) {
-			c->count = c->reload << 8;
+			c->count = (c->reload - 1) << 8;
 			if (trace & TRACE_CTC)
 				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
@@ -1170,7 +1173,7 @@ static void ctc_write(uint8_t channel, uint8_t val)
 			fprintf(stderr, "CTC %d control loaded with %02X\n", channel, val);
 		c->ctrl = val;
 		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == CTC_RESET) {
-			c->count = c->reload << 8;
+			c->count = (c->reload - 1) << 8;
 			if (trace & TRACE_CTC)
 				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
