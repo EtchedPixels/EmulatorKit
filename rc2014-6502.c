@@ -13,6 +13,7 @@
  *	8085 bitbang port also wired to the M1 line (to test an experimental idea)
  *	16550A at 0xC0 (can't be used with RTC present)
  *
+ *	FIXME: Need to emulate 6522 VIA card ? or TMS9918A for IRQ at least
  */
 
 #include <stdio.h>
@@ -34,7 +35,6 @@ static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 static unsigned int bankreg[4];
 static uint8_t bankenable;
 
-static uint8_t bank512 = 0;
 static uint8_t have_ctc = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
@@ -1236,11 +1236,11 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
-	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
+	else if (addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
 		if (trace & TRACE_512)
 			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
-	} else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
+	} else if (addr >= 0x7C && addr <= 0x7F) {
 		if (trace & TRACE_512)
 			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
 		bankenable = val & 1;
@@ -1269,9 +1269,10 @@ uint8_t do_6502_read(uint16_t addr)
 		xaddr &= 0x3FFF;
 		return ramrom[(bankreg[bank] << 14) + xaddr];
 	}
+	/* When banking is off the entire 64K is occupied by repeats of ROM 0 */
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[xaddr]);
-	return ramrom[xaddr];
+	return ramrom[xaddr & 0x3FFF];
 }
 
 uint8_t read6502(uint16_t addr)
@@ -1289,6 +1290,18 @@ uint8_t read6502(uint16_t addr)
 	if (r == 0xED && fake_m1)
 		rstate = 1;
 	return r;
+}
+
+uint8_t read6502_debug(uint16_t addr)
+{
+	static uint8_t rstate = 0;
+	uint8_t r;
+
+	/* Avoid side effects for debug */
+	if (addr >> 8 == iopage)
+		return 0xFF;
+
+	return do_6502_read(addr);
 }
 
 
@@ -1314,8 +1327,6 @@ void write6502(uint16_t addr, uint8_t val)
 	} else {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W: %04X = %02X\n", addr, val);
-		if (xaddr >= 32768 && !bank512)
-			ramrom[xaddr] = val;
 		else if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
 	}
@@ -1370,7 +1381,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-b] [-c] [-f] [-R] [-r rompath] [-s] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-c] [-f] [-R] [-r rompath] [-s] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1379,11 +1390,10 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	int fd;
-	int rom = 1;
 	char *rompath = "rc2014-6502.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "1Aabcd:fi:r:sRw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aacd:fi:r:sRw")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -1412,10 +1422,6 @@ int main(int argc, char *argv[])
 			sio2_input = 1;
 			acia = 0;
 			uart_16550a = 0;
-			break;
-		case 'b':
-			bank512 = 1;
-			rom = 0;
 			break;
 		case 'i':
 			ide = 1;
@@ -1451,47 +1457,17 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "rc2014: RTC and 16550A clash at 0xC0.\n");
 		exit(1);
 	}
-	if (rom == 0 && bank512 == 0) {
-		fprintf(stderr, "rc2014: no ROM\n");
+
+	fd = open(rompath, O_RDONLY);
+	if (fd == -1) {
+		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-
-	if (rom) {
-		int size;
-		fd = open(rompath, O_RDONLY);
-		if (fd == -1) {
-			perror(rompath);
-			exit(EXIT_FAILURE);
-		}
-		bankreg[0] = 0;
-		bankreg[1] = 1;
-		bankreg[2] = 32;
-		bankreg[3] = 33;
-		if ((size = read(fd, ramrom, 65536)) < 16384) {
-			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
-			exit(EXIT_FAILURE);
-		}
-		/* Set the jumpers for the user... */
-		if (size <= 16384)
-			addrinvert = 0xC000;
-		else
-			addrinvert = 0x8000;
-		close(fd);
+	if (read(fd, ramrom, 524288) != 524288) {
+		fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
+		exit(EXIT_FAILURE);
 	}
-
-	if (bank512) {
-		fd = open(rompath, O_RDONLY);
-		if (fd == -1) {
-			perror(rompath);
-			exit(EXIT_FAILURE);
-		}
-		if (read(fd, ramrom, 524288) != 524288) {
-			fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
-			exit(EXIT_FAILURE);
-		}
-		bankenable = 1;
-		close(fd);
-	}
+	close(fd);
 
 	if (ide) {
 		ide0 = ide_allocate("cf");
@@ -1540,6 +1516,9 @@ int main(int argc, char *argv[])
 		term.c_cc[VSTOP] = 0;
 		tcsetattr(0, TCSADRAIN, &term);
 	}
+
+	if (trace & TRACE_CPU)
+		log_6502 = 1;
 
 	reset6502();
 	hookexternal(irqnotify);

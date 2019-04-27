@@ -926,7 +926,7 @@ void irq6502(void)
 
 static void (*loopexternal) (void);
 
-static int log = 0;
+int log_6502 = 0;
 
 uint64_t exec6502(uint64_t tickcount)
 {
@@ -937,12 +937,16 @@ uint64_t exec6502(uint64_t tickcount)
 	while (clockticks6502 < clockgoal6502) {
 		opcode = read6502(pc++);
 		status |= FLAG_CONSTANT;
-//		if (pc-1 == 0x2000)
-			//log = 1;
-		if (log)
-			printf("%04x: %02x\n",
-			(unsigned int)pc-1, (unsigned int)opcode);
-
+		if (log_6502) {
+			uint8_t c[3];
+			char *dis;
+			c[0] = opcode;
+			c[1] = read6502_debug(pc);
+			c[2] = read6502_debug(pc + 1);
+			dis = dis6502(pc - 1, c);
+			fprintf(stderr, "%02X %02X %02X %02X %02X | %04X %s\n",
+				a, x, y, sp, status, pc - 1, dis);
+		}
 		penaltyop = 0;
 		penaltyaddr = 0;
 
