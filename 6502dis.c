@@ -37,6 +37,67 @@
 #define VERSION_INFO "v2.1"
 #define NUMBER_OPCODES 151
 
+struct symbol {
+    struct symbol *next;
+    uint16_t addr;
+    char type[4];
+    char name[];
+};
+
+struct symbol *symhash[256];
+
+void insert_symbol(const char *name, uint16_t addr, const char *type)
+{
+    struct symbol *s = malloc(sizeof(struct symbol) + strlen(name) + 1);
+    if (s == NULL) {
+        fprintf(stderr, "Out of memory.\n");
+        exit(1);
+    }
+    s->addr = addr;
+    memcpy(s->type, type, 3);
+    s->type[3] = 0;
+    strcpy(s->name, name);
+    s->next = symhash[addr & 255];
+    symhash[addr & 255] = s;
+}
+
+struct symbol *find_symbol(uint16_t addr)
+{
+    struct symbol *s = symhash[addr & 255];
+    while(s) {
+        if (s->addr == addr)
+            return s;
+        s = s->next;
+    }
+    return NULL;
+}
+
+void load_symbols(void)
+{
+    FILE *fp = fopen("6502.sym", "r");
+    char buf[128];
+    char *n, *ap, *t;
+    int line = 0;
+
+    if (fp == NULL)
+        return;
+    fprintf(stderr, "[Loading symbols]\n");
+    while(fgets(buf, 127, fp)) {
+        line++;
+        n = strtok(buf, " ");
+        ap = strtok(NULL, " ");
+        t = strtok(NULL, " \n");
+        if (n == NULL || ap == NULL || t == NULL) {
+            fprintf(stderr, "line %d: malformed symbol entry.\n", line);
+        } else {
+            uint16_t addr;
+            addr = strtoul(ap, NULL, 16);
+            insert_symbol(n, addr, t);
+        }
+    }
+    fclose(fp);
+}
+
 /* Exceptions for cycle counting */
 #define CYCLES_CROSS_PAGE_ADDS_ONE      (1 << 0)
 #define CYCLES_BRANCH_TAKEN_ADDS_ONE    (1 << 1)
@@ -281,10 +342,14 @@ static opcode_t opcodes[NUMBER_OPCODES] = {
     {0x98, "TYA", IMPLI, 2, 0} /* TYA */
 };
 
-static void append_rc2014(char *input, uint16_t arg) {
-    switch(arg) {
-        /* TODO */
-    }
+static void append_rc2014(char *input, char *lead, uint16_t arg, char *tail) {
+    struct symbol *s = find_symbol(arg);
+    if (s == NULL)
+        return;
+    strcat(input, "; ");
+    strcat(input, lead);
+    strcat(input, s->name);
+    strcat(input, tail);
 }
 
 /* Helper macros for disassemble() function */
@@ -301,6 +366,7 @@ static void disassemble(char *output, uint16_t current_addr, uint8_t *buffer) {
     uint16_t word_operand = LOAD_WORD(buffer);
     uint8_t opcode = *buffer;
     const char *mnemonic;
+    struct symbol *cs = find_symbol(current_addr);
 
 
     // Linear search for opcode
@@ -384,12 +450,30 @@ static void disassemble(char *output, uint16_t current_addr, uint8_t *buffer) {
             break;
     }
 
-    /* Add NES port info if necessary */
+    if (cs)
+        sprintf(output + strlen(output), ";[%s] ", cs->name);
+
     switch (opcodes[entry].addressing) {
+        case RELAT:
         case ABSOL:
         case ABSIX:
         case ABSIY:
-            append_rc2014(output, word_operand);
+            append_rc2014(output, "", word_operand, "");
+            break;
+       case ZEROP:
+            append_rc2014(output, "", byte_operand, "");
+            break;
+       case ZEPIX:
+            append_rc2014(output, "", byte_operand, ",X");
+            break;
+       case ZEPIY:
+            append_rc2014(output, "", byte_operand, ",Y");
+            break;
+        case INDIN:
+            append_rc2014(output, "(", byte_operand, ",X)");
+            break;
+        case ININD:
+            append_rc2014(output, "(", byte_operand, "),Y");
             break;
         default:
             break;
@@ -401,4 +485,9 @@ char *dis6502(uint16_t current_addr, uint8_t *istream)
     static char buf[128];
     disassemble(buf, current_addr, istream);
     return buf;
+}
+
+void disassembler_init(void)
+{
+    load_symbols();
 }

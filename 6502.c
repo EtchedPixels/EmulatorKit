@@ -1004,3 +1004,8 @@ void waitstates(uint32_t n)
 {
 	clockticks6502 += n;
 }
+
+void init6502(void)
+{
+	disassembler_init();
+}

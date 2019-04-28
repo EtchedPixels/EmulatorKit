@@ -8,7 +8,7 @@
  *	IDE at 0x10-0x17 no high or control access
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
- *	Z80 CTC
+ *	Z80 CTC (6502 can never clear an IRQ caused by this so be careful!)
  *	RTC at 0xC0
  *	8085 bitbang port also wired to the M1 line (to test an experimental idea)
  *	16550A at 0xC0 (can't be used with RTC present)
@@ -1192,6 +1192,185 @@ static uint8_t ctc_read(uint8_t channel)
 	return val;
 }
 
+/*
+ *	Minimal beginnings of 6522 VIA emulation
+ */
+
+struct via6522 {
+	uint8_t irq;
+	uint8_t acr;
+	uint8_t ifr;
+	uint8_t ier;
+	uint8_t pcr;
+	uint8_t sr;
+	uint8_t ora;
+	uint8_t orb;
+	uint8_t ira;
+	uint8_t irb;
+	uint8_t ddra;
+	uint8_t ddrb;
+	uint16_t t1;
+	uint16_t t1l;
+	uint16_t t2;
+	uint8_t t2l;
+	/* Pin states rather than registers */
+	uint8_t ca;
+	uint8_t cb;
+};
+
+struct via6522 via;
+
+static void via_recalc_irq(void)
+{
+	if (via.ifr & 0x7F)
+		via.ifr |= 0x80;
+	else
+		via.ifr = 0;
+	/* We interrupt if ier and ifr are set */
+	/* Note: the pin is inverted but we model irq state not the pin! */
+	via.irq = via.ier & via.ifr;
+}
+
+static void via_handshake_a(void)
+{
+}
+
+static void via_handshake_b(void)
+{
+}
+
+static void via_recalc_outputs(void)
+{
+}
+
+static void via_recalc_inputs(void)
+{
+}
+
+static void via_recalc_all(void)
+{
+	via_recalc_outputs();
+	via_recalc_inputs();
+	via_recalc_irq();
+}
+
+uint8_t via_read(uint8_t addr)
+{
+	uint8_t r;
+	switch(addr) {
+		case 0:
+			r = via.irb & ~via.ddrb;
+			r |= via.orb & via.ddrb;
+			via_handshake_b();
+			return r;
+		case 1:
+			r = via.ira & ~via.ddra;
+			r |= via.ora & via.ddra;
+			via_handshake_a();
+			return via.ira;
+		case 2:
+			return via.ddrb;
+		case 3:
+			return via.ddra;
+		case 4:
+			via.ifr &= ~0x40;	/* T1 timeout */
+			via_recalc_irq();
+			return via.t1;
+		case 5:
+			return via.t1 >> 8;
+		case 6:
+			return via.t1l;
+		case 7:
+			return via.t1l >> 8;
+		case 8:
+			via.ifr &= ~0x20;	/* T2 timeout */
+			via_recalc_irq();
+			return via.t2;
+		case 9:
+			return via.t2 >> 8;
+		case 10:
+			return via.sr;
+		case 11:
+			return via.acr;
+		case 12:
+			return via.pcr;
+		case 13:
+			return via.ifr;
+		case 14:
+			return via.ier;
+		default:
+		case 15:
+			return via.ira;
+	}
+}
+
+void via_write(uint8_t addr, uint8_t val)
+{
+	switch(addr) {
+		case 0:
+			via.orb = val;
+			via_recalc_outputs();
+			via_handshake_b();
+			break;
+		case 1:
+			via.ora = val;
+			via_recalc_outputs();
+			break;
+		case 2:
+			via.ddrb = val;
+			via_recalc_all();
+			break;
+		case 3:
+			via.ddra = val;
+			via_recalc_all();
+			break;
+		case 4:
+		case 6:
+			via.t1l &= 0xFF00;
+			via.t1l |= val;
+			break;
+		case 5:
+			via.t1l &= 0xFF;
+			via.t1l |= val << 8;
+			via.t1 = via.t1l;
+			via.ifr &= ~0x40;	/* T1 timeout */
+			via_recalc_irq();
+			break;
+		case 7:
+			via.t1l &= 0xFF;
+			via.t1l |= val << 8;
+			break;
+		case 8:
+			via.t2l = val;
+			break;
+		case 9:
+			via.t2 = val << 8;
+			via.t2 |= via.t2l;
+			via.ifr &= ~0x20;	/* T2 timeout */
+			via_recalc_irq();
+			break;
+		case 10:
+			via.sr = val;
+			break;
+		case 11:
+			via.acr = val;
+			break;
+		case 12:
+			via.pcr = val;
+			break;
+		case 13:
+			via.ifr = val;
+			break;
+		case 14:
+			via.ier = val;
+			break;
+		case 15:
+			via.ora = val;
+			break;
+	}
+}
+
+
 
 uint8_t mmio_read_6502(uint8_t addr)
 {
@@ -1294,9 +1473,6 @@ uint8_t read6502(uint16_t addr)
 
 uint8_t read6502_debug(uint16_t addr)
 {
-	static uint8_t rstate = 0;
-	uint8_t r;
-
 	/* Avoid side effects for debug */
 	if (addr >> 8 == iopage)
 		return 0xFF;
@@ -1520,6 +1696,7 @@ int main(int argc, char *argv[])
 	if (trace & TRACE_CPU)
 		log_6502 = 1;
 
+	init6502();
 	reset6502();
 	hookexternal(irqnotify);
 

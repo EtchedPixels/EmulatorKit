@@ -1,6 +1,7 @@
 #ifndef __6502_H__
 #define __6502_H__
 
+extern void init6502(void);
 extern void reset6502(void);
 extern void nmi6502(void);
 extern void irq6502(void);
@@ -11,8 +12,6 @@ extern uint16_t getPC(void);
 extern uint64_t getclockticks(void);
 extern void waitstates(uint32_t n);
 
-extern char *dis6502(uint16_t addr, uint8_t *p);
-
 //externally supplied functions
 extern uint8_t read6502(uint16_t address);
 extern uint8_t read6502_debug(uint16_t address);
@@ -21,6 +20,10 @@ extern void write6502(uint16_t address, uint8_t value);
 extern int log_6502;
 
 #ifdef _6502_PRIVATE
+
+extern void disassembler_init(void);
+extern char *dis6502(uint16_t addr, uint8_t *p);
+
 
 extern uint8_t sp, a, x, y, status;
 extern uint16_t pc;
