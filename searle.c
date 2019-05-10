@@ -507,7 +507,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-f] [-b] [-t] [-i path] [-r path] [-d debug]\n");
+	fprintf(stderr, "searle: [-f] [-b] [-t] [-i path] [-r path] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
