@@ -587,10 +587,10 @@ int main(int argc, char *argv[])
 
 	sio_reset();
 
-	/* 50ms - it's a balance between nice behaviour and simulation
+	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 50000000L;
+	tc.tv_nsec = 5000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
