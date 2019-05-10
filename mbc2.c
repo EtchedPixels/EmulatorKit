@@ -139,6 +139,27 @@ static uint8_t ios_rx_char(void)
 	return 0xFF;
 }
 
+static void ios_rtc_load(void)
+{
+	struct tm *tm;
+	time_t t;
+
+	time(&t);
+	tm = gmtime(&t);
+
+	if (tm == NULL) {
+		fprintf(stderr, "mbc2: unable to get time.\n");
+		exit(1);
+	}
+	ios_buf[0] = tm->tm_sec;
+	ios_buf[1] = tm->tm_min;
+	ios_buf[2] = tm->tm_hour;
+	ios_buf[3] = tm->tm_mday;
+	ios_buf[4] = tm->tm_mon;
+	ios_buf[5] = tm->tm_year - 100;	/* 2000 based */
+	ios_buf[6] = (uint8_t)-40;	/* Silly value for temperature */
+}
+
 static void ios_open(void)
 {
 	char buf[32];
@@ -230,7 +251,7 @@ static void ios_op(uint8_t val)
 			break;
 		case 0x84:
 			ios_data = 7;
-			/* FIXME: set up time buffer */
+			ios_rtc_load();
 			break;
 		case 0x85:
 			ios_buf[0] = ios_error;
@@ -424,10 +445,10 @@ int main(int argc, char *argv[])
 	}
 	printf("Loaded %d bytes at %04X.\n", l, addr);
 
-	/* 50ms - it's a balance between nice behaviour and simulation
+	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 50000000L;
+	tc.tv_nsec = 5000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -459,11 +480,11 @@ int main(int argc, char *argv[])
 		int l;
 		for (l = 0; l < 10; l++) {
 			int i;
-			/* 36400 T states */
+			/* 40000 T states */
 			for (i = 0; i < 100; i++) {
-				Z80ExecuteTStates(&cpu_z80, 364);
+				Z80ExecuteTStates(&cpu_z80, 400);
 			}
-			if (int_on && check_chario() & 1)
+			if (int_on && (check_chario() & 1))
 				Z80INT(&cpu_z80, 0xFF);
 			/* Do 5ms of I/O and delays */
 			if (!fast)
