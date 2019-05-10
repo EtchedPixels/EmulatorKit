@@ -19,6 +19,10 @@ linc80:	linc80.o ide.o
 	(cd libz80; make)
 	cc -g3 linc80.o ide.o libz80/libz80.o -o linc80
 
+mbc2:	mbc2.o ide.o
+	(cd libz80; make)
+	cc -g3 mbc2.o libz80/libz80.o -o mbc2
+
 rc2014-6502: rc2014-6502.o 6502.o 6502dis.o
 	cc -g3 rc2014-6502.o ide.o w5100.o 6502.o 6502dis.o -o rc2014-6502
 
