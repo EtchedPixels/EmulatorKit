@@ -4,8 +4,9 @@
 #define ACME_COYOTE		2	/* 20MB early IDE drive */
 #define ACME_NEMESIS		3	/* 20MB LBA capable drive */
 #define ACME_ULTRASONICUS	4	/* 40MB LBA capable drive */
+#define ACME_ACCELLERATTI	5	/* 128MB LBA capable drive */
 
-#define MAX_DRIVE_TYPE		4
+#define MAX_DRIVE_TYPE		5
 
 #define		ide_data	0
 #define		ide_error_r	1

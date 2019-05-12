@@ -108,6 +108,7 @@ static void hexdump(uint8_t *bp)
   }
 }
 
+/* FIXME: use proper endian convertors! */
 static uint16_t le16(uint16_t v)
 {
   uint8_t *p = (uint8_t *)&v;
@@ -143,7 +144,8 @@ static off_t xlate_block(struct ide_taskfile *t)
       return 2 + (((t->lba4 & DEVH_HEAD) << 24) | (t->lba3 << 16) | (t->lba2 << 8) | t->lba1);
     ide_fault(d, "LBA on non LBA drive");
   }
-  return 2 + (((t->lba4 & DEVH_HEAD) * d->cylinders + ((t->lba3 << 8) + t->lba2)) * d->sectors + t->lba1);
+  /* Sector 1 is first */
+  return 1 + (((t->lba4 & DEVH_HEAD) * d->cylinders + ((t->lba3 << 8) + t->lba2)) * d->sectors + t->lba1);
 }
 
 /* Indicate the drive is ready */
@@ -268,10 +270,12 @@ static void cmd_initparam_complete(struct ide_taskfile *tf)
 {
   struct ide_drive *d = tf->drive;
   /* We only support the current mapping */
-  if (tf->count != d->sectors || (tf->lba4 & DEVH_HEAD) != d->heads) {
+  if (tf->count != d->sectors || (tf->lba4 & DEVH_HEAD) + 1 != d->heads) {
     tf->status |= ST_ERR;
     tf->error |= ERR_ABRT;
     tf->drive->failed = 1;		/* Report ID NF until fixed */
+    fprintf(stderr, "geo is %d %d, asked for %d %d\n",
+      d->sectors, d->heads, tf->count, (tf->lba4 & DEVH_HEAD) + 1);
     ide_fault(d, "invalid geometry");
   } else if (tf->drive->failed == 1)
     tf->drive->failed = 0;		/* Valid translation */
@@ -732,6 +736,8 @@ int ide_attach(struct ide_controller *c, int drive, int fd)
   }
   d->fd = fd;
   d->present = 1;
+  d->heads = d->identify[3];
+  d->sectors = d->identify[6];
   if (d->identify[49] & le16(1 << 9))
     d->lba = 1;
   else
@@ -872,6 +878,14 @@ int ide_make_drive(uint8_t type, int fd)
       make_ascii(ident + 23, "A001.001", 8);
       make_ascii(ident + 27, "ACME COYOTE v0.1", 40);
       break;  
+    case ACME_ACCELLERATTI:
+      c = 1024;
+      h = 16;
+      s = 16;
+      ident[49] = le16(1 << 9); /* LBA */
+      make_ascii(ident + 23, "A001.001", 8);
+      make_ascii(ident + 27, "ACME ACCELLERATTI INCREDIBILUS v0.1", 40);
+      break;
   }
   ident[1] = le16(c);
   ident[3] = le16(h);
