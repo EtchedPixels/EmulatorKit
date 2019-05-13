@@ -4,17 +4,15 @@
  *	544K RAM
  *	32K EEPROM
  *	4 x 16550A UART @14.7456MHz (actually 2 x 16C2550A)
- *	72421B RTC
  *	GIDE
  *	Memory banking (32K)
+ *	72421B RTC
+ *
+ *	Unimplemented at this point
  *	82077A/PC8477B FDC including 1.44MB
+ *	RTC setting
  *
- *	Only IRQ is from the RTC
- *
- *	Weirdly banked memory is in the middle of the address space
- *
- *	TODO
- *	All of it 8)
+ *	The only IRQ on this system is from the RTC.
  */
 
 #include <stdio.h>
@@ -51,6 +49,7 @@ static volatile int done;
 #define TRACE_BANK	16
 #define TRACE_UART	32
 #define TRACE_IDE	64
+#define TRACE_LED	128
 
 static int trace = 0;
 
@@ -58,19 +57,27 @@ static uint8_t mem_read(int unused, uint16_t addr)
 {
     uint8_t r;
     if (trace & TRACE_MEM)
-        fprintf(stderr, "R %04X: ", addr);
-    if (addr < 0x4000)
-        r = fixedram[addr];
-    else if (addr > 0xC000)
-        r = fixedram[addr - 0x8000];
-    else
-        r = bankedram[gpreg&0x0F][addr - 0x4000];
+        fprintf(stderr, "R %04X: [", addr);
 
-    if ((gpreg & 0x80) == 0 && addr < 0x8000)
+    if ((gpreg & 0x80) == 0 && addr < 0x8000) {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "EE");
         r = eeprom[addr];
-
+    } else if (addr < 0x4000) {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "LF");
+        r = fixedram[addr];
+    } else if (addr >= 0xC000) {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "HF");
+        r = fixedram[addr - 0x8000];
+    } else {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "%2d\n", gpreg & 0x0F);
+        r = bankedram[gpreg&0x0F][addr - 0x4000];
+    }
     if (trace & TRACE_MEM)
-        fprintf(stderr, "-> %02X\n", r);
+        fprintf(stderr, "] -> %02X\n", r);
     return r;
 }
 
@@ -78,20 +85,29 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
     uint8_t *m;
 
-    if (trace & TRACE_MEM)
-        fprintf(stderr, "W %04X <- %02X\n", addr, val);
-    if (addr < 0x4000)
-        m = fixedram + addr;
-    else if (addr > 0xC000)
-        m = fixedram + addr - 0x8000;
-    else
-        m = &bankedram[gpreg&0x0F][addr - 0x4000];
-
     if ((gpreg & 0x80) == 0 && addr < 0x8000) {
         fprintf(stderr, "EEPROM write not yet emulated.\n");
         return;
     }
+
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "W %04X: [", addr);
+    if (addr < 0x4000) {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "LF");
+        m = fixedram + addr;
+    } else if (addr >= 0xC000) {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "HF");
+        m = fixedram + addr - 0x8000;
+    } else {
+        if (trace & TRACE_MEM)
+            fprintf(stderr, "%2d", gpreg&0x0F);
+        m = &bankedram[gpreg&0x0F][addr - 0x4000];
+    }
     *m = val;
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "] <- %02X\n", val);
 }
 
 static int check_chario(void)
@@ -377,13 +393,95 @@ void fdc_write(uint8_t addr, uint8_t val)
 {
 }
 
+static struct tm *tmhold;
+uint8_t rtc_status = 2;
+uint8_t rtc_ce = 0;
+uint8_t rtc_cf = 0;
+
+uint8_t do_rtc_read(uint8_t addr)
+{
+    uint8_t r;
+    if (tmhold == NULL && addr < 13)
+        return 0xFF;
+
+    switch(addr) {
+    case 0:
+        return tmhold->tm_sec % 10;
+    case 1:
+        return tmhold->tm_sec / 10;
+    case 2:
+        return tmhold->tm_min % 10;
+    case 3:
+        return tmhold->tm_min / 10;
+    case 4:
+        return tmhold->tm_hour % 10;
+    case 5:
+        /* Check AM/PM behaviour */
+        r = tmhold->tm_hour;
+        if (rtc_cf & 4)		/* 24hr */
+            r /= 10;
+        else if (r >= 12) {	/* 12hr PM */
+            r -= 12;
+            r /= 10;
+            r |= 4;
+        } else			/* 12hr AM */
+            r /= 10;
+        return r;
+    case 6:
+        return tmhold->tm_mday % 10;
+    case 7:
+        return tmhold->tm_mday / 10;
+    case 8:
+        return tmhold->tm_mon % 10;
+    case 9:
+        return tmhold->tm_mon / 10;
+    case 10:
+        return tmhold->tm_year % 10;
+    case 11:
+        return (tmhold->tm_year %100) / 10;
+    case 12:
+        return tmhold->tm_wday;
+    case 13:
+        return rtc_status;
+    case 14:
+        return rtc_ce;
+    case 15:
+        return 4;
+    }
+}
+
 uint8_t rtc_read(uint8_t addr)
 {
-    return 0x00;
+    uint8_t v = do_rtc_read(addr);
+    if (trace & TRACE_RTC)
+        fprintf(stderr, "[RTC read %x of %X[\n", addr, v);
+    return v;
 }
 
 void rtc_write(uint8_t addr, uint8_t val)
 {
+    if (trace & TRACE_RTC)
+        fprintf(stderr, "[RTC write %X to %X]\n", addr, val);
+    switch(addr) {
+        case 13:
+            if ((val & 0x04) == 0)
+                rtc_status &= ~4;
+            if (val & 0x01) {
+                time_t t;
+                rtc_status &= ~2;
+                time(&t);
+                tmhold = gmtime(&t);
+            } else
+                rtc_status |= 2;
+            /* FIXME: sort out hold behaviour */
+            break;
+        case 14:
+            rtc_ce = val & 0x0F;
+            break;
+        case 15:
+            rtc_cf = val & 0x0F;
+            break;
+    }
 }
 
 /* +6 is the IDE altstatus/devctrl and the drive address register */
@@ -448,15 +546,18 @@ void gp_write(uint8_t val)
 {
     uint8_t delta = val ^ gpreg;
 
-    if (delta & 0x0F)
-        fprintf(stderr, "[Bank set to %d].\n", val & 0x0F);
-    if (delta & 0x10)
-        ledmod("Red", val & 0x10);
-    if (delta & 0x20)
-        ledmod("Yellow", val & 0x20);
-    if (delta & 0x40)
-        ledmod("Green", val & 0x40);
-    
+    if (trace & TRACE_BANK) {
+        if (delta & 0x0F)
+            fprintf(stderr, "[Bank set to %d].\n", val & 0x0F);
+    }
+    if (trace & TRACE_LED) {
+        if (delta & 0x10)
+            ledmod("Red", val & 0x10);
+        if (delta & 0x20)
+            ledmod("Yellow", val & 0x20);
+        if (delta & 0x40)
+            ledmod("Green", val & 0x40);
+    }
     gpreg = val;
 }
 
@@ -491,13 +592,13 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     if (trace & TRACE_IO)
         fprintf(stderr, "write %02x <- %02x\n", addr & 0xFF, val);
     addr &= 0xFF;
-    if (addr >= 0x10 && addr < 0x17)
+    if (addr >= 0x10 && addr <= 0x17)
         uart_write(&uart[0], addr & 7, val);
-    else if (addr >= 0x18 && addr < 0x1F)
+    else if (addr >= 0x18 && addr <= 0x1F)
         uart_write(&uart[1], addr & 7, val);
-    else if (addr >= 0x48 && addr < 0x4F)
+    else if (addr >= 0x48 && addr <= 0x4F)
         uart_write(&uart[2], addr & 7, val);
-    else if (addr >= 0x50 && addr < 0x57)
+    else if (addr >= 0x50 && addr <= 0x57)
         uart_write(&uart[3], addr & 7, val);
     else if (addr >= 0x20 && addr <= 0x2F)
         rtc_write(addr & 0x0F, val);
@@ -604,10 +705,9 @@ int main(int argc, char *argv[])
     uart_init(&uart[2]);
     uart_init(&uart[3]);
 
-    /* No real need for interrupt accuracy so just go with the timer. If we
-       ever do the UART as timer hack it'll need addressing! */
+    /* 1/64th of a second */
     tc.tv_sec = 0;
-    tc.tv_nsec = 100000000L;
+    tc.tv_nsec = 15625000L;
 
     if (tcgetattr(0, &term) == 0) {
 	saved_term = term;
@@ -635,14 +735,21 @@ int main(int argc, char *argv[])
        matched with that. The scheme here works fine except when the host
        is loaded though */
 
-       /* FIXME - 20Mhz and shorter event times */
-    /* 4MHz Z80 - 4,000,000 tstates / second */
+    /* 20MHz Z80 - 20,000,000 tstates / second */
+    /* 312500 tstates per RTC interrupt */
     while (!done) {
-        Z80ExecuteTStates(&cpu_z80, 400000);
-	/* Do 100ms of I/O and delays */
+	int i;
+	/* Run the CPU and uart until the next tick */
+	for (i = 0; i < 10; i++) {
+	    if (!(rtc_ce & 1) && (rtc_status & 4))
+                Z80INT(&cpu_z80, 0xFF);
+	    Z80ExecuteTStates(&cpu_z80, 31250);
+	    uart_event(&uart[0]);
+	}
+        rtc_status |= 4;
+        /* Do 1/64th of a second of I/O and delays */
 	if (!fast)
-	    nanosleep(&tc, NULL);
-	uart_event(uart);
+		nanosleep(&tc, NULL);
     }
     exit(0);
 }
