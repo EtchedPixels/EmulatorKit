@@ -225,9 +225,9 @@ The monitor ROM is available from Ben's github at
 https://github.com/ancientcomputing/rc2014
 
 # Usage
-- -1		enable 16550A UART
-- -a		enable 6850 ACIA with usual RC2014 wide decode (80-BF)
-- -A		enable 6850 ACIA with narrow decode (80-87)
+- -1		Enable 16550A UART
+- -a		Enable 6850 ACIA with usual RC2014 wide decode (80-BF)
+- -A		Enable 6850 ACIA with narrow decode (80-87)
 - -b		512K ROM/512K RAM board
 - -c		CTC card present (not yet tested)
 - -d n		Turn on debug flags
@@ -238,3 +238,30 @@ https://github.com/ancientcomputing/rc2014
 - -s		Enable the SIO/2
 - -R		Enable the DS1302 RTC (clashes with 16550A UART)
 - -w		WizNET 5100 at 0x28-0x2B (works but buggy)
+
+## SmallZ80
+
+An emulation for Terry Gulczynski's SmallZ80 system. This emulates the full
+machine except for the optional floppy controller. Some details are not
+emulated including EEPROM writeback and RTC clock setting.
+
+The emulator is however good enough to boot the SmallZ80 system firmware,
+run the supplied Z System and software off the supplied disk image and of
+course to boot Fuzix.
+
+# To build yourself an actual system
+
+http://stack180.com/SmallZ80%20Services.htm
+
+# For ROM and filesystem images
+
+http://stack180.com/SmallZ80%20Downloads.htm
+
+# Usage
+
+Options:
+- -r path	Path to ROM (default smallz80.rom)
+- -i path	Path to IDE image (up to two)
+- -d n		Enable debug tracing
+- -f		Run flat out rather than at about native speed
+
