@@ -266,6 +266,9 @@ static void ios_op(uint8_t val)
 		case 0x87:
 			/* FIXME?? */
 			break;
+		case 0x88:
+			ios_buf[0] = check_chario() & 2 ? 1 : 0;
+			break;
 		}
 	} else {
 		if (val == 2 || val > 0x0D) {
