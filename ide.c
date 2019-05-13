@@ -1,7 +1,7 @@
 /*
  *	IDE Emulation Layer for retro-style PIO interfaces
  *
- *	(c) Copyright Alan Cox, 2015
+ *	(c) Copyright Alan Cox, 2015-2019
  *
  *	IDE-emu is free software: you can redistribute it and/or modify
  *	it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
  *	GNU General Public License for more details.
  *
  *	You should have received a copy of the GNU General Public License
- *	along with IDE-emu.  If not, see <http://www.gnu.org/licenses/>.
+ *	along with IDE-emu.  If not, see <http://;www.gnu.org/licenses/>.
  */
 
 #include <stdio.h>
@@ -137,6 +137,8 @@ static void ide_fault(struct ide_drive *d, const char *p)
 static off_t xlate_block(struct ide_taskfile *t)
 {
   struct ide_drive *d = t->drive;
+  uint16_t cyl;
+
   if (t->lba4 & DEVH_LBA) {
 /*    fprintf(stderr, "XLATE LBA %02X:%02X:%02X:%02X\n", 
       t->lba4, t->lba3, t->lba2, t->lba1);*/
@@ -144,8 +146,22 @@ static off_t xlate_block(struct ide_taskfile *t)
       return 2 + (((t->lba4 & DEVH_HEAD) << 24) | (t->lba3 << 16) | (t->lba2 << 8) | t->lba1);
     ide_fault(d, "LBA on non LBA drive");
   }
+
+  /* Some well known software asks for 0/0/0 when it means 0/0/1. Drives appear
+     to interpret sector 0 as sector 1 */
+  if (t->lba1 == 0) {
+    fprintf(stderr, "[Bug: request for sector offset 0].\n");
+    t->lba1 = 1;
+  }
+  cyl = (t->lba3 << 8) | t->lba2;
+  fprintf(stderr, "(H %d C %d S %d)\n", t->lba4 & DEVH_HEAD, cyl, t->lba1);
+  if (t->lba1 == 0 || t->lba1 > d->sectors || t->lba4 >= d->heads || cyl >= d->cylinders) {
+    return -1;
+  }
   /* Sector 1 is first */
-  return 1 + (((t->lba4 & DEVH_HEAD) * d->cylinders + ((t->lba3 << 8) + t->lba2)) * d->sectors + t->lba1);
+  /* Images generally go cylinder/head/sector. This also matters if we ever
+     implement more advanced geometry setting */
+  return 1 + ((cyl * d->heads) + (t->lba4 & DEVH_HEAD)) * d->sectors + t->lba1;
 }
 
 /* Indicate the drive is ready */
@@ -321,7 +337,7 @@ static void cmd_verifysectors_complete(struct ide_taskfile *tf)
   d->offset = xlate_block(tf);
   /* 0 = 256 sectors */
   d->length = tf->count ? tf->count : 256;
-  if (lseek(d->fd, 512 * (d->offset + d->length - 1), SEEK_SET) == -1) {
+  if (d->offset == -1 || lseek(d->fd, 512 * (d->offset + d->length - 1), SEEK_SET) == -1) {
     tf->status &= ~ST_DSC;
     tf->status |= ST_ERR;
     tf->error |= ERR_IDNF;
@@ -335,7 +351,7 @@ static void cmd_recalibrate_complete(struct ide_taskfile *tf)
   struct ide_drive *d = tf->drive;
   if (d->failed)
     drive_failed(tf);
-  if (xlate_block(tf) != 0L) {
+  if (d->offset == -1 || xlate_block(tf) != 0L) {
     tf->status &= ~ST_DSC;
     tf->status |= ST_ERR;
     tf->error |= ERR_ABRT;
@@ -738,6 +754,7 @@ int ide_attach(struct ide_controller *c, int drive, int fd)
   d->present = 1;
   d->heads = d->identify[3];
   d->sectors = d->identify[6];
+  d->cylinders = le16(d->identify[1]);
   if (d->identify[49] & le16(1 << 9))
     d->lba = 1;
   else
