@@ -154,7 +154,7 @@ static off_t xlate_block(struct ide_taskfile *t)
     t->lba1 = 1;
   }
   cyl = (t->lba3 << 8) | t->lba2;
-  fprintf(stderr, "(H %d C %d S %d)\n", t->lba4 & DEVH_HEAD, cyl, t->lba1);
+  /* fprintf(stderr, "(H %d C %d S %d)\n", t->lba4 & DEVH_HEAD, cyl, t->lba1); */
   if (t->lba1 == 0 || t->lba1 > d->sectors || t->lba4 >= d->heads || cyl >= d->cylinders) {
     return -1;
   }
