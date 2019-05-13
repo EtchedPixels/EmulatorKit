@@ -73,7 +73,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
         r = fixedram[addr - 0x8000];
     } else {
         if (trace & TRACE_MEM)
-            fprintf(stderr, "%2d\n", gpreg & 0x0F);
+            fprintf(stderr, "%2d", gpreg & 0x0F);
         r = bankedram[gpreg&0x0F][addr - 0x4000];
     }
     if (trace & TRACE_MEM)
@@ -242,8 +242,8 @@ static void show_settings(struct uart16x50 *uptr)
 
     baud = uptr->ls + (uptr->ms << 8);
     if (baud == 0)
-        baud = 1843200;
-    baud = 1843200 / baud;
+        baud = 14745600;
+    baud = 14745600 / baud;
     baud /= 16;
     fprintf(stderr, "[%d:%d",
             baud, (uptr->lcr &3) + 5);
