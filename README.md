@@ -265,3 +265,33 @@ Options:
 - -d n		Enable debug tracing
 - -f		Run flat out rather than at about native speed
 
+## SBC-2G-512K
+
+Closely related to the Grant Searle design but with banked memory. The
+system has 512K of RAM, 16K of boot ROM, dual serial and a simple 8bit IDE
+CF interface
+
+# To build yourself an actual system see
+
+https://retrobrewcomputers.org/doku.php?id=builderpages:rhkoolstar:sbc-2g-512
+
+# For ROM images and file system images see
+
+Get the ZIP file from the web page
+
+makebin 10-HEXFILES/SMON35.HEX > sbc2g.rom
+
+You can build an emulated drive from the image with
+
+./makedisk 6 sbc2g.ide
+dd if=System18.img of=sbc2g.ide bs=512 seek=2 conv=notrunc
+
+
+# Usage
+
+Options:
+- -r path	path to ROM image (default searle.rom)
+- -i path	path to IDE image (default searle.cf)
+- -d n		set debug trace bits
+- -f		fast (run flat out)
+- -t		external 10Hz timer on DCD (not yet accurate to 10Hz)
