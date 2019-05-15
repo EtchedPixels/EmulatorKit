@@ -903,6 +903,14 @@ int ide_make_drive(uint8_t type, int fd)
       make_ascii(ident + 23, "A001.001", 8);
       make_ascii(ident + 27, "ACME ACCELLERATTI INCREDIBILUS v0.1", 40);
       break;
+    case ACME_ZIPPIBUS:
+      c = 1024;
+      h = 16;
+      s = 32;
+      ident[49] = le16(1 << 9); /* LBA */
+      make_ascii(ident + 23, "A001.001", 8);
+      make_ascii(ident + 27, "ACME ZIPPIBUS v0.1", 40);
+      break;
   }
   ident[1] = le16(c);
   ident[3] = le16(h);
