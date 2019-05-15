@@ -251,7 +251,10 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 	if (chan->irq) {
 		/* FIXME: quick fix for now but the vector calculation should all be
 		   done here it seems */
-		chan->vector += (sio[1].wr[2] & 0xF1);
+		if (sio[1].wr[1] & 0x04)
+			chan->vector += (sio[1].wr[2] & 0xF1);
+		else
+			chan->vector += sio[1].wr[2];
 		if (trace & (TRACE_IRQ|TRACE_SIO))
 			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
 				(int)(chan - sio), chan->vector);
