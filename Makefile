@@ -38,6 +38,10 @@ sbc2g:	sbc2g.o ide.o
 	(cd libz80; make)
 	cc -g3 sbc2g.o ide.o libz80/libz80.o -o sbc2g
 
+z80mc:	z80mc.o
+	(cd libz80; make)
+	cc -g3 z80mc.o libz80/libz80.o -o z80mc
+
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
 
