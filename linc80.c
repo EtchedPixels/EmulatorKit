@@ -1254,7 +1254,7 @@ int main(int argc, char *argv[])
 
 	if (sdpath) {
 		sd_fd = open(sdpath, O_RDWR);
-		if (fd == -1) {
+		if (sd_fd == -1) {
 			perror(sdpath);
 			exit(1);
 		}
