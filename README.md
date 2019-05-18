@@ -290,8 +290,65 @@ dd if=System18.img of=sbc2g.ide bs=512 seek=2 conv=notrunc
 # Usage
 
 Options:
-- -r path	path to ROM image (default searle.rom)
-- -i path	path to IDE image (default searle.cf)
+- -r path	path to ROM image (default sbc2g.rom)
+- -i path	path to IDE image (default sbc2g.cf)
 - -d n		set debug trace bits
 - -f		fast (run flat out)
 - -t		external 10Hz timer on DCD (not yet accurate to 10Hz)
+
+## Z80 Membership Card
+
+This is an emulation of the Z80 Membership Card full stack with 512K
+of RAM. It emulates the full stack including the bitbang SPI/SD card
+interface and is sufficient to run CP/M or Fuzix on the card.
+
+The keypad and bitbang serial port are emulated as not being used. The LED
+display is also not decoded and displayed.
+
+# To build yourself an actual system see
+
+http://www.sunrise-ev.com/z80.htm
+
+# For ROM images and file system images see
+
+http://www.sunrise-ev.com/z80.htm
+
+Building an emulated drive image is a little complicated. You need to
+partition the image to include a FAT16 MSDOS partition with the files on as
+described. If you want to run Fuzix you also need to place the Fuzix loader
+hex file on that partition and have another partition with Fuzix on it, as
+Fuzix avoids the emulated floppy disk layer and drives the SD card directly.
+
+# Usage
+
+Options:
+- -r path	path to ROM image (default z80mc.rom)
+- -s path	path to SD image (default none)
+- -d n		set debug trace bits
+- -f		fast (run flat out)
+
+## Z80 MBC2
+
+This is a Z80 level emulation of the Z80-MBC2. The I/O processor interface
+is emulated rather than actually emulating the I/O processor itself.
+Firmware including timer and transmit queue size is emulated.
+
+# To build yourself an actual sysem see
+
+https://hackaday.io/project/159973-z80-mbc2-4ics-homemade-z80-computer
+
+# For ROM images and file system images see
+
+https://hackaday.io/project/159973-z80-mbc2-4ics-homemade-z80-computer
+
+and hit "Files".
+
+# Usage
+
+Options:
+- -s diskset	Disk set number 0-9
+- -d n		Set debug trace bits
+- -b path	Image for the IOS to load into Z80 RAM
+- -i		Turn on interrupt emulation
+- -f		Fast (run flat out)
+- -a		Set load address of image (default 0)
