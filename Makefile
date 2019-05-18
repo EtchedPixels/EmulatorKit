@@ -2,7 +2,7 @@
 CFLAGS = -Wall -pedantic
 
 all:	rc2014 rc2014-6502 rc2014-8085 rbcv2 searle linc80 makedisk \
-	mbc2 smallz80 sbc2g
+	mbc2 smallz80 sbc2g z80mc
 
 rc2014:	rc2014.o ide.o w5100.o
 	(cd libz80; make)
