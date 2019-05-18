@@ -39,6 +39,7 @@ static uint8_t ios_cmd;
 static int ios_dptr;
 static int ios_data;
 static uint8_t ios_buf[512];
+static uint8_t ios_timer_expired;
 
 static Z80Context cpu_z80;
 
@@ -269,6 +270,11 @@ static void ios_op(uint8_t val)
 		case 0x88:
 			ios_buf[0] = check_chario() & 2 ? 1 : 0;
 			break;
+		case 0x89:
+			ios_buf[0] = check_chario() & 1;
+			ios_buf[0] |= ios_timer_expired ? 2 : 0;
+			ios_timer_expired = 0;
+			break;
 		}
 	} else {
 		if (val == 2 || val > 0x0D) {
@@ -493,7 +499,9 @@ int main(int argc, char *argv[])
 			if (!fast)
 				nanosleep(&tc, NULL);
 		}
-//		timer_pulse();
+		ios_timer_expired = 1;
+		if (int_on)
+			Z80INT(&cpu_z80, 0xFF);
 	}
 	exit(0);
 }
