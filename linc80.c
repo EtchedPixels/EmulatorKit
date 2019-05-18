@@ -740,9 +740,10 @@ static uint8_t sd_process_command(void)
 		return 0x01;	/* Just respond 0x01 */
 	case 0x40+1:		/* CMD 1 - leave idle */
 		return 0x00;	/* Immediately indicate we did */
-	case 0x40+9:		/* CMD 9 - read thye CSD */
+	case 0x40+9:		/* CMD 9 - read the CSD */
 		memcpy(sd_out,sd_csd, 17);
 		sd_outlen = 17;
+		sd_outp = 0;
 		sd_mode = 2;
 		return 0x00;
 	case 0x40+16:		/* CMD 16 - set block size */
