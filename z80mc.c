@@ -79,6 +79,17 @@ static uint8_t mem_read(int unused, uint16_t addr)
     return r;
 }
 
+static void mem_write(int unused, uint16_t addr, uint8_t val)
+{
+    if (trace & TRACE_MEM)
+        fprintf(stderr, "W %04X: -> %02X\n", addr, val);
+    if (addr >= 0x8000)
+        ram[addr & 0x7FFF] = val;
+    else /* Writes through under the EPROM even if EPROM mapped */
+        bankram[bankreg][addr] = val;
+}
+
+
 static int sd_mode = 0;
 static uint8_t sd_bits;
 static uint8_t sd_bitct;
@@ -120,10 +131,11 @@ static uint8_t sd_process_command(void)
 		return 0x01;	/* Just respond 0x01 */
 	case 0x40+1:		/* CMD 1 - leave idle */
 		return 0x00;	/* Immediately indicate we did */
-	case 0x40+9:		/* CMD 9 - read thye CSD */
+	case 0x40+9:		/* CMD 9 - read the CSD */
 		memcpy(sd_out,sd_csd, 17);
 		sd_outlen = 17;
 		sd_mode = 2;
+                sd_outp = 0;
 		return 0x00;
 	case 0x40+16:		/* CMD 16 - set block size */
 		/* Should check data is 512 !! FIXME */
@@ -286,16 +298,6 @@ static void spi_clock(void)
 	rxbits |= 0x01;
 	if (trace & TRACE_SPI)
 	    fprintf(stderr, "rxbit = %d]\n", sd_miso);
-}
-
-static void mem_write(int unused, uint16_t addr, uint8_t val)
-{
-    if (trace & TRACE_MEM)
-        fprintf(stderr, "W %04X: -> %02X\n", addr, val);
-    if (addr >= 0x8000)
-        ram[addr & 0x7FFF] = val;
-    else /* Writes through under the EPROM even if EPROM mapped */
-        bankram[bankreg][addr] = val;
 }
 
 static int check_chario(void)
@@ -760,6 +762,8 @@ int main(int argc, char *argv[])
 	if (!fast)
 	    nanosleep(&tc, NULL);
 	uart_event(uart);
+	fpreg |= 0x40;
+        Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
     }
     exit(0);
 }
