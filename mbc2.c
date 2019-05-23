@@ -231,7 +231,7 @@ static void ios_op(uint8_t val)
 	if (trace & TRACE_IOS)
 		fprintf(stderr, "IOS_cmd %02X\n", ios_cmd);
 	if (val & 0x80) {
-		if (val > 0x87) {
+		if (val > 0x89) {
 			ios_cmd = 0xFF;
 			return;
 		}
