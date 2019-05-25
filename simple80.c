@@ -14,12 +14,11 @@
  *	3 SIO B ctrl
  *
  *	The SIO controls the RAM and ROM mappings. The ROM maps the entire
- *	space when mapped but writes affect the underlying RAM
+ *	space when mapped but writes affect the underlying RAM. Only a write
+ *	to the underlying RAM of the value in ROM is permitted when ROM is
+ *	paged in.
  *
- *	Need to emulate the WREADY bits before this can be used
- *
- *	TODO:
- *	Add support for RC2014 plugin CTC and RTC
+ *	Also emulated: RTC card at 0xC0, CTC at 0xD0
  */
 
 #include <stdio.h>
@@ -49,16 +48,18 @@ static uint8_t live_irq;
 
 #define IRQ_SIOA	1
 #define IRQ_SIOB	2
+#define IRQ_CTC		3	/* 3,4,5,6 */
 
 static volatile int done;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
-#define TRACE_ROM	4
+#define TRACE_RTC	4
 #define TRACE_UNK	8
 #define TRACE_SIO	16
 #define TRACE_BANK	32
 #define TRACE_IRQ	64
+#define TRACE_CTC	128
 
 static int trace = 0;
 
@@ -94,6 +95,10 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X -> %02X\n", addr, val);
+	if (romen && val != rom[addr]) {
+		fprintf(stderr, "[PC = %04X: HAZARD %04X %02x %02X]\n",
+			cpu_z80.PC, addr, rom[addr], val);
+	}
 	ram[addr + 65536 * banknum] = val;
 }
 
@@ -490,6 +495,399 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 		ide_write8(ide0, addr, val);
 }
 
+/* Real time clock state machine and related state.
+
+   Give the host time and don't emulate time setting except for
+   the 24/12 hour setting.
+
+ */
+static uint8_t rtcw;
+static uint8_t rtcst;
+static uint16_t rtcr;
+static uint8_t rtccnt;
+static uint8_t rtcstate;
+static uint8_t rtcreg;
+static uint8_t rtcram[32];
+static uint8_t rtcwp = 0x80;
+static uint8_t rtc24 = 1;
+static uint8_t rtcbp = 0;
+static uint8_t rtcbc = 0;
+static struct tm *rtc_tm;
+
+static uint8_t rtc_read(void)
+{
+	if (rtcst & 0x30)
+		return (rtcr & 0x01) ? 1 : 0;
+	return 0xFF;
+}
+
+static uint16_t rtcregread(uint8_t reg)
+{
+	uint8_t val, v;
+
+	switch (reg) {
+	case 0:
+		val = (rtc_tm->tm_sec % 10) + ((rtc_tm->tm_sec / 10) << 4);
+		break;
+	case 1:
+		val = (rtc_tm->tm_min % 10) + ((rtc_tm->tm_min / 10) << 4);
+		break;
+	case 2:
+		v = rtc_tm->tm_hour;
+		if (!rtc24) {
+			v %= 12;
+			v++;
+		}
+		val = (v % 10) + ((v / 10) << 4);
+		if (!rtc24) {
+			if (rtc_tm->tm_hour > 11)
+				val |= 0x20;
+			val |= 0x80;
+		}
+		break;
+	case 3:
+		val = (rtc_tm->tm_mday % 10) + ((rtc_tm->tm_mday / 10) << 4);
+		break;
+	case 4:
+		val = ((rtc_tm->tm_mon + 1) % 10) + (((rtc_tm->tm_mon + 1) / 10) << 4);
+		break;
+	case 5:
+		val = rtc_tm->tm_wday + 1;
+		break;
+	case 6:
+		v = rtc_tm->tm_year % 100;
+		val = (v % 10) + ((v / 10) << 4);
+		break;
+	case 7:
+		val = rtcwp ? 0x80 : 0x00;
+		break;
+	case 8:
+		val = 0;
+		break;
+	default:
+		val = 0xFF;
+		/* Check */
+		break;
+	}
+	if (trace & TRACE_RTC)
+		fprintf(stderr, "RTCreg %d = %02X\n", reg, val);
+	return val;
+}
+
+static void rtcop(void)
+{
+	if (trace & TRACE_RTC)
+		fprintf(stderr, "rtcbyte %02X\n", rtcw);
+	/* The emulated task asked us to write a byte, and has now provided
+	   the data byte to go with it */
+	if (rtcstate == 2) {
+		if (!rtcwp) {
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "RTC write %d as %d\n", rtcreg, rtcw);
+			/* We did a real write! */
+			/* Not yet tackled burst mode */
+			if (rtcreg != 0x3F && (rtcreg & 0x20))	/* NVRAM */
+				rtcram[rtcreg & 0x1F] = rtcw;
+			else if (rtcreg == 2)
+				rtc24 = rtcw & 0x80;
+			else if (rtcreg == 7)
+				rtcwp = rtcw & 0x80;
+		}
+		/* For now don't emulate writes to the time */
+		rtcstate = 0;
+	}
+	/* Check for broken requests */
+	if (!(rtcw & 0x80)) {
+		if (trace & TRACE_RTC)
+			fprintf(stderr, "rtcw makes no sense %d\n", rtcw);
+		rtcstate = 0;
+		rtcr = 0x1FF;
+		return;
+	}
+	/* Clock burst ? : for now we only emulate time burst */
+	if (rtcw == 0xBF) {
+		rtcstate = 3;
+		rtcbp = 0;
+		rtcbc = 0;
+		rtcr = rtcregread(rtcbp++) << 1;
+		if (trace & TRACE_RTC)
+			fprintf(stderr, "rtc command BF: burst clock read.\n");
+		return;
+	}
+	/* A write request */
+	if (!(rtcw & 0x01)) {
+		if (trace & TRACE_RTC)
+			fprintf(stderr, "rtc write request, waiting byte 2.\n");
+		rtcstate = 2;
+		rtcreg = (rtcw >> 1) & 0x3F;
+		rtcr = 0x1FF;
+		return;
+	}
+	/* A read request */
+	rtcstate = 1;
+	if (rtcw & 0x40) {
+		/* RAM */
+		if (rtcw != 0xFE)
+			rtcr = rtcram[(rtcw >> 1) & 0x1F] << 1;
+		if (trace & TRACE_RTC)
+			fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n", (rtcw >> 1) & 0xFF, rtcr);
+		return;
+	}
+	/* Register read */
+	rtcr = rtcregread((rtcw >> 1) & 0x1F) << 1;
+	if (trace & TRACE_RTC)
+		fprintf(stderr, "RTC read of time register %d is %d\n", (rtcw >> 1) & 0x1F, rtcr);
+}
+
+static void rtc_write(uint8_t val)
+{
+	uint8_t changed = val ^ rtcst;
+	uint8_t is_read;
+	/* Direction */
+	if ((trace & TRACE_RTC) && (changed & 0x20))
+		fprintf(stderr, "RTC direction now %s.\n", (val & 0x20) ? "read" : "write");
+	is_read = val & 0x20;
+	/* Clock */
+	if (changed & 0x40) {
+		/* The rising edge samples, the falling edge clocks receive */
+		if (trace & TRACE_RTC)
+			fprintf(stderr, "RTC clock low.\n");
+		if (!(val & 0x40)) {
+			rtcr >>= 1;
+			/* Burst read of time */
+			rtcbc++;
+			if (rtcbc == 8 && rtcbp) {
+				rtcr = rtcregread(rtcbp++) << 1;
+				rtcbc = 0;
+			}
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "rtcr now %02X\n", rtcr);
+		} else {
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "RTC clock high.\n");
+			rtcw >>= 1;
+			if ((val & 0x30) == 0x10)
+				rtcw |= val & 0x80;
+			else
+				rtcw |= 0xFF;
+			rtccnt++;
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "rtcw now %02x (%d)\n", rtcw, rtccnt);
+			if (rtccnt == 8 && !is_read)
+				rtcop();
+		}
+	}
+	/* CE */
+	if (changed & 0x10) {
+		if (rtcst & 0x10) {
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "RTC CE dropped.\n");
+			rtccnt = 0;
+			rtcr = 0;
+			rtcw = 0;
+			rtcstate = 0;
+		} else {
+			/* Latch imaginary registers on rising edge */
+			time_t t = time(NULL);
+			rtc_tm = localtime(&t);
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "RTC CE raised and latched time.\n");
+		}
+	}
+	rtcst = val;
+}
+
+
+/*
+ *	Z80 CTC
+ */
+
+struct z80_ctc {
+	uint16_t count;
+	uint16_t reload;
+	uint8_t vector;
+	uint8_t ctrl;
+#define CTC_IRQ		0x80
+#define CTC_COUNTER	0x40
+#define CTC_PRESCALER	0x20
+#define CTC_RISING	0x10
+#define CTC_PULSE	0x08
+#define CTC_TCONST	0x04
+#define CTC_RESET	0x02
+#define CTC_CONTROL	0x01
+	uint8_t irq;		/* Only valid for channel 0, so we know
+				   if we must wait for a RETI before doing
+				   a further interrupt */
+};
+
+#define CTC_STOPPED(c)	(((c)->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET))
+
+struct z80_ctc ctc[4];
+uint8_t ctc_irqmask;
+
+static void ctc_reset(struct z80_ctc *c)
+{
+	c->vector = 0;
+	c->ctrl = CTC_RESET;
+}
+
+static void ctc_init(void)
+{
+	ctc_reset(ctc);
+	ctc_reset(ctc + 1);
+	ctc_reset(ctc + 2);
+	ctc_reset(ctc + 3);
+}
+
+static void ctc_interrupt(struct z80_ctc *c)
+{
+	int i = c - ctc;
+	if (c->ctrl & CTC_IRQ) {
+		if (!(ctc_irqmask & (1 << i))) {
+			ctc_irqmask |= 1 << i;
+			recalc_interrupts();
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d wants to interrupt.\n", i);
+		}
+	}
+}
+
+static void ctc_reti(int ctcnum)
+{
+	if (ctc_irqmask & (1 << ctcnum)) {
+		ctc_irqmask &= ~(1 << ctcnum);
+		if (trace & TRACE_IRQ)
+			fprintf(stderr, "Acked interrupt from CTC %d.\n", ctcnum);
+	}
+}
+
+/* After a RETI or when idle compute the status of the interrupt line and
+   if we are head of the chain this time then raise our interrupt */
+
+static int ctc_check_im2(void)
+{
+	if (ctc_irqmask) {
+		int i;
+		for (i = 0; i < 4; i++) {	/* FIXME: correct order ? */
+			if (ctc_irqmask & (1 << i)) {
+				uint8_t vector = ctc[0].vector & 0xF8;
+				vector += 2 * i;
+				if (trace & TRACE_IRQ)
+					fprintf(stderr, "New live interrupt is from CTC %d vector %x.\n", i, vector);
+				live_irq = IRQ_CTC + i;
+				Z80INT(&cpu_z80, vector);
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+/* Model the chains between the CTC devices */
+static void ctc_receive_pulse(int i);
+
+static void ctc_pulse(int i)
+{
+	/* Model CTC 2 chained into CTC 3 */
+	if (i == 2)
+		ctc_receive_pulse(3);
+}
+
+/* We don't worry about edge directions just a logical pulse model */
+static void ctc_receive_pulse(int i)
+{
+	struct z80_ctc *c = ctc + i;
+	if (c->ctrl & CTC_COUNTER) {
+		if (CTC_STOPPED(c))
+			return;
+		if (c->count >= 0x0100)
+			c->count -= 0x100;	/* No scaling on pulses */
+		if ((c->count & 0xFF00) == 0) {
+			ctc_interrupt(c);
+			ctc_pulse(i);
+			c->count = c->reload << 8;
+		}
+	} else {
+		if (c->ctrl & CTC_PULSE)
+			c->ctrl &= ~CTC_PULSE;
+	}
+}
+
+/* Model counters */
+static void ctc_tick(unsigned int clocks)
+{
+	struct z80_ctc *c = ctc;
+	int i;
+	int n;
+	int decby;
+
+	for (i = 0; i < 4; i++, c++) {
+		/* Waiting a value */
+		if (CTC_STOPPED(c))
+			continue;
+		/* Pulse trigger mode */
+		if (c->ctrl & CTC_COUNTER)
+			continue;
+		/* 256x downscaled */
+		decby = clocks;
+		/* 16x not 256x downscale - so increase by 16x */
+		if (!(c->ctrl & CTC_PRESCALER))
+			decby <<= 4;
+		/* Now iterate over the events. We need to deal with wraps
+		   because we might have something counters chained */
+		n = c->count - decby;
+		while (n < 0) {
+			ctc_interrupt(c);
+			ctc_pulse(i);
+			if (c->reload == 0)
+				n += 256 << 8;
+			else
+				n += c->reload << 8;
+		}
+		c->count = n;
+	}
+}
+
+static void ctc_write(uint8_t channel, uint8_t val)
+{
+	struct z80_ctc *c = ctc + channel;
+	if (c->ctrl & CTC_TCONST) {
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d constant loaded with %02X\n", channel, val);
+		c->reload = val;
+		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET)) {
+			c->count = (c->reload - 1) << 8;
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
+		}
+		c->ctrl &= ~CTC_TCONST|CTC_RESET;
+	} else if (val & CTC_CONTROL) {
+		/* We don't yet model the weirdness around edge wanted
+		   toggling and clock starts */
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d control loaded with %02X\n", channel, val);
+		c->ctrl = val;
+		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == CTC_RESET) {
+			c->count = (c->reload - 1) << 8;
+			if (trace & TRACE_CTC)
+				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
+		}
+	} else {
+		if (trace & TRACE_CTC)
+			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
+		c->vector = val;
+	}
+}
+
+static uint8_t ctc_read(uint8_t channel)
+{
+	uint8_t val = ctc[channel].count >> 8;
+	if (trace & TRACE_CTC)
+		fprintf(stderr, "CTC %d reads %02x\n", channel, val);
+	return val;
+}
+
+
 static uint8_t io_read(int unused, uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -499,6 +897,10 @@ static uint8_t io_read(int unused, uint16_t addr)
 		return sio2_read(addr & 3);
 	if (ide && !(addr & 0x40))
 		return my_ide_read(addr & 7);
+	if ((addr & 0xF0) == 0xC0)
+		return rtc_read();
+	if ((addr & 0xF0) == 0xD0)
+		return ctc_read(addr & 3);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -513,6 +915,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		sio2_write(addr & 3, val);
 	else if (ide && !(addr & 0x40))
 		my_ide_write(addr & 7, val);
+	else if ((addr & 0xF0) == 0xC0)
+		rtc_write(val);
+	else if ((addr & 0xF0) == 0xD0)
+		ctc_write(addr & 3, val);
 	else if (addr == 0xFD)
 		trace = val;
 	else if (trace & TRACE_UNK)
@@ -522,12 +928,19 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 
 static void poll_irq_event(void)
 {
-	sio2_check_im2(sio);
+	if (!sio2_check_im2(sio))
+		sio2_check_im2(sio + 1);
+	ctc_check_im2();
 }
 
 static void reti_event(void)
 {
 	sio2_reti(sio);
+	sio2_reti(sio + 1);
+	ctc_reti(0);
+	ctc_reti(1);
+	ctc_reti(2);
+	ctc_reti(3);
 	live_irq = 0;
 	poll_irq_event();
 }
@@ -608,6 +1021,7 @@ int main(int argc, char *argv[])
 	}
 
 	sio_reset();
+	ctc_init();
 
 	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
@@ -648,6 +1062,7 @@ int main(int argc, char *argv[])
 			for (i = 0; i < 100; i++) {
 				Z80ExecuteTStates(&cpu_z80, 364);
 				sio2_timer();
+				ctc_tick(364);
 			}
 			/* Do 5ms of I/O and delays */
 			if (!fast)
