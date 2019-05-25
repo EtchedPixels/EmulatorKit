@@ -177,9 +177,9 @@ static unsigned int next_char(void)
 static void recalc_interrupts(void)
 {
 	if (live_irq)
-		i8085_set_int(INT_EXTERN);
+		i8085_set_int(INT_RST65);
 	else
-		i8085_clear_int(INT_EXTERN);
+		i8085_clear_int(INT_RST65);
 }
 
 static void int_set(int src)
