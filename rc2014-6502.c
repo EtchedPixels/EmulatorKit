@@ -55,6 +55,7 @@ static uint8_t live_irq;
 #define IRQ_CTC		3
 #define IRQ_ACIA	4
 #define IRQ_16550A	5
+#define IRQ_VIA		6
 
 static nic_w5100_t *wiz;
 
@@ -72,6 +73,7 @@ static volatile int done;
 #define TRACE_CPU	512
 #define TRACE_IRQ	1024
 #define TRACE_UART	2048
+#define TRACE_VIA	4096
 
 static int trace = 0;
 
@@ -1225,13 +1227,21 @@ struct via6522 via;
 
 static void via_recalc_irq(void)
 {
-	if (via.ifr & 0x7F)
+	int irq = (via.ier & via.ifr) & 0x7F;
+	if (irq)
 		via.ifr |= 0x80;
 	else
-		via.ifr = 0;
+		via.ifr &= 0x7F;
 	/* We interrupt if ier and ifr are set */
 	/* Note: the pin is inverted but we model irq state not the pin! */
-	via.irq = via.ier & via.ifr;
+	if ((trace & TRACE_VIA) && irq != via.irq)
+		fprintf(stderr, "[VIA IRQ now %02X.]\n", irq);
+	via.irq = irq;
+
+	if (via.irq)
+		int_set(IRQ_VIA);
+	else
+		int_clear(IRQ_VIA);
 }
 
 static void via_handshake_a(void)
@@ -1257,58 +1267,111 @@ static void via_recalc_all(void)
 	via_recalc_irq();
 }
 
+/* Perform time related processing for the VIA */
+void via_tick(int clocks)
+{
+	/* This isn't quite right but it's near enough for the moment */
+	if (via.t1) {
+		if (clocks >= via.t1) {
+			if (trace & TRACE_VIA)
+				fprintf(stderr,"[VIA T1 expire.].\n");
+			via.ifr |= 0x40;
+			via_recalc_irq();
+			/* +1 or + 2 ?? */
+			if (via.acr & 0x40)
+				via.t1 = via.t1l + 1;
+			else
+				via.t1 = 0;
+		}
+		else
+			via.t1 -= clocks;
+	}
+
+	if (via.t2 && !(via.acr & 0x20)) {
+		if (clocks >= via.t2) {
+			via.ifr |= 0x20;
+			via_recalc_irq();
+			via.t2 = 0;
+			if (trace & TRACE_VIA)
+				fprintf(stderr,"[VIA T2 expire.].\n");
+		}
+		via.t2 -= clocks;
+	}
+}
+
 uint8_t via_read(uint8_t addr)
 {
 	uint8_t r;
+	if (trace & TRACE_VIA)
+		fprintf(stderr, "[VIA read %d: ", addr);
 	switch(addr) {
 		case 0:
 			r = via.irb & ~via.ddrb;
 			r |= via.orb & via.ddrb;
 			via_handshake_b();
-			return r;
+			break;
 		case 1:
 			r = via.ira & ~via.ddra;
 			r |= via.ora & via.ddra;
 			via_handshake_a();
-			return via.ira;
+			break;
 		case 2:
-			return via.ddrb;
+			r = via.ddrb;
+			break;
 		case 3:
-			return via.ddra;
+			r = via.ddra;
+			break;
 		case 4:
 			via.ifr &= ~0x40;	/* T1 timeout */
 			via_recalc_irq();
-			return via.t1;
+			r = via.t1;
+			break;
 		case 5:
-			return via.t1 >> 8;
+			r = via.t1 >> 8;
+			break;
 		case 6:
-			return via.t1l;
+			r = via.t1l;
+			break;
 		case 7:
-			return via.t1l >> 8;
+			r = via.t1l >> 8;
+			break;
 		case 8:
 			via.ifr &= ~0x20;	/* T2 timeout */
 			via_recalc_irq();
-			return via.t2;
+			r = via.t2;
+			break;
 		case 9:
-			return via.t2 >> 8;
+			r = via.t2 >> 8;
+			break;
 		case 10:
-			return via.sr;
+			r = via.sr;
+			break;
 		case 11:
-			return via.acr;
+			r = via.acr;
+			break;
 		case 12:
-			return via.pcr;
+			r = via.pcr;
+			break;
 		case 13:
-			return via.ifr;
+			r = via.ifr;
+			break;
 		case 14:
-			return via.ier;
+			r = via.ier;
+			break;
 		default:
 		case 15:
-			return via.ira;
+			r =  via.ira;
+			break;
 	}
+	if (trace & TRACE_VIA)
+		fprintf(stderr, "%02X.]\n", r);
+	return r;
 }
 
 void via_write(uint8_t addr, uint8_t val)
 {
+	if (trace & TRACE_VIA)
+		fprintf(stderr, "[VIA write %d: %02X.]\n ", addr, val);
 	switch(addr) {
 		case 0:
 			via.orb = val;
@@ -1338,6 +1401,8 @@ void via_write(uint8_t addr, uint8_t val)
 			via.t1 = via.t1l;
 			via.ifr &= ~0x40;	/* T1 timeout */
 			via_recalc_irq();
+			if (trace & TRACE_VIA)
+				fprintf(stderr, "[VIA T1 begin %04X.]\n", via.t1);
 			break;
 		case 7:
 			via.t1l &= 0xFF;
@@ -1362,10 +1427,18 @@ void via_write(uint8_t addr, uint8_t val)
 			via.pcr = val;
 			break;
 		case 13:
-			via.ifr = val;
+			via.ifr &= ~val;
+			if (via.ifr & 0x7F)
+				via.ifr |= 0x80;
+			via_recalc_irq();
 			break;
 		case 14:
-			via.ier = val;
+			if (val & 0x80)
+				via.ier |= val;
+			else
+				via.ier &= ~val;
+			via.ier &= 0x7F;
+			via_recalc_irq();
 			break;
 		case 15:
 			via.ora = val;
@@ -1391,13 +1464,16 @@ uint8_t mmio_read_6502(uint8_t addr)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0xC0 && rtc)
 		return rtc_read();
-	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
+	if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		return uart_read(&uart, addr & 0x0F);
+	if (addr >= 0xF0 && addr <= 0xFF)
+		return via_read(addr & 0x0F);
 	/* Scott Baker is 0x90-93, suggested defaults for the
 	   Stephen Cousins boards at 0x88-0x8B. No doubt we'll get
 	   an official CTC board at another address  */
 	if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		return ctc_read(addr & 3);
+
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -1432,7 +1508,9 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		ctc_write(addr & 3, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		uart_write(&uart, addr & 0x0F, val);
-	else if (addr == 0xFD) {
+	else if (addr >= 0xF0 && addr <= 0xFF)
+		via_write(addr & 0x0F, val);
+	else if (addr == 0x00) {
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
@@ -1447,7 +1525,7 @@ uint8_t do_6502_read(uint16_t addr)
 	if (bankenable) {
 		unsigned int bank = (xaddr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (xaddr & 0x3FFF)]);
+			fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (xaddr & 0x3FFF)]);
 		xaddr &= 0x3FFF;
 		return ramrom[(bankreg[bank] << 14) + xaddr];
 	}
@@ -1495,7 +1573,7 @@ void write6502(uint16_t addr, uint8_t val)
 	if (bankenable) {
 		unsigned int bank = (xaddr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "W %04x[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
+			fprintf(stderr, "W %04X[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
 		if (bankreg[bank] >= 32) {
 			xaddr &= 0x3FFF;
 			ramrom[(bankreg[bank] << 14) + xaddr] = val;
@@ -1708,8 +1786,8 @@ int main(int argc, char *argv[])
 	   matched with that. The scheme here works fine except when the host
 	   is loaded though */
 
-	/* We run 7372000 t-states per second */
-	/* We run 369 cycles per I/O check, do that 100 times then poll the
+	/* We run 4000000 t-states per second */
+	/* We run 200 cycles per I/O check, do that 100 times then poll the
 	   slow stuff and nap for 5ms. */
 	while (!done) {
 		int i;
@@ -1725,6 +1803,7 @@ int main(int argc, char *argv[])
 				ctc_tick(tstate_steps);
 			if (uart_16550a)
 				uart_event(&uart);
+			via_tick(tstate_steps);
 		}
 		if (wiznet)
 			w5100_process(wiz);
