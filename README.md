@@ -149,7 +149,7 @@ cat hexFiles/CPM22.HEX | makebin -s 65535 >1.rom
 cat hexFiles/CBIOS64.HEX | makebin -s 65535 >2.rom
 dd if=2.rom of=1.rom bs=58880 skip=1 seek=1 conv=notrunc
 dd if=1.rom of=3.rom bs=1 skip=53248
-dd if=/tmp/2.rom of=searle.cf bs=512 seek=2 conv=notrunc
+dd if=3.rom of=searle.cf bs=512 seek=2 conv=notrunc
 
 cpmtools can then be used to manipulate it further.
 
