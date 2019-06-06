@@ -1,4 +1,4 @@
-## RC2014 Emulator
+# RC2014 Emulator
 
 This is an emulator for the RC2014 Z80 system.
 
@@ -32,19 +32,19 @@ yet understood.
 
 To exit use ctrl-backslash
 
-# To get actual hardware see
+## To get actual hardware see
 
 https://rc2014.co.uk/
 https://smallcomputercentral.wordpress.com/
 https://www.retrobrewcomputers.org/forum/index.php?t=msg&th=368&start=0&
 
-# For ROM images see
+## For ROM images see
 
 https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
 https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start
 https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/
 
-# Usage
+## Usage
 
 Options:
 - -a		enable 6850 ACIA with usual RC2014 wide decode (80-BF)
@@ -86,7 +86,7 @@ marked read only), so you can do the full bootstrap. Alternatively you can
 start from the SCM monitor or similar. These boards default to the bitbang
 serial interface, unless an SIO or ACIA is specified.
 
-## RBC (ex N8VEM) Mark 2 Emulator
+# RBC (ex N8VEM) Mark 2 Emulator
 
 This is a fairly basic emulator for the RBC v2 system board.
 
@@ -104,15 +104,15 @@ pieces of code.
 The jumpers are not emulated. K7 is always assumed to be 1-2, K10 1-2 and
 K11 1-2 giving a 32K/32K split.
 
-# To get actual hardware see
+## To get actual hardware see
 
 https://retrobrewcomputers.org
 
-# For ROM images see
+## For ROM images see
 
 https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start
 
-# Usage
+## Usage
 
 Options:
 - -r path	path to ROM image
@@ -127,17 +127,17 @@ Options:
 
 The sd card image is just a raw file of the blocks at this point.
 
-## Grant Searle SBC Emulator
+# Grant Searle SBC Emulator
 
 This is an emulator for the Grant Searle 9 chip CP/M computer. This is a
 Z80 machine with 128K of RAM (64K accessible), 16K of boot ROM, dual serial
 and a simple 8bit IDE CF interface.
 
-# To build yourself an actual system see
+## To build yourself an actual system see
 
 http://searle.hostei.com/grant/cpm/
 
-# For ROM images
+## For ROM images
 
 Get the zip file from the web page above.
 
@@ -153,7 +153,7 @@ dd if=3.rom of=searle.cf bs=512 seek=2 conv=notrunc
 
 cpmtools can then be used to manipulate it further.
 
-# Usage
+## Usage
 
 Options:
 - -r path	path to ROM image (default searle.rom)
@@ -163,23 +163,23 @@ Options:
 - -t		external 10Hz timer on DCD (not yet accurate to 10Hz)
 - -b		A16 of RAM is controlled by UART RTS line
 
-## Tom's SBC Version C
+# Tom's SBC Version C
 
 This is a close relative of the Grant Searle system except that it has up to
 64K of banked ROM. This is handled by the searle emulator when provided with
 a 64K or 32K ROM image. The only differences are the two ROM paging ports.
 The ROM can be paged back in.
 
-# To build yourself an actual system see
+## To build yourself an actual system see
 
 https://easyeda.com/peabody1929
 
-# For ROM images
+## For ROM images
 
 Use either the Grant Searle ROM padded to 32K or the SCM firmware at
 https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/
 
-## LiNC 80 SBC
+# LiNC 80 SBC
 
 This is an emulator for the LiNC80 system with optional expanded memory. It
 emulates the 64K ROM, 64K base RAM, optional banked RAM, memory mapping
@@ -191,15 +191,15 @@ in emulation.
 
 It has been tested with SCMon, CP/M and Fuzix.
 
-# To get actual hardware see
+## To get actual hardware see
 
 http://linc.no
 
-# For ROM images see
+## For ROM images see
 
 http://linc.no/products/linc80-sbc1/software-for-the-linc80/
 
-# Usage
+## Usage
 
 Options:
 - -r path	path to ROM (default linc80.rom)
@@ -209,22 +209,22 @@ Options:
 - -f		fast (run flat out)
 - -x		emulate the 32K banking mod
 
-## RC2014 8085
+# RC2014 8085
 
 This is a model of the standard RC2014 system but fitted with Ben Chong
 (ancientcomputing)'s 8085 processor card and optionally the 16550A uart
 interface.
 
-# To build yourself an actual system see
+## To build yourself an actual system see
 
 http://ancientcomputing.blogspot.com/
 
-# For ROM images
+## For ROM images
 
 The monitor ROM is available from Ben's github at
 https://github.com/ancientcomputing/rc2014
 
-# Usage
+## Usage
 - -1		Enable 16550A UART
 - -a		Enable 6850 ACIA with usual RC2014 wide decode (80-BF)
 - -A		Enable 6850 ACIA with narrow decode (80-87)
@@ -239,7 +239,7 @@ https://github.com/ancientcomputing/rc2014
 - -R		Enable the DS1302 RTC (clashes with 16550A UART)
 - -w		WizNET 5100 at 0x28-0x2B (works but buggy)
 
-## SmallZ80
+# SmallZ80
 
 An emulation for Terry Gulczynski's SmallZ80 system. This emulates the full
 machine except for the optional floppy controller. Some details are not
@@ -249,15 +249,15 @@ The emulator is however good enough to boot the SmallZ80 system firmware,
 run the supplied Z System and software off the supplied disk image and of
 course to boot Fuzix.
 
-# To build yourself an actual system
+## To build yourself an actual system
 
 http://stack180.com/SmallZ80%20Services.htm
 
-# For ROM and filesystem images
+## For ROM and filesystem images
 
 http://stack180.com/SmallZ80%20Downloads.htm
 
-# Usage
+## Usage
 
 Options:
 - -r path	Path to ROM (default smallz80.rom)
@@ -265,17 +265,17 @@ Options:
 - -d n		Enable debug tracing
 - -f		Run flat out rather than at about native speed
 
-## SBC-2G-512K
+# SBC-2G-512K
 
 Closely related to the Grant Searle design but with banked memory. The
 system has 512K of RAM, 16K of boot ROM, dual serial and a simple 8bit IDE
 CF interface
 
-# To build yourself an actual system see
+## To build yourself an actual system see
 
 https://retrobrewcomputers.org/doku.php?id=builderpages:rhkoolstar:sbc-2g-512
 
-# For ROM images and file system images see
+## For ROM images and file system images see
 
 Get the ZIP file from the web page
 
@@ -287,7 +287,7 @@ You can build an emulated drive from the image with
 dd if=System18.img of=sbc2g.ide bs=512 seek=2 conv=notrunc
 
 
-# Usage
+## Usage
 
 Options:
 - -r path	path to ROM image (default sbc2g.rom)
@@ -296,7 +296,7 @@ Options:
 - -f		fast (run flat out)
 - -t		external 10Hz timer on DCD (not yet accurate to 10Hz)
 
-## Z80 Membership Card
+# Z80 Membership Card
 
 This is an emulation of the Z80 Membership Card full stack with 512K
 of RAM. It emulates the full stack including the bitbang SPI/SD card
@@ -305,11 +305,11 @@ interface and is sufficient to run CP/M or Fuzix on the card.
 The keypad and bitbang serial port are emulated as not being used. The LED
 display is also not decoded and displayed.
 
-# To build yourself an actual system see
+## To build yourself an actual system see
 
 http://www.sunrise-ev.com/z80.htm
 
-# For ROM images and file system images see
+## For ROM images and file system images see
 
 http://www.sunrise-ev.com/z80.htm
 
@@ -319,7 +319,7 @@ described. If you want to run Fuzix you also need to place the Fuzix loader
 hex file on that partition and have another partition with Fuzix on it, as
 Fuzix avoids the emulated floppy disk layer and drives the SD card directly.
 
-# Usage
+## Usage
 
 Options:
 - -r path	path to ROM image (default z80mc.rom)
@@ -327,23 +327,23 @@ Options:
 - -d n		set debug trace bits
 - -f		fast (run flat out)
 
-## Z80 MBC2
+# Z80 MBC2
 
 This is a Z80 level emulation of the Z80-MBC2. The I/O processor interface
 is emulated rather than actually emulating the I/O processor itself.
 Firmware including timer and transmit queue size is emulated.
 
-# To build yourself an actual sysem see
+## To build yourself an actual sysem see
 
 https://hackaday.io/project/159973-z80-mbc2-4ics-homemade-z80-computer
 
-# For ROM images and file system images see
+## For ROM images and file system images see
 
 https://hackaday.io/project/159973-z80-mbc2-4ics-homemade-z80-computer
 
 and hit "Files".
 
-# Usage
+## Usage
 
 Options:
 - -s diskset	Disk set number 0-9
