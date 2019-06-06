@@ -63,15 +63,14 @@ static volatile int done;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
-#define TRACE_ROM	4
+#define TRACE_IRQ	4
 #define TRACE_UNK	8
 #define TRACE_SIO	16
 #define TRACE_512	32
 #define TRACE_RTC	64
-#define TRACE_ACIA	128
+#define TRACE_CPU	128
 #define TRACE_CTC	256
-#define TRACE_CPU	512
-#define TRACE_IRQ	1024
+#define TRACE_ACIA	512
 #define TRACE_UART	2048
 #define TRACE_VIA	4096
 
@@ -1513,6 +1512,10 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 	else if (addr == 0x00) {
 		printf("trace set to %d\n", val);
 		trace = val;
+		if (trace & TRACE_CPU)
+			log_6502 = 1;
+		else
+			log_6502 = 0;
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
