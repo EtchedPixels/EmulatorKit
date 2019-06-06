@@ -9,7 +9,7 @@
  *	128K RAM of which 64K is normally accessible
  *
  *	Optional
- *	1.	Support for the 'A16 via SIO' hack
+ *	1.	Support for the 'A16 via SIO' hack using W/RDYB
  *	2.	Support for timer via SIO hack
  *	3.	Support for A16 via ROM_PAGE15 on Tom's SBC
  *
@@ -50,6 +50,7 @@ static uint8_t banken = 0;
 static uint8_t fast = 0;
 static uint8_t timerhack = 0;
 static uint8_t bankhack = 0;
+static uint8_t tom = 0;
 
 static uint8_t rombank = 0;
 static uint8_t rombanken = 0;
@@ -467,6 +468,12 @@ static void sio2_write(uint16_t addr, uint8_t val)
 			}
 			break;
 		case 1:
+			if (chan != sio && bankhack == 1) {
+				banken = (val & 0x40) ? 0 : 1;
+				if (trace & TRACE_BANK)
+					fprintf(stderr, "[RAM A16 = %d.]\n", banken);
+			}
+			/* Fall through */
 		case 2:
 		case 3:
 		case 4:
@@ -475,12 +482,6 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		case 7:
 			chan->wr[chan->wr[0] & 7] = val;
 			chan->wr[0] &= ~007;
-			/* A16 is wired to the RTS pin */
-			if (chan == sio && bankhack == 1) {
-				banken = (chan->wr[5] & 2) ? 1 : 0;
-				if (trace & TRACE_BANK)
-					fprintf(stderr, "RAM A16 now %d.\n", banken);
-			}
 			break;
 		}
 		/* Control */
@@ -530,7 +531,10 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 
 static void control_rom(uint8_t val)
 {
-	romen = val & 1;
+	if (tom)
+		romen = val & 1;
+	else
+		romen = 0;
 	if (trace & TRACE_BANK)
 		fprintf(stderr, "ROM enabled %d.\n", romen);
 
@@ -610,7 +614,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "searle: [-f] [-b] [-t] [-i path] [-r path] [-d debug]\n");
+	fprintf(stderr, "searle: [-f] [-b] [-t] [-T] [-i path] [-r path] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -623,7 +627,7 @@ int main(int argc, char *argv[])
 	char *rompath = "searle.rom";
 	char *idepath = "searle.cf";
 
-	while ((opt = getopt(argc, argv, "d:i:r:fbBt")) != -1) {
+	while ((opt = getopt(argc, argv, "d:i:r:fbBtT")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -640,6 +644,9 @@ int main(int argc, char *argv[])
 			break;
 		case 't':
 			timerhack = 1;
+			break;
+		case 'T':
+			tom = 1;
 			break;
 		case 'b':
 			bankhack = 1;
