@@ -531,11 +531,12 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 
 static void control_rom(uint8_t val)
 {
+	uint8_t olden = romen;
 	if (tom)
-		romen = val & 1;
+		romen = !(val & 1);
 	else
 		romen = 0;
-	if (trace & TRACE_BANK)
+	if (olden != romen && (trace & TRACE_BANK))
 		fprintf(stderr, "ROM enabled %d.\n", romen);
 
 }
