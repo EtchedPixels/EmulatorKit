@@ -8,6 +8,7 @@
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
  *	RTC at 0xC0
+ *	16550A at 0xC8
  *
  *	Known bugs
  *	ROMWBW crashes in ACIA mode
@@ -53,6 +54,7 @@ static uint8_t int_recalc = 0;
 static uint8_t wiznet = 0;
 static uint8_t cpld_serial = 0;
 static uint8_t has_im2;
+static uint8_t has_16x50;
 
 static uint16_t tstate_steps = 369;	/* RC2014 speed */
 
@@ -80,6 +82,7 @@ static volatile int done;
 #define TRACE_CTC	256
 #define TRACE_CPLD	512
 #define TRACE_IRQ	1024
+#define TRACE_UART	2048
 
 static int trace = 0;
 
@@ -241,11 +244,18 @@ static uint8_t mem_read(int unused, uint16_t addr)
 		fputs("invalid cpu type.\n", stderr);
 		exit(1);
 	}
-	/* Look for ED with M1, followed directly by 4D and if so trigger
-	   the interrupt chain */
-	if (r == 0xED && cpu_z80.M1) {
-		rstate = 1;
-		return r;
+	if (cpu_z80.M1) {
+		/* DD FD CB see the Z80 interrupt manual */
+		if (r == 0xDD || r == 0xFD || r == 0xCB) {
+			rstate = 2;
+			return r;
+		}
+		/* Look for ED with M1, followed directly by 4D and if so trigger
+		   the interrupt chain */
+		if (r == 0xED && rstate == 0) {
+			rstate = 1;
+			return r;
+		}
 	}
 	if (r == 0x4D && rstate == 1)
 		reti_event();
@@ -328,15 +338,19 @@ static uint8_t acia_input;
 static uint8_t acia_inint = 0;
 static uint8_t acia_narrow;
 
+static void acia_check_irq(void)
+{
+	if (acia_inint)
+		Z80INT(&cpu_z80, 0xFF);	/* FIXME probably last data or bus noise */
+}
+
 static void acia_irq_compute(void)
 {
 	if (!acia_inint && (acia_config & acia_status & 0x80)) {
 		if (trace & TRACE_ACIA)
 			fprintf(stderr, "ACIA interrupt.\n");
 		acia_inint = 1;
-		Z80INT(&cpu_z80, 0xFF);	/* FIXME probably last data or bus noise */
 	}
-	/* FIXME: clearing logic */
 }
 
 static void acia_receive(void)
@@ -423,6 +437,254 @@ static void acia_write(uint16_t addr, uint8_t val)
 		break;
 	}
 }
+
+/* UART: very mimimal for the moment */
+
+struct uart16x50 {
+    uint8_t ier;
+    uint8_t iir;
+    uint8_t fcr;
+    uint8_t lcr;
+    uint8_t mcr;
+    uint8_t lsr;
+    uint8_t msr;
+    uint8_t scratch;
+    uint8_t ls;
+    uint8_t ms;
+    uint8_t dlab;
+    uint8_t irq;
+#define RXDA	1
+#define TEMT	2
+#define MODEM	8
+    uint8_t irqline;
+};
+
+static struct uart16x50 uart[1];
+
+static void uart_init(struct uart16x50 *uptr)
+{
+    uptr->dlab = 0;
+}
+
+static void uart_check_irq(struct uart16x50 *uptr)
+{
+    if (uptr->irqline)
+	    Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
+}
+
+/* Compute the interrupt indicator register from what is pending */
+static void uart_recalc_iir(struct uart16x50 *uptr)
+{
+    if (uptr->irq & RXDA)
+        uptr->iir = 0x04;
+    else if (uptr->irq & TEMT)
+        uptr->iir = 0x02;
+    else if (uptr->irq & MODEM)
+        uptr->iir = 0x00;
+    else {
+        uptr->iir = 0x01;	/* No interrupt */
+        uptr->irqline = 0;
+        return;
+    }
+    /* Ok so we have an event, do we need to waggle the line */
+    if (uptr->irqline)
+        return;
+    uptr->irqline = uptr->irq;
+
+}
+
+/* Raise an interrupt source. Only has an effect if enabled in the ier */
+static void uart_interrupt(struct uart16x50 *uptr, uint8_t n)
+{
+    if (uptr->irq & n)
+        return;
+    if (!(uptr->ier & n))
+        return;
+    uptr->irq |= n;
+    uart_recalc_iir(uptr);
+}
+
+static void uart_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
+{
+    if (!(uptr->irq & n))
+        return;
+    uptr->irq &= ~n;
+    uart_recalc_iir(uptr);
+}
+
+static void uart_event(struct uart16x50 *uptr)
+{
+    uint8_t r = check_chario();
+    uint8_t old = uptr->lsr;
+    uint8_t dhigh;
+#if 0
+    if (r & 1)
+        uptr->lsr |= 0x01;	/* RX not empty */
+#endif
+    if (r & 2)
+        uptr->lsr |= 0x60;	/* TX empty */
+    dhigh = (old ^ uptr->lsr);
+    dhigh &= uptr->lsr;		/* Changed high bits */
+    if (dhigh & 1)
+        uart_interrupt(uptr, RXDA);
+    if (dhigh & 0x2)
+        uart_interrupt(uptr, TEMT);
+}
+
+static void show_settings(struct uart16x50 *uptr)
+{
+    uint32_t baud;
+
+    if (!(trace & TRACE_UART))
+        return;
+
+    baud = uptr->ls + (uptr->ms << 8);
+    if (baud == 0)
+        baud = 1843200;
+    baud = 1843200 / baud;
+    baud /= 16;
+    fprintf(stderr, "[%d:%d",
+            baud, (uptr->lcr &3) + 5);
+    switch(uptr->lcr & 0x38) {
+        case 0x00:
+        case 0x10:
+        case 0x20:
+        case 0x30:
+            fprintf(stderr, "N");
+            break;
+        case 0x08:
+            fprintf(stderr, "O");
+            break;
+        case 0x18:
+            fprintf(stderr, "E");
+            break;
+        case 0x28:
+            fprintf(stderr, "M");
+            break;
+        case 0x38:
+            fprintf(stderr, "S");
+            break;
+    }
+    fprintf(stderr, "%d ",
+            (uptr->lcr & 4) ? 2 : 1);
+
+    if (uptr->lcr & 0x40)
+        fprintf(stderr, "break ");
+    if (uptr->lcr & 0x80)
+        fprintf(stderr, "dlab ");
+    if (uptr->mcr & 1)
+        fprintf(stderr, "DTR ");
+    if (uptr->mcr & 2)
+        fprintf(stderr, "RTS ");
+    if (uptr->mcr & 4)
+        fprintf(stderr, "OUT1 ");
+    if (uptr->mcr & 8)
+        fprintf(stderr, "OUT2 ");
+    if (uptr->mcr & 16)
+        fprintf(stderr, "LOOP ");
+    fprintf(stderr, "ier %02x]\n", uptr->ier);
+}
+
+static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
+{
+    switch(addr) {
+    case 0:	/* If dlab = 0, then write else LS*/
+        if (uptr->dlab == 0) {
+            if (uptr == &uart[0]) {
+                putchar(val);
+                fflush(stdout);
+            }
+            uart_clear_interrupt(uptr, TEMT);
+            uart_interrupt(uptr, TEMT);
+        } else {
+            uptr->ls = val;
+            show_settings(uptr);
+        }
+        break;
+    case 1:	/* If dlab = 0, then IER */
+        if (uptr->dlab) {
+            uptr->ms= val;
+            show_settings(uptr);
+        }
+        else
+            uptr->ier = val;
+        break;
+    case 2:	/* FCR */
+        uptr->fcr = val & 0x9F;
+        break;
+    case 3:	/* LCR */
+        uptr->lcr = val;
+        uptr->dlab = (uptr->lcr & 0x80);
+        show_settings(uptr);
+        break;
+    case 4:	/* MCR */
+        uptr->mcr = val & 0x3F;
+        break;
+    case 5:	/* LSR (r/o) */
+        break;
+    case 6:	/* MSR (r/o) */
+        break;
+    case 7:	/* Scratch */
+        uptr->scratch = val;
+        break;
+    }
+}
+
+static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
+{
+    uint8_t r;
+
+    switch(addr) {
+    case 0:
+        /* receive buffer */
+        if (uptr == &uart[0] && uptr->dlab == 0) {
+            uart_clear_interrupt(uptr, RXDA);
+            if (check_chario() & 1)
+                return next_char();
+            return 0x00;
+        } else
+            return uptr->ls;
+        break;
+    case 1:
+        /* IER */
+        if (uptr->dlab == 0)
+            return uptr->ier;
+        return uptr->ms;
+    case 2:
+        /* IIR */
+        return uptr->iir;
+    case 3:
+        /* LCR */
+        return uptr->lcr;
+    case 4:
+        /* mcr */
+        return uptr->mcr;
+    case 5:
+        /* lsr */
+        r = check_chario();
+        uptr->lsr &=0x90;
+        if (r & 1)
+             uptr->lsr |= 0x01;	/* Data ready */
+        if (r & 2)
+             uptr->lsr |= 0x60;	/* TX empty | holding empty */
+        /* Reading the LSR causes these bits to clear */
+        r = uptr->lsr;
+        uptr->lsr &= 0xF0;
+        return r;
+    case 6:
+        /* msr */
+        uptr->msr &= 0x7F;
+        r = uptr->msr;
+        /* Reading clears the delta bits */
+        uptr->msr &= 0xF0;
+        uart_clear_interrupt(uptr, MODEM);
+        return r;
+    case 7:
+        return uptr->scratch;
+    }
+    return 0xFF;
+}
+
 
 struct z80_sio_chan {
 	uint8_t wr[8];
@@ -1274,6 +1536,8 @@ static uint8_t io_read_2014(uint16_t addr)
 	   an official CTC board at another address  */
 	if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		return ctc_read(addr & 3);
+	if (addr >= 0xC8 && addr <= 0xD0 && has_16x50)
+		return uart_read(&uart[0], addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -1307,11 +1571,18 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		rtc_write(val);
 	else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		ctc_write(addr & 3, val);
+	else if (addr >= 0xC8 && addr <= 0xCF && has_16x50)
+		uart_write(&uart[0], addr & 7, val);
 	else if (switchrom && addr == 0x38)
 		toggle_rom();
 	else if (addr == 0xFD) {
-		printf("trace set to %d\n", val);
-		trace = val;
+		trace &= 0xFF00;
+		trace |= val;
+		printf("trace set to %04X\n", trace);
+	} else if (addr == 0xFE) {
+		trace &= 0xFF;
+		trace |= val << 8;
+		printf("trace set to %d\n", trace);
 	} else if (!known && (trace & TRACE_UNK))
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
@@ -1503,11 +1774,15 @@ static uint8_t io_read(int unused, uint16_t addr)
 static void poll_irq_event(void)
 {
 	if (has_im2) {
+		acia_check_irq();
+		uart_check_irq(&uart[0]);
 		if (!live_irq) {
 			!sio2_check_im2(sio) && !sio2_check_im2(sio + 1) &&
 			!ctc_check_im2();
 		}
 	} else {
+		acia_check_irq();
+		uart_check_irq(&uart[0]);
 		!sio2_check_im2(sio) && !sio2_check_im2(sio + 1);
 		ctc_check_im2();
 	}
@@ -1579,7 +1854,7 @@ int main(int argc, char *argv[])
 	char *idepath;
 	int save = 0;
 
-	while ((opt = getopt(argc, argv, "Aabcd:e:fi:m:pr:sRw")) != -1) {
+	while ((opt = getopt(argc, argv, "Aabcd:e:fi:m:pr:sRuw")) != -1) {
 		switch (opt) {
 		case 'a':
 			acia = 1;
@@ -1618,6 +1893,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'c':
 			have_ctc = 1;
+			break;
+		case 'u':
+			has_16x50 = 1;
 			break;
 		case 'm':
 			/* Default Z80 board */
@@ -1787,6 +2065,8 @@ int main(int argc, char *argv[])
 		sio_reset();
 	if (have_ctc)
 		ctc_init();
+	if (has_16x50)
+		uart_init(&uart[0]);
 
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
@@ -1836,6 +2116,8 @@ int main(int argc, char *argv[])
 				acia_timer();
 			if (sio2)
 				sio2_timer();
+			if (has_16x50)
+				uart_event(&uart[0]);
 			if (cpld_serial)
 				sbc64_cpld_timer();
 			if (have_ctc)
