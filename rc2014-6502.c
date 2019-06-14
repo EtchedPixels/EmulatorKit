@@ -1461,12 +1461,12 @@ uint8_t mmio_read_6502(uint8_t addr)
 		return my_ide_read(addr & 7);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
+	if (addr >= 0x60 && addr <= 0x6F)
+		return via_read(addr & 0x0F);
 	if (addr == 0xC0 && rtc)
 		return rtc_read();
 	if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		return uart_read(&uart, addr & 0x0F);
-	if (addr >= 0xF0 && addr <= 0xFF)
-		return via_read(addr & 0x0F);
 	/* Scott Baker is 0x90-93, suggested defaults for the
 	   Stephen Cousins boards at 0x88-0x8B. No doubt we'll get
 	   an official CTC board at another address  */
@@ -1492,6 +1492,8 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		my_ide_write(addr & 7, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
+	else if (addr >= 0x60 && addr <= 0x6F)
+		via_write(addr & 0x0F, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
@@ -1507,8 +1509,6 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		ctc_write(addr & 3, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		uart_write(&uart, addr & 0x0F, val);
-	else if (addr >= 0xF0 && addr <= 0xFF)
-		via_write(addr & 0x0F, val);
 	else if (addr == 0x00) {
 		printf("trace set to %d\n", val);
 		trace = val;
@@ -1547,11 +1547,23 @@ uint8_t read6502(uint16_t addr)
 		return mmio_read_6502(addr);
 
 	r = do_6502_read(addr);
+
+	if (fake_m1) {
+		/* DD FD CB see the Z80 interrupt manual */
+		if (r == 0xDD || r == 0xFD || r== 0xCB) {
+			rstate = 2;
+			return r;
+		}
+		/* Look for ED with M1, followed directly by 4D and if so trigger
+		   the interrupt chain */
+		if (r == 0xED && rstate == 0) {
+			rstate = 1;
+			return r;
+		}
+	}
 	if (rstate == 1 && r == 0x4D)
 		reti_event();
 	rstate = 0;
-	if (r == 0xED && fake_m1)
-		rstate = 1;
 	return r;
 }
 
