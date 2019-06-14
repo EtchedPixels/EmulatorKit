@@ -100,9 +100,9 @@ static uint8_t mem_read(int unused, uint16_t addr)
 
 	/* Look for ED with M1, followed directly by 4D and if so trigger
 	   the interrupt chain */
-	if (cpu_z80.m1) {
+	if (cpu_z80.M1) {
 		/* DD FD CB see the Z80 interrupt manual */
-		if (r == 0xDD || r == 0xFD || r== 0xCB)
+		if (r == 0xDD || r == 0xFD || r== 0xCB) {
 			rstate = 2;
 			return r;
 		}
