@@ -104,11 +104,22 @@ uint8_t i8085_read(uint16_t addr)
 {
 	static uint8_t rstate = 0;
 	uint8_t r = i8085_do_read(addr);
+	if (fake_m1) {
+		/* DD FD CB see the Z80 interrupt manual */
+		if (r == 0xDD || r == 0xFD || r== 0xCB) {
+			rstate = 2;
+			return r;
+		}
+		/* Look for ED with M1, followed directly by 4D and if so trigger
+		   the interrupt chain */
+		if (r == 0xED && rstate == 0) {
+			rstate = 1;
+			return r;
+		}
+	}
 	if (rstate == 1 && r == 0x4D)
 		reti_event();
 	rstate = 0;
-	if (r == 0xED && fake_m1)
-		rstate = 1;
 	return r;
 }
 
