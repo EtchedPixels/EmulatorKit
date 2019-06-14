@@ -404,7 +404,7 @@ uint8_t do_rtc_read(uint8_t addr)
     if (tmhold == NULL && addr < 13)
         return 0xFF;
 
-    switch(addr) {
+    switch(addr & 0x0F) {
     case 0:
         return tmhold->tm_sec % 10;
     case 1:
