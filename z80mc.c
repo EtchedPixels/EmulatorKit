@@ -357,7 +357,7 @@ struct uart16x50 {
     uint8_t irqline;
 };
 
-static struct uart16x50 uart[5];
+static struct uart16x50 uart[1];
 
 static void uart_init(struct uart16x50 *uptr)
 {
