@@ -43,7 +43,7 @@
 
 uint8_t reg8[9], INTE = 0;
 uint16_t reg_SP, reg_PC;
-uint8_t reg_IM = 0;
+uint8_t reg_IM = 0x07;	/* Verified with a Tundra CA80C85B */
 uint8_t intprotect;
 #define set_S() reg8[FLAGS] |= 0x80
 #define set_Z() reg8[FLAGS] |= 0x40
