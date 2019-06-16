@@ -448,7 +448,8 @@ int i8085_exec(int cycles) {
 				cycles -= 13;
 				break;
 			case 0x2A: //LHLD a - load H:L from memory
-				temp16 = (uint16_t)i8085_read(reg_PC) | ((uint16_t)i8085_read(reg_PC+1)<<8);
+				temp16 = (uint16_t)i8085_read(reg_PC);
+				temp16 |= ((uint16_t)i8085_read(reg_PC+1)<<8);
 				reg8[L] = i8085_read(temp16++);
 				reg8[H] = i8085_read(temp16);
 				reg_PC += 2;
@@ -800,7 +801,10 @@ int i8085_exec(int cycles) {
 			case 0x21:
 			case 0x31:
 				reg = (opcode >> 4) & 3;
-				write_RP(reg, i8085_read(reg_PC), i8085_read(reg_PC + 1));
+				/* Although there are not internal side effects we must put
+				   the two reads on the bus in order */
+				temp8 = i8085_read(reg_PC);
+				write_RP(reg, temp8, i8085_read(reg_PC + 1));
 				reg_PC += 2;
 				cycles -= 10;
 				break;
@@ -1090,7 +1094,8 @@ int i8085_exec(int cycles) {
 				}
 				break;
 			case 0xC3: //JMP a - unconditional jump
-				temp16 = (uint16_t)i8085_read(reg_PC) | (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+				temp16 = (uint8_t)i8085_read(reg_PC);
+				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
 				reg_PC = temp16;
 				cycles -= 10;
 				break;
@@ -1102,7 +1107,8 @@ int i8085_exec(int cycles) {
 			case 0xEA:
 			case 0xF2:
 			case 0xFA:
-				temp16 = (uint16_t)i8085_read(reg_PC) | (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+				temp16 = (uint8_t)i8085_read(reg_PC);
+				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
 				if (test_cond((opcode >> 3) & 7)) {
 					reg_PC = temp16;
 					cycles -= 10;
@@ -1112,7 +1118,8 @@ int i8085_exec(int cycles) {
 				}
 				break;
 			case 0xDD: // JNK
-				temp16 = (uint16_t)i8085_read(reg_PC) | (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+				temp16 = (uint8_t)i8085_read(reg_PC);
+				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
 				if (!test_K()) {
 					reg_PC = temp16;
 					cycles -= 10;
@@ -1127,7 +1134,8 @@ int i8085_exec(int cycles) {
 				cycles -= 10;
 				break;
 			case 0xFD:
-				temp16 = (uint16_t)i8085_read(reg_PC) | (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+				temp16 = (uint8_t)i8085_read(reg_PC);
+				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
 				if (!test_K()) {
 					reg_PC = temp16;
 					cycles -= 10;
@@ -1137,7 +1145,8 @@ int i8085_exec(int cycles) {
 				}
 				break;
 			case 0xCD: //CALL a - unconditional call
-				temp16 = (uint16_t)i8085_read(reg_PC) | (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+				temp16 = (uint8_t)i8085_read(reg_PC);
+				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
 				i8085_push(reg_PC + 2);
 				reg_PC = temp16;
 				cycles -= 18;
@@ -1150,7 +1159,8 @@ int i8085_exec(int cycles) {
 			case 0xEC:
 			case 0xF4:
 			case 0xFC:
-				temp16 = (uint16_t)i8085_read(reg_PC) | (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+				temp16 = (uint8_t)i8085_read(reg_PC);
+				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
 				if (test_cond((opcode >> 3) & 7)) {
 					i8085_push(reg_PC + 2);
 					reg_PC = temp16;
