@@ -349,7 +349,7 @@ static void acia_irq_compute(void)
 {
 	/* Recalculate the interrupt bit */
 	acia_status &= 0x7F;
-	if (acia_status & 0x01)
+	if ((acia_status & 0x01) && (acia_config & 0x80))
 		acia_status |= 0x80;
 	if ((acia_status & 0x02) && (acia_config & 0x60) == 0x20)
 		acia_status |= 0x80;
