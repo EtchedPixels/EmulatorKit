@@ -346,23 +346,34 @@ static void acia_check_irq(void)
 
 static void acia_irq_compute(void)
 {
-	if (!acia_inint && (acia_config & acia_status & 0x80)) {
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "ACIA interrupt.\n");
-		acia_inint = 1;
+	/* Recalculate the interrupt bit */
+	acia_status &= 0x7F;
+	if (acia_status & 0x01)
+		acia_status |= 0x80;
+	if ((acia_status & 0x02) && (acia_config & 0x60) == 0x20)
+		acia_status |= 0x80;
+	/* Now see what should happen */
+	if (!(acia_config & 0x80) || !(acia_status & 0x80)) {
+		if (acia_inint && (trace & TRACE_ACIA))
+			fprintf(stderr, "ACIA interrupt end.\n");
+		acia_inint = 0;
+		return;
 	}
+	if (acia_inint == 0 && (trace & TRACE_ACIA))
+		fprintf(stderr, "ACIA interrupt.\n");
+	acia_inint = 1;
+	recalc_interrupts();
 }
 
 static void acia_receive(void)
 {
-	uint8_t old_status = acia_status;
-	acia_status = old_status & 0x02;
-	if (old_status & 1)
+	/* Already a character waiting so set OVRN */
+	if (acia_status & 1)
 		acia_status |= 0x20;
 	acia_char = next_char();
 	if (trace & TRACE_ACIA)
 		fprintf(stderr, "ACIA rx.\n");
-	acia_status |= 0x81;	/* IRQ, and rx data full */
+	acia_status |= 0x01;	/* IRQ, and rx data full */
 }
 
 static void acia_transmit(void)
@@ -370,7 +381,7 @@ static void acia_transmit(void)
 	if (!(acia_status & 2)) {
 		if (trace & TRACE_ACIA)
 			fprintf(stderr, "ACIA tx is clear.\n");
-		acia_status |= 0x82;	/* IRQ, and tx data empty */
+		acia_status |= 0x02;	/* IRQ, and tx data empty */
 	}
 }
 
@@ -385,26 +396,22 @@ static void acia_timer(void)
 		acia_irq_compute();
 }
 
-/* Very crude for initial testing ! */
 static uint8_t acia_read(uint8_t addr)
 {
 	if (trace & TRACE_ACIA)
 		fprintf(stderr, "acia_read %d ", addr);
 	switch (addr) {
 	case 0:
-		/* bits 7: irq pending, 6 parity error, 5 rx over
-		 * 4 framing error, 3 cts, 2 dcd, 1 tx empty, 0 rx full.
-		 * Bits are set on char arrival and cleared on next not by
-		 * user
-		 */
-		acia_status &= ~0x80;
-		acia_inint = 0;
+		/* Reading the ACIA status has no effect on the bits */
 		if (trace & TRACE_ACIA)
 			fprintf(stderr, "acia_status %d\n", acia_status);
 		return acia_status;
 	case 1:
-		acia_status &= ~0x81;	/* No IRQ, rx empty */
-		acia_inint = 0;
+		/* Reading the ACIA character clears the receive ready
+		   and also updates the error bits to match the new byte */
+		/* Clear receive ready and rx overrun */
+		acia_status &= ~0x21;
+		acia_irq_compute();
 		if (trace & TRACE_ACIA)
 			fprintf(stderr, "acia_char %d\n", acia_char);
 		return acia_char;
@@ -432,8 +439,9 @@ static void acia_write(uint16_t addr, uint8_t val)
 		return;
 	case 1:
 		write(1, &val, 1);
-		/* Clear any existing int state and tx empty */
-		acia_status &= ~0x82;
+		/* Clear TDRE - we now have a byte */
+		acia_status &= ~0x02;
+		acia_irq_compute();
 		break;
 	}
 }
