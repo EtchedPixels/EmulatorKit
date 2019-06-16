@@ -1145,6 +1145,8 @@ static void ctc_reti(int ctcnum)
 		if (trace & TRACE_IRQ)
 			fprintf(stderr, "Acked interrupt from CTC %d.\n", ctcnum);
 	}
+	if (!ctc_irqmask)
+		int_clear(IRQ_CTC);
 }
 
 
@@ -1352,7 +1354,7 @@ int i8085_get_input(void)
 
 void i8085_set_output(int value)
 {
-	fake_m1 = value;
+	fake_m1 = !value;
 }
 
 static void poll_irq_event(void)
