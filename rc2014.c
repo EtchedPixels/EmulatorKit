@@ -336,6 +336,7 @@ static uint8_t acia_char;
 static uint8_t acia;
 static uint8_t acia_input;
 static uint8_t acia_inint = 0;
+static uint8_t acia_inreset;
 static uint8_t acia_narrow;
 
 static void acia_check_irq(void)
@@ -357,6 +358,7 @@ static void acia_irq_compute(void)
 		if (acia_inint && (trace & TRACE_ACIA))
 			fprintf(stderr, "ACIA interrupt end.\n");
 		acia_inint = 0;
+		acia_status &= 0x7F;
 		return;
 	}
 	if (acia_inint == 0 && (trace & TRACE_ACIA))
@@ -367,6 +369,8 @@ static void acia_irq_compute(void)
 
 static void acia_receive(void)
 {
+	if (acia_inreset)
+		return;
 	/* Already a character waiting so set OVRN */
 	if (acia_status & 1)
 		acia_status |= 0x20;
@@ -402,6 +406,8 @@ static uint8_t acia_read(uint8_t addr)
 		fprintf(stderr, "acia_read %d ", addr);
 	switch (addr) {
 	case 0:
+		if (acia_inreset)
+			return 0;
 		/* Reading the ACIA status has no effect on the bits */
 		if (trace & TRACE_ACIA)
 			fprintf(stderr, "acia_status %d\n", acia_status);
@@ -431,9 +437,11 @@ static void acia_write(uint16_t addr, uint8_t val)
 		   bits 2-4 select the word size and 0-1 counter divider
 		   except 11 in them means reset */
 		acia_config = val;
-		if ((acia_config & 3) == 3) {
+		if ((acia_config & 3) == 3)
+			acia_inreset = 1;
+		else if (acia_inreset) {
+			acia_inreset = 0;
 			acia_status = 2;
-			acia_inint = 0;
 		}
 		acia_irq_compute();
 		return;

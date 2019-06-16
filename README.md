@@ -27,8 +27,7 @@ emulated compact flash adapter. This corresponds to the RC2014 with the
 switchable ROM, 64K RAM card, ACIA card and Compact Flash card.
 
 In 512K mode the emulator can run the ROMWBW 512K image for the RC2014
-system providing an SIO is selected. With ACIA ROMWBW fails for reasons not
-yet understood.
+system.
 
 To exit use ctrl-backslash
 
