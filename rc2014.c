@@ -745,7 +745,6 @@ static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 {
 	uint8_t new = (chan->intbits ^ m) & m;
-	uint8_t vector;
 	chan->intbits |= m;
 	if ((trace & TRACE_SIO) && new)
 		fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
@@ -753,21 +752,6 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 		if (!sio->irq) {
 			chan->irq = 1;
 			sio->rr[1] |= 0x02;
-			vector = 0; /* sio[1].wr[2]; */
-			/* This is a subset of the real options. FIXME: add
-			   external status change */
-			if (sio[1].wr[1] & 0x04) {
-				vector &= 0xF1;
-				if (chan == sio)
-					vector |= 1 << 3;
-				if (chan->intbits & INT_RX)
-					vector |= 4;
-				else if (chan->intbits & INT_ERR)
-					vector |= 2;
-			}
-			if (trace & TRACE_SIO)
-				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
-			chan->vector = vector;
 			recalc_interrupts();
 		}
 	}
@@ -783,14 +767,31 @@ static void sio2_reti(struct z80_sio_chan *chan)
 
 static int sio2_check_im2(struct z80_sio_chan *chan)
 {
+	uint8_t vector;
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
-		/* FIXME: quick fix for now but the vector calculation should all be
-		   done here it seems */
-		if (sio[1].wr[1] & 0x04)
-			chan->vector += (sio[1].wr[2] & 0xF1);
-		else
-			chan->vector += sio[1].wr[2];
+		/* Do the vector calculation in the right place */
+		/* FIXME: move this to other platforms */
+		if (sio[1].wr[1] & 0x04) {
+			/* This is a subset of the real options. FIXME: add
+			   external status change */
+			if (sio[1].wr[1] & 0x04) {
+				vector &= 0xF1;
+				if (chan == sio)
+					vector |= 1 << 3;
+				if (chan->intbits & INT_RX)
+					vector |= 4;
+				else if (chan->intbits & INT_ERR)
+					vector |= 2;
+			}
+			if (trace & TRACE_SIO)
+				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
+			chan->vector = vector + (sio[1].wr[2] & 0xF1);
+		} else {
+			if (chan != sio)
+				vector |= 1 << 3;
+			chan->vector = vector + (sio[1].wr[2] & 0xF7);
+		}
 		if (trace & (TRACE_IRQ|TRACE_SIO))
 			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
 				(int)(chan - sio), chan->vector);
@@ -1806,6 +1807,8 @@ static void poll_irq_event(void)
 
 static void reti_event(void)
 {
+	if (live_irq && (trace & TRACE_IRQ))
+		fprintf(stderr, "RETI\n");
 	if (has_im2) {
 		switch(live_irq) {
 		case IRQ_SIOA:
