@@ -984,7 +984,7 @@ void w5100_process(nic_w5100_t *self)
       for( i = 0; i < 4; i++ )
         nic_w5100_socket_process_io( &self->socket[i], readfds, writefds , self);
     }
-    else if( errno = EBADF ) {
+    else if( errno == EBADF ) {
       /* Do nothing - just loop again */
     }
     else {
