@@ -767,7 +767,7 @@ static void sio2_reti(struct z80_sio_chan *chan)
 
 static int sio2_check_im2(struct z80_sio_chan *chan)
 {
-	uint8_t vector;
+	uint8_t vector = sio[1].wr[2];
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
 		/* Do the vector calculation in the right place */
@@ -786,11 +786,12 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 			}
 			if (trace & TRACE_SIO)
 				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
-			chan->vector = vector + (sio[1].wr[2] & 0xF1);
+			chan->vector = vector;
 		} else {
+			vector &= 0xF7;
 			if (chan != sio)
 				vector |= 1 << 3;
-			chan->vector = vector + (sio[1].wr[2] & 0xF7);
+			chan->vector = vector;
 		}
 		if (trace & (TRACE_IRQ|TRACE_SIO))
 			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
