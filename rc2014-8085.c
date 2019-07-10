@@ -37,11 +37,12 @@ static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
 static uint8_t have_ctc = 0;
+static uint8_t have_m1 = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 
-static uint8_t fake_m1;
+static uint8_t fake_m1 = 0;
 
 static uint16_t tstate_steps = 307;	/* RC2014 speed (6.144MHz)*/
 
@@ -1263,6 +1264,16 @@ static void ctc_write(uint8_t channel, uint8_t val)
 			if (trace & TRACE_CTC)
 				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
+		/* Undocumented */
+		if (!(c->ctrl & CTC_IRQ) && (ctc_irqmask & (1 << channel))) {
+			ctc_irqmask &= ~(1 << channel);
+			if (ctc_irqmask == 0) {
+				int_clear(IRQ_CTC);
+				if (trace & TRACE_IRQ)
+					fprintf(stderr, "CTC %d irq reset.\n", channel);
+				/* Is this all that is needed ?? */
+			}
+		}
 	} else {
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
@@ -1354,7 +1365,8 @@ int i8085_get_input(void)
 
 void i8085_set_output(int value)
 {
-	fake_m1 = !value;
+	if (have_m1)
+		fake_m1 = !value;
 }
 
 static void poll_irq_event(void)
@@ -1414,7 +1426,7 @@ int main(int argc, char *argv[])
 	char *rompath = "rc2014-8085.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fi:r:sRw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fi:r:sRwm")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -1469,6 +1481,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 'm':
+			have_m1 = 1;
 			break;
 		default:
 			usage();

@@ -881,6 +881,15 @@ static void ctc_write(uint8_t channel, uint8_t val)
 			if (trace & TRACE_CTC)
 				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
+		/* Undocumented */
+		if (!(c->ctrl & CTC_IRQ) && (ctc_irqmask & (1 << channel))) {
+			ctc_irqmask &= ~(1 << channel);
+			if (ctc_irqmask == 0) {
+				if (trace & TRACE_IRQ)
+					fprintf(stderr, "CTC %d irq reset.\n", channel);
+				recalc_interrupts();
+			}
+		}
 	} else {
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
