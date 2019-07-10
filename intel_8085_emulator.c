@@ -104,7 +104,7 @@ uint16_t read_RP_PUSHPOP(uint8_t rp) {
 		case 0x02:
 			return reg16_HL;
 		case 0x03:
-			return (reg16_PSW | 0x02) & 0xFFD7;
+			return reg16_PSW;
 	}
 	return 0;
 }
