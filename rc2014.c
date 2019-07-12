@@ -44,7 +44,15 @@ static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
 static uint8_t switchrom = 1;
-static uint8_t cpuboard = 0;
+
+#define CPUBOARD_Z80		0
+#define CPUBOARD_SC108		1
+#define CPUBOARD_SC114		2
+#define CPUBOARD_Z80SBC64	3
+#define CPUBOARD_EASYZ80	4
+
+static uint8_t cpuboard = CPUBOARD_Z80;
+
 static uint8_t have_ctc = 0;
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
@@ -225,19 +233,19 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	uint8_t r;
 
 	switch (cpuboard) {
-	case 0:
+	case CPUBOARD_Z80:
 		r = mem_read0(addr);
 		break;
-	case 1:
+	case CPUBOARD_SC108:
 		r = mem_read108(addr);
 		break;
-	case 2:
+	case CPUBOARD_SC114:
 		r = mem_read114(addr);
 		break;
-	case 3:
+	case CPUBOARD_Z80SBC64:
 		r = mem_read64(addr);
 		break;
-	case 4:
+	case CPUBOARD_EASYZ80:
 		r = mem_read0(addr);
 		break;
 	default:
@@ -266,19 +274,19 @@ static uint8_t mem_read(int unused, uint16_t addr)
 static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
-	case 0:
+	case CPUBOARD_Z80:
 		mem_write0(addr, val);
 		break;
-	case 1:
+	case CPUBOARD_SC108:
 		mem_write108(addr, val);
 		break;
-	case 2:
+	case CPUBOARD_SC114:
 		mem_write114(addr, val);
 		break;
-	case 3:
+	case CPUBOARD_Z80SBC64:
 		mem_write64(addr, val);
 		break;
-	case 4:
+	case CPUBOARD_EASYZ80:
 		mem_write0(addr, val);
 		break;
 	default:
@@ -1759,19 +1767,19 @@ static void io_write_2(uint16_t addr, uint8_t val)
 static void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
-	case 0:
+	case CPUBOARD_Z80:
 		io_write_2014(addr, val, 0);
 		break;
-	case 1:
+	case CPUBOARD_SC108:
 		io_write_1(addr, val);
 		break;
-	case 2:
+	case CPUBOARD_SC114:
 		io_write_2(addr, val);
 		break;
-	case 3:
+	case CPUBOARD_Z80SBC64:
 		io_write_3(addr, val);
 		break;
-	case 4:
+	case CPUBOARD_EASYZ80:
 		io_write_4(addr, val);
 		break;
 	default:
@@ -1783,14 +1791,14 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 static uint8_t io_read(int unused, uint16_t addr)
 {
 	switch (cpuboard) {
-	case 0:
-	case 1:
+	case CPUBOARD_Z80:
+	case CPUBOARD_SC108:
 		return io_read_2014(addr);
-	case 2:
+	case CPUBOARD_SC114:
 		return io_read_2(addr);
-	case 3:
+	case CPUBOARD_Z80SBC64:
 		return io_read_3(addr);
-	case 4:
+	case CPUBOARD_EASYZ80:
 		return io_read_4(addr);
 	default:
 		fprintf(stderr, "bad cpuboard\n");
@@ -1929,30 +1937,30 @@ int main(int argc, char *argv[])
 		case 'm':
 			/* Default Z80 board */
 			if (strcmp(optarg, "z80") == 0)
-				cpuboard = 0;
+				cpuboard = CPUBOARD_Z80;
 			else if (strcmp(optarg, "sc108") == 0) {
 				switchrom = 0;
 				bank512 = 0;
-				cpuboard = 1;
+				cpuboard = CPUBOARD_SC108;
 			} else if (strcmp(optarg, "sc114") == 0) {
 				switchrom = 0;
 				bank512 = 0;
-				cpuboard = 2;
+				cpuboard = CPUBOARD_SC114;
 			} else if (strcmp(optarg, "z80sbc64") == 0) {
 				switchrom = 0;
 				bank512 = 0;
-				cpuboard = 3;
+				cpuboard = CPUBOARD_Z80SBC64;
 				bankreg[0] = 3;
 			} else if (strcmp(optarg, "z80mb64") == 0) {
 				switchrom = 0;
 				bank512 = 0;
-				cpuboard = 3;
+				cpuboard = CPUBOARD_Z80SBC64;
 				bankreg[0] = 3;
 				/* Triple RC2014 rate */
 				tstate_steps = 123;
 			} else if (strcmp(optarg, "easyz80") == 0) {
 				bank512 = 1;
-				cpuboard = 4;
+				cpuboard = CPUBOARD_EASYZ80;
 				switchrom = 0;
 				rom = 0;
 				acia = 0;
