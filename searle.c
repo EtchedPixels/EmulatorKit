@@ -85,9 +85,11 @@ static uint8_t mem_read(int unused, uint16_t addr)
 
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R");
-	if (addr < 0x4000 && romen)
+	if (addr < 0x4000 && romen) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "R%1d", rombank);
 		r = rom[rombank * 0x4000 + addr];
-	else if (banken == 1) {
+	} else if (banken == 1) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "H");
 		r = ram[addr + 65536];
@@ -122,7 +124,7 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	if (addr < 0x4000 && romen) {
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "W %04X : ROM\n", addr);
+			fprintf(stderr, "W %04X : ROM %d\n", addr, rombank);
 		return;
 	}
 	if (banken) {
@@ -657,6 +659,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'T':
 			tom = 1;
+			rombanken = 1;
 			break;
 		case 'b':
 			bankhack = 1;
