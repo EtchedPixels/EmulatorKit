@@ -344,11 +344,18 @@ static opcode_t opcodes[NUMBER_OPCODES] = {
 
 static void append_rc2014(char *input, char *lead, uint16_t arg, char *tail) {
     struct symbol *s = find_symbol(arg);
-    if (s == NULL)
-        return;
+    int pn = 0;
+    if (s == NULL) {
+        s = find_symbol(arg - 1);
+        if (s == NULL)
+            return;
+        pn = 1;
+    }
     strcat(input, "; ");
     strcat(input, lead);
     strcat(input, s->name);
+    if (pn)
+        strcat(input, "+1");
     strcat(input, tail);
 }
 
