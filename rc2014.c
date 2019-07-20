@@ -11,7 +11,6 @@
  *	16550A at 0xC8
  *
  *	Known bugs
- *	ROMWBW crashes in ACIA mode
  *	Not convinced we have all the INT clear cases right for SIO error
  *
  *	Add support for using real CF card
@@ -20,6 +19,10 @@
  *	TRG0/1 CTC0 and CTC1 are fed from UART_CLK (1.8432MHz)
  *	TRG2 is fed from CTC_CLK
  *	TO2 feeds TRG3
+ *
+ *	The SC121 just an initial sketch for playing with IM2 and the
+ *	relevant peripherals. I'll align it properly with the real thing as more
+ *	info appears.
  *
  */
 
@@ -50,6 +53,7 @@ static uint8_t switchrom = 1;
 #define CPUBOARD_SC114		2
 #define CPUBOARD_Z80SBC64	3
 #define CPUBOARD_EASYZ80	4
+#define CPUBOARD_SC121		5
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -240,6 +244,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
 		r = mem_read108(addr);
 		break;
 	case CPUBOARD_SC114:
+	case CPUBOARD_SC121:
 		r = mem_read114(addr);
 		break;
 	case CPUBOARD_Z80SBC64:
@@ -281,6 +286,7 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 		mem_write108(addr, val);
 		break;
 	case CPUBOARD_SC114:
+	case CPUBOARD_SC121:
 		mem_write114(addr, val);
 		break;
 	case CPUBOARD_Z80SBC64:
@@ -796,9 +802,6 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
 			chan->vector = vector;
 		} else {
-			vector &= 0xF7;
-			if (chan != sio)
-				vector |= 1 << 3;
 			chan->vector = vector;
 		}
 		if (trace & (TRACE_IRQ|TRACE_SIO))
@@ -1023,7 +1026,13 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		sio2_clear_int(chan, INT_TX);
 		if (trace & TRACE_SIO)
 			fprintf(stderr, "sio%c write data %d\n", (addr & 2) ? 'b' : 'a', val);
-		write(1, &val, 1);
+		if (chan == sio)
+			write(1, &val, 1);
+		else {
+			write(1, "\033[1m;", 5);
+			write(1, &val,1);
+			write(1, "\033[0m;", 5);
+		}
 	}
 }
 
@@ -1333,9 +1342,12 @@ static void ctc_receive_pulse(int i);
 
 static void ctc_pulse(int i)
 {
-	/* Model CTC 2 chained into CTC 3 */
-	if (i == 2)
-		ctc_receive_pulse(3);
+	if (cpuboard != CPUBOARD_SC121) {
+		/* Model CTC 2 chained into CTC 3 */
+		if (i == 2)
+			ctc_receive_pulse(3);
+	}
+	/* The SC121 has 0-2 for SIO baud and only 3 for a timer */
 }
 
 /* We don't worry about edge directions just a logical pulse model */
@@ -1423,13 +1435,16 @@ static void ctc_write(uint8_t channel, uint8_t val)
 			if (ctc_irqmask == 0) {
 				if (trace & TRACE_IRQ)
 					fprintf(stderr, "CTC %d irq reset.\n", channel);
-				/* Is this all that is needed ?? */
+				if (live_irq == IRQ_CTC + channel)
+					live_irq = 0;
 			}
 		}
 	} else {
 		if (trace & TRACE_CTC)
 			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
-		c->vector = val;
+		/* Only works on channel 0 */
+		if (channel == 0)
+			c->vector = val;
 	}
 }
 
@@ -1774,6 +1789,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		io_write_1(addr, val);
 		break;
 	case CPUBOARD_SC114:
+	case CPUBOARD_SC121:
 		io_write_2(addr, val);
 		break;
 	case CPUBOARD_Z80SBC64:
@@ -1795,6 +1811,7 @@ static uint8_t io_read(int unused, uint16_t addr)
 	case CPUBOARD_SC108:
 		return io_read_2014(addr);
 	case CPUBOARD_SC114:
+	case CPUBOARD_SC121:
 		return io_read_2(addr);
 	case CPUBOARD_Z80SBC64:
 		return io_read_3(addr);
@@ -1890,6 +1907,9 @@ int main(int argc, char *argv[])
 	char *rompath = "rc2014.rom";
 	char *idepath;
 	int save = 0;
+	uint8_t *p = ramrom;
+	while (p < ramrom + sizeof(ramrom))
+		*p++= rand();
 
 	while ((opt = getopt(argc, argv, "Aabcd:e:fi:m:pr:sRuw")) != -1) {
 		switch (opt) {
@@ -1969,8 +1989,19 @@ int main(int argc, char *argv[])
 				sio2_input = 1;
 				has_im2 = 1;
 				tstate_steps = 500;
+			} else if (strcmp(optarg, "sc121") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				cpuboard = CPUBOARD_SC121;
+				sio2 = 1;
+				sio2_input = 1;
+				have_ctc = 1;
+				rom = 0;
+				acia = 0;
+				has_im2 = 1;
+				/* FIXME: SC122 is four ports */
 			} else {
-				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, z80sbc64, z80mb64.\n",
+				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
 						stderr);
 				exit(EXIT_FAILURE);
 			}
@@ -2159,6 +2190,19 @@ int main(int argc, char *argv[])
 				sbc64_cpld_timer();
 			if (have_ctc)
 				ctc_tick(tstate_steps);
+			if (cpuboard == CPUBOARD_EASYZ80) {
+				/* Feed the uart clock into the CTC */
+				int c;
+				/* 10Mhz so calculate for 500 tstates.
+				   CTC 2 runs at half uart clock */
+				for (c = 0; c < 46; c++) {
+					ctc_receive_pulse(0);
+					ctc_receive_pulse(1);
+					ctc_receive_pulse(2);
+					ctc_receive_pulse(0);
+					ctc_receive_pulse(1);
+				}
+			}
 		}
 		if (wiznet)
 			w5100_process(wiz);
