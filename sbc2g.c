@@ -411,6 +411,7 @@ static uint8_t sio2_read(uint16_t addr)
 static void sio2_write(uint16_t addr, uint8_t val)
 {
 	struct z80_sio_chan *chan = (addr & 1) ? sio + 1 : sio;
+	uint8_t r;
 	if (addr & 2) {
 		if (trace & TRACE_SIO)
 			fprintf(stderr,
@@ -470,7 +471,13 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		case 5:
 		case 6:
 		case 7:
-			chan->wr[chan->wr[0] & 7] = val;
+			r = chan->wr[0] & 7;
+			if (trace & TRACE_SIO)
+				fprintf(stderr, "sio%c: wrote r%d to %02X\n",
+					(addr & 1) ? 'b' : 'a', r, val);
+			chan->wr[r] = val;
+			if (chan != sio && r == 2)
+				chan->rr[2] = val;
 			chan->wr[0] &= ~007;
 			break;
 		}
