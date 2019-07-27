@@ -420,8 +420,10 @@ static uint8_t acia_read(uint8_t addr)
 		fprintf(stderr, "acia_read %d ", addr);
 	switch (addr) {
 	case 0:
-		if (acia_inreset)
+		if (acia_inreset) {
+			fprintf(stderr, "= 0 (reset).\n");
 			return 0;
+		}
 		/* Reading the ACIA status has no effect on the bits */
 		if (trace & TRACE_ACIA)
 			fprintf(stderr, "acia_status %d\n", acia_status);
@@ -457,6 +459,8 @@ static void acia_write(uint16_t addr, uint8_t val)
 			acia_inreset = 0;
 			acia_status = 2;
 		}
+		if(trace & TRACE_ACIA)
+			fprintf(stderr, "ACIA config %02X\n", val);
 		acia_irq_compute();
 		return;
 	case 1:
@@ -959,6 +963,7 @@ static uint8_t sio2_read(uint16_t addr)
 static void sio2_write(uint16_t addr, uint8_t val)
 {
 	struct z80_sio_chan *chan = (addr & 2) ? sio + 1 : sio;
+	uint8_t r;
 	if (!(addr & 1)) {
 		if (trace & TRACE_SIO)
 			fprintf(stderr, "sio%c write reg %d with %02X\n", (addr & 2) ? 'b' : 'a', chan->wr[0] & 7, val);
@@ -1008,10 +1013,13 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		case 5:
 		case 6:
 		case 7:
+			r = chan->wr[0] & 7;
 			if (trace & TRACE_SIO)
 				fprintf(stderr, "sio%c: wrote r%d to %02X\n",
-					(addr & 2) ? 'b' : 'a', chan->wr[0] & 7, val);
-			chan->wr[chan->wr[0] & 7] = val;
+					(addr & 2) ? 'b' : 'a', r, val);
+			chan->wr[r] = val;
+			if (chan != sio && r == 2)
+				chan->rr[2] = val;
 			chan->wr[0] &= ~007;
 			break;
 		}
@@ -1569,7 +1577,9 @@ static uint8_t io_read_2014(uint16_t addr)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
 	addr &= 0xFF;
-	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
+	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
+		return acia_read(addr & 1);
+	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
 		return acia_read(addr & 1);
 	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		return acia_read(addr & 1);
@@ -1598,9 +1608,11 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	addr &= 0xFF;
-	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
+	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		acia_write(addr & 1, val);
-	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
+	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
+		acia_write(addr & 1, val);
+	else if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		acia_write(addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0x83) && sio2)
 		sio2_write(addr & 3, val);
@@ -1911,7 +1923,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "Aabcd:e:fi:m:pr:sRuw")) != -1) {
+	while ((opt = getopt(argc, argv, "Aabcd:e:fi:m:pr:sRuw8")) != -1) {
 		switch (opt) {
 		case 'a':
 			acia = 1;
@@ -1923,6 +1935,12 @@ int main(int argc, char *argv[])
 			acia = 1;
 			acia_narrow = 1;
 			acia_input = 1;
+			sio2_input = 0;
+			break;
+		case '8':
+			acia = 1;
+			acia_narrow = 2;
+			acia_input = 1;
 			sio2 = 0;
 			break;
 		case 'r':
@@ -1931,7 +1949,9 @@ int main(int argc, char *argv[])
 		case 's':
 			sio2 = 1;
 			sio2_input = 1;
-			acia = 0;
+			if (!acia_narrow)
+				acia = 0;
+			acia_input = 0;
 			break;
 		case 'e':
 			rombank = atoi(optarg);
