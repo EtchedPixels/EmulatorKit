@@ -97,6 +97,7 @@ static volatile int done;
 #define TRACE_IRQ	1024
 #define TRACE_UART	2048
 #define TRACE_Z84C15	4096
+#define TRACE_IDE	8192
 
 static int trace = 0;
 
@@ -1128,11 +1129,16 @@ struct ide_controller *ide0;
 
 static uint8_t my_ide_read(uint16_t addr)
 {
-	return ide_read8(ide0, addr);
+	uint8_t r =  ide_read8(ide0, addr);
+	if (trace & TRACE_IDE)
+		fprintf(stderr, "ide read %d = %02X\n", addr, r);
+	return r;
 }
 
 static void my_ide_write(uint16_t addr, uint8_t val)
 {
+	if (trace & TRACE_IDE)
+		fprintf(stderr, "ide write %d = %02X\n", addr, val);
 	ide_write8(ide0, addr, val);
 }
 
@@ -2216,6 +2222,7 @@ int main(int argc, char *argv[])
 				acia = 0;
 				rom = 1;
 				switchrom = 0;
+				tstate_steps = 800;	/* 16MHz */
 			} else {
 				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
 						stderr);
