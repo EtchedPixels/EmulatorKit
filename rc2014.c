@@ -54,6 +54,7 @@ static uint8_t switchrom = 1;
 #define CPUBOARD_Z80SBC64	3
 #define CPUBOARD_EASYZ80	4
 #define CPUBOARD_SC121		5
+#define CPUBOARD_MICRO80	6
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -231,6 +232,77 @@ static void mem_write64(uint16_t addr, uint8_t val)
 		ramrom[bankreg[0] * 0x8000 + addr] = val;
 }
 
+struct z84c15 {
+	uint8_t scrp;
+	uint8_t wcr;
+	uint8_t mwbr;
+	uint8_t csbr;
+	uint8_t mcr;
+	uint8_t intpr;
+};
+
+struct z84c15 z84c15;
+
+static void z84c15_init(void)
+{
+	z84c15.scrp = 0;
+	z84c15.wcr = 0;		/* Really it's 0xFF for 15 instructions then 0 */
+	z84c15.mwbr = 0xF0;
+	z84c15.csbr = 0x0F;
+	z84c15.mcr = 0x01;
+	z84c15.intpr = 0;
+}
+
+/*
+ *	The Z84C15 CS lines as wired for the Micro80
+ */
+
+static uint8_t *mmu_micro80_z84c15(uint16_t addr, int write)
+{
+	uint8_t cs0 = 0, cs1 = 0;
+	uint8_t page = addr >> 12;
+	if (page <= (z84c15.csbr & 0x0F))
+		cs0 = 1;
+	else if (page <= (z84c15.csbr >> 4))
+		cs1 = 1;
+	if (!(z84c15.mcr & 0x01))
+		cs0 = 0;
+	if (!(z84c15.mcr & 0x02))
+		cs1 = 0;
+	/* Depending upon final flash wiring. PIO might control
+	   this and it might be 32K */
+	/* CS0 low selects ROM always */
+	if (cs0) {
+		if (write)
+			return NULL;
+		else
+			return &ramrom[(addr & 0x3FFF)];
+	}
+	/* CS1 low forces A16 low */
+	if (cs1)
+		return &ramrom[0x20000 + addr];
+	return &ramrom[0x30000 + addr];
+}
+
+static uint8_t mem_read_micro80(uint16_t addr)
+{
+	uint8_t val = *mmu_micro80_z84c15(addr, 0);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04x = %02X\n", addr, val);
+	return val;
+}
+
+static void mem_write_micro80(uint16_t addr, uint8_t val)
+{
+	uint8_t *p = mmu_micro80_z84c15(addr, 1);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W %04x = %02X\n", addr, val);
+	if (p == NULL)
+		fprintf(stderr, "%04x: write to ROM of %02X attempted.\n", addr, val);
+	else
+		*p = val;
+}
+
 static uint8_t mem_read(int unused, uint16_t addr)
 {
 	static uint8_t rstate = 0;
@@ -252,6 +324,9 @@ static uint8_t mem_read(int unused, uint16_t addr)
 		break;
 	case CPUBOARD_EASYZ80:
 		r = mem_read0(addr);
+		break;
+	case CPUBOARD_MICRO80:
+		r = mem_read_micro80(addr);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -294,6 +369,9 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_EASYZ80:
 		mem_write0(addr, val);
+		break;
+	case CPUBOARD_MICRO80:
+		mem_write_micro80(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -1572,6 +1650,68 @@ static void sbc64_cpld_bankreg(uint8_t val)
 	}
 }
 
+static uint8_t z84c15_read(uint8_t port)
+{
+	switch(port) {
+	case 0xEE:
+		return z84c15.scrp;
+	case 0xEF:
+		switch(z84c15.scrp) {
+		case 0:
+			return z84c15.wcr;
+		case 1:
+			return z84c15.mwbr;
+		case 2:
+			return z84c15.csbr;
+		case 3:
+			return z84c15.mcr;
+		default:
+			fprintf(stderr, "Read invalid SCRP  %d\n", z84c15.scrp);
+			return 0xFF;
+		}
+		break;
+	/* Watchdog: not yet emulated */
+	case 0xF0:
+	case 0xF1:
+		return 0xFF;
+	}
+	return 0xFF;
+}
+
+static void z84c15_write(uint8_t port, uint8_t val)
+{
+	switch(port) {
+	case 0xEE:
+		z84c15.scrp = val;
+		break;
+	case 0xEF:
+		switch(z84c15.scrp) {
+		case 0:
+			z84c15.wcr = val;
+			break;
+		case 1:
+			z84c15.mwbr = val;
+			break;
+		case 2:
+			z84c15.csbr = val;
+			break;
+		case 3:
+			z84c15.mcr = val;
+			break;
+		default:
+			fprintf(stderr, "Read invalid SCRP  %d\n", z84c15.scrp);
+		}
+		break;
+	/* Watchdog: not yet emulated */
+	case 0xF0:
+	case 0xF1:
+		return;
+	case 0xF4:
+		z84c15.intpr = val;
+		break;
+	}
+}
+
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -1791,6 +1931,40 @@ static void io_write_2(uint16_t addr, uint8_t val)
 	io_write_2014(addr, val, known);
 }
 
+static uint8_t io_read_micro80(uint16_t addr)
+{
+	uint8_t r = addr & 0xFF;
+	if (r >= 0x10 && r <= 0x13)
+		return ctc_read(addr & 3);
+	else if (r >= 0x18 && r <= 0x1B)
+		return sio2_read(r & 3);
+//	else if (r >= 0x1C && r <= 0x1F)
+//		return pio_read(r & 3);
+	else if (r >= 0xEE && r <= 0xF1)
+		return z84c15_read(r);
+	else if (trace & TRACE_UNK)
+		fprintf(stderr, "Unknown read from port %04X\n", addr);
+	return 0xFF;
+}
+
+static void io_write_micro80(uint16_t addr, uint8_t val)
+{
+	uint16_t r = addr & 0xFF;
+	if (r >= 0x10 && r <= 0x13)
+		ctc_write(addr & 3, val);
+	else if (r >= 0x18 && r <= 0x1B)
+		sio2_write(r & 3, val);
+//	else if (r >= 0x1C && r <= 0x1F)
+//		pio_write(r & 3, val);
+	else if ((r >= 0xEE && r <= 0xF1) || r == 0xF4)
+		z84c15_write(r, val);
+	else if (addr == 0xFD) {
+		printf("trace set to %d\n", val);
+		trace = val;
+	} else if (trace & TRACE_UNK)
+		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+}
+
 static void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
@@ -1809,6 +1983,9 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_EASYZ80:
 		io_write_4(addr, val);
+		break;
+	case CPUBOARD_MICRO80:
+		io_write_micro80(addr, val);
 		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
@@ -1829,6 +2006,8 @@ static uint8_t io_read(int unused, uint16_t addr)
 		return io_read_3(addr);
 	case CPUBOARD_EASYZ80:
 		return io_read_4(addr);
+	case CPUBOARD_MICRO80:
+		return io_read_micro80(addr);
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2020,6 +2199,15 @@ int main(int argc, char *argv[])
 				acia = 0;
 				has_im2 = 1;
 				/* FIXME: SC122 is four ports */
+			} else if (strcmp(optarg, "micro80") == 0) {
+				cpuboard = CPUBOARD_MICRO80;
+				have_ctc = 1;
+				sio2 = 1;
+				sio2_input = 1;
+				has_im2 = 1;
+				acia = 0;
+				rom = 1;
+				switchrom = 0;
 			} else {
 				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
 						stderr);
@@ -2045,7 +2233,7 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	if (cpuboard == 3) {
+	if (cpuboard == CPUBOARD_Z80SBC64) {
 		acia_input = 0;
 		sio2_input = 0;
 		cpld_serial = 1;
@@ -2061,7 +2249,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (rom && cpuboard != 3) {
+	if (rom && cpuboard != CPUBOARD_Z80SBC64) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
@@ -2094,7 +2282,7 @@ int main(int argc, char *argv[])
 	   
 	   Mark states read only with chmod and it won't save back */
 
-	if (cpuboard == 3) {
+	if (cpuboard == CPUBOARD_Z80SBC64) {
 		int len;
 		save = 1;
 		fd = open(rompath, O_RDWR);
@@ -2118,6 +2306,9 @@ int main(int argc, char *argv[])
 			printf("[loaded bank 3 only]\n");
 		}
 	}
+
+	if (cpuboard == CPUBOARD_MICRO80)
+		z84c15_init();
 
 	if (bank512) {
 		fd = open(rompath, O_RDONLY);
