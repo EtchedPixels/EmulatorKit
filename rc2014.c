@@ -96,6 +96,7 @@ static volatile int done;
 #define TRACE_CPLD	512
 #define TRACE_IRQ	1024
 #define TRACE_UART	2048
+#define TRACE_Z84C15	4096
 
 static int trace = 0;
 
@@ -1680,6 +1681,9 @@ static uint8_t z84c15_read(uint8_t port)
 
 static void z84c15_write(uint8_t port, uint8_t val)
 {
+	if (trace & TRACE_Z84C15)
+		fprintf(stderr, "z84c15: write %02X <- %02X\n",
+			port, val);
 	switch(port) {
 	case 0xEE:
 		z84c15.scrp = val;
@@ -1937,11 +1941,13 @@ static uint8_t io_read_micro80(uint16_t addr)
 	if (r >= 0x10 && r <= 0x13)
 		return ctc_read(addr & 3);
 	else if (r >= 0x18 && r <= 0x1B)
-		return sio2_read(r & 3);
+		return sio2_read((r & 3) ^ 1);
 //	else if (r >= 0x1C && r <= 0x1F)
 //		return pio_read(r & 3);
 	else if (r >= 0xEE && r <= 0xF1)
 		return z84c15_read(r);
+	else if (r >= 0x90 && r <= 0x97)
+		return my_ide_read(r & 7);
 	else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -1953,11 +1959,13 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 	if (r >= 0x10 && r <= 0x13)
 		ctc_write(addr & 3, val);
 	else if (r >= 0x18 && r <= 0x1B)
-		sio2_write(r & 3, val);
+		sio2_write((r & 3) ^ 1, val);
 //	else if (r >= 0x1C && r <= 0x1F)
 //		pio_write(r & 3, val);
 	else if ((r >= 0xEE && r <= 0xF1) || r == 0xF4)
 		z84c15_write(r, val);
+	else if (r >= 0x90 && r <= 0x97)
+		my_ide_write(r & 0x07, val);
 	else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
