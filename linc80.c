@@ -736,6 +736,8 @@ static uint8_t sd_out[520];
 static int sd_outlen, sd_outp;
 static int sd_fd = -1;
 static off_t sd_lba;
+static int sd_stuff;
+static uint8_t sd_poststuff;
 static const uint8_t sd_csd[17] = {
 
 	0xFE,		/* Sync byte before CSD */
@@ -757,6 +759,7 @@ static uint8_t sd_process_command(void)
 	}
 	if (trace & TRACE_SD)
 		fprintf(stderr, "Command received %x\n", sd_cmd[0]);
+	sd_stuff = 1 + (rand() & 7);
 	switch(sd_cmd[0]) {
 	case 0x40+0:		/* CMD 0 */
 		return 0x01;	/* Just respond 0x01 */
@@ -831,6 +834,13 @@ static uint8_t sd_card_byte(uint8_t in)
 	if (sd_fd == -1)
 		return 0xFF;
 
+	/* Stuffing on commands */
+	if (sd_stuff) {
+		if (--sd_stuff)
+			return 0xFF;
+		return sd_poststuff;
+	}
+
 	if (sd_mode == 0) {
 		if (in != 0xFF) {
 			sd_mode = 1;	/* Command wait */
@@ -844,9 +854,9 @@ static uint8_t sd_card_byte(uint8_t in)
 		if (sd_cmdp == 6) {	/* Command complete */
 			sd_cmdp = 0;
 			sd_mode = 0;
-			/* Reply with either a stuff byte (CMD12) or a
-			   status */
-			return sd_process_command();
+			/* Queue byte and begin stuffing */
+			sd_poststuff = sd_process_command();
+			return 0xFF;
 		}
 		/* Keep talking */
 		return 0xFF;
@@ -1187,7 +1197,7 @@ static void exit_cleanup(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"linc80: [-x] [-f] [-r rompath] [-i idepath] [-s sdcard] [-d debug]\n");
+		"linc80: [-x] [-f] [-b banks] [-r rompath] [-i idepath] [-s sdcard] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
