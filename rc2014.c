@@ -2428,6 +2428,8 @@ int main(int argc, char *argv[])
 		if (trace & TRACE_ACIA)
 			acia_trace(acia, 1);
 	}
+	if (rtc && (trace & TRACE_RTC))
+		rtc_trace(rtc, 1);
 	if (sio2)
 		sio_reset();
 	if (have_ctc)
@@ -2439,6 +2441,7 @@ int main(int argc, char *argv[])
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
 	}
+
 
 
 	switch(indev) {
