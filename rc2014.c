@@ -393,7 +393,7 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 	}
 }
 
-static int check_chario(void)
+int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -419,7 +419,7 @@ static int check_chario(void)
 	return r;
 }
 
-static unsigned int next_char(void)
+unsigned int next_char(void)
 {
 	char c;
 	if (read(0, &c, 1) != 1) {
