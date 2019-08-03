@@ -36,9 +36,11 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include "system.h"
 #include "libz80/z80.h"
 #include "ide.h"
 #include "w5100.h"
+#include "z80dma.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
@@ -98,6 +100,8 @@ static volatile int done;
 #define TRACE_UART	2048
 #define TRACE_Z84C15	4096
 #define TRACE_IDE	8192
+#define TRACE_SPI	16384
+#define TRACE_SD	32768
 
 static int trace = 0;
 
@@ -274,6 +278,14 @@ static uint8_t *mmu_micro80_z84c15(uint16_t addr, int write)
 	/* Depending upon final flash wiring. PIO might control
 	   this and it might be 32K */
 	/* CS0 low selects ROM always */
+	if (trace & TRACE_MEM) {
+		if (cs0)
+			fprintf(stderr, "R");
+		if (cs1)
+			fprintf(stderr, "L");
+		else
+			fprintf(stderr, "H");
+	}
 	if (cs0) {
 		if (write)
 			return NULL;
@@ -305,7 +317,7 @@ static void mem_write_micro80(uint16_t addr, uint8_t val)
 		*p = val;
 }
 
-static uint8_t mem_read(int unused, uint16_t addr)
+uint8_t mem_read(int unused, uint16_t addr)
 {
 	static uint8_t rstate = 0;
 	uint8_t r;
@@ -353,7 +365,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	return r;
 }
 
-static void mem_write(int unused, uint16_t addr, uint8_t val)
+void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
 	case CPUBOARD_Z80:
@@ -961,8 +973,8 @@ static void sio2_channel_timer(struct z80_sio_chan *chan, uint8_t ab)
 			}
 		}
 	} else {
-		if (!(chan->rr[1] & 0x04)) {
-			chan->rr[1] |= 0x04;
+		if (!(chan->rr[0] & 0x04)) {
+			chan->rr[0] |= 0x04;
 			if (chan->wr[1] & 0x02)
 				sio2_raise_int(chan, INT_TX);
 		}
@@ -1117,9 +1129,9 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		if (chan == sio)
 			write(1, &val, 1);
 		else {
-			write(1, "\033[1m;", 5);
+//			write(1, "\033[1m;", 5);
 			write(1, &val,1);
-			write(1, "\033[0m;", 5);
+//			write(1, "\033[0m;", 5);
 		}
 	}
 }
@@ -1549,6 +1561,357 @@ static uint8_t ctc_read(uint8_t channel)
 	return val;
 }
 
+static int sd_mode = 0;
+static int sd_cmdp = 0;
+static int sd_ext = 0;
+static uint8_t sd_cmd[6];
+static uint8_t sd_in[520];
+static int sd_inlen, sd_inp;
+static uint8_t sd_out[520];
+static int sd_outlen, sd_outp;
+static int sd_fd = -1;
+static off_t sd_lba;
+static const uint8_t sd_csd[17] = {
+
+	0xFE,		/* Sync byte before CSD */
+	/* Taken from a Toshiba 64MB card c/o softgun */
+	0x00, 0x2D, 0x00, 0x32,
+	0x13, 0x59, 0x83, 0xB1,
+	0xF6, 0xD9, 0xCF, 0x80,
+	0x16, 0x40, 0x00, 0x00
+};
+
+static uint8_t sd_process_command(void)
+{
+	if (sd_ext) {
+		sd_ext = 0;
+		switch(sd_cmd[0]) {
+		default:
+			return 0xFF;
+		}
+	}
+	if (trace & TRACE_SD)
+		fprintf(stderr, "Command received %x\n", sd_cmd[0]);
+	switch(sd_cmd[0]) {
+	case 0x40+0:		/* CMD 0 */
+		return 0x01;	/* Just respond 0x01 */
+	case 0x40+1:		/* CMD 1 - leave idle */
+		return 0x00;	/* Immediately indicate we did */
+	case 0x40+9:		/* CMD 9 - read the CSD */
+		memcpy(sd_out,sd_csd, 17);
+		sd_outlen = 17;
+		sd_outp = 0;
+		sd_mode = 2;
+		return 0x00;
+	case 0x40+16:		/* CMD 16 - set block size */
+		/* Should check data is 512 !! FIXME */
+		return 0x00;	/* Sure */
+	case 0x40+17:		/* Read */
+		sd_outlen = 514;
+		sd_outp = 0;
+		/* Sync mark then data */
+		sd_out[0] = 0xFF;
+		sd_out[1] = 0xFE;
+		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
+			16777216 * sd_cmd[1];
+		if (trace & TRACE_SD)
+			fprintf(stderr, "Read LBA %lx\n", sd_lba);
+		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 || read(sd_fd, sd_out + 2, 512) != 512) {
+			if (trace & TRACE_SD)
+				fprintf(stderr, "Read LBA failed.\n");
+			return 0x01;
+		}
+		sd_mode = 2;
+		/* Result */
+		return 0x00;
+	case 0x40+24:		/* Write */
+		/* Will send us FE data FF FF */
+		if (trace & TRACE_SD)
+			fprintf(stderr, "Write LBA %lx\n", sd_lba);
+		sd_inlen = 514;	/* Data FF FF */
+		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
+			16777216 * sd_cmd[1];
+		sd_inp = 0;
+		sd_mode = 4;	/* Send a pad then go to mode 3 */
+		return 0x00;	/* The expected OK */
+	case 0x40+55:
+		sd_ext = 1;
+		return 0x01;
+	default:
+		return 0x7F;
+	}
+}
+
+static uint8_t sd_process_data(void)
+{
+	switch(sd_cmd[0]) {
+	case 0x40+24:		/* Write */
+		sd_mode = 0;
+		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 ||
+			write(sd_fd, sd_in, 512) != 512) {
+			if (trace & TRACE_SD)
+				fprintf(stderr, "Write failed.\n");
+			return 0x1E;	/* Need to look up real values */
+		}
+		return 0x05;	/* Indicate it worked */
+	default:
+		sd_mode = 0;
+		return 0xFF;
+	}
+}
+
+static uint8_t sd_card_byte(uint8_t in)
+{
+	/* No card present */
+	if (sd_fd == -1)
+		return 0xFF;
+
+	if (sd_mode == 0) {
+		if (in != 0xFF) {
+			sd_mode = 1;	/* Command wait */
+			sd_cmdp = 1;
+			sd_cmd[0] = in;
+		}
+		return 0xFF;
+	}
+	if (sd_mode == 1) {
+		sd_cmd[sd_cmdp++] = in;
+		if (sd_cmdp == 6) {	/* Command complete */
+			sd_cmdp = 0;
+			sd_mode = 0;
+			/* Reply with either a stuff byte (CMD12) or a
+			   status */
+			return sd_process_command();
+		}
+		/* Keep talking */
+		return 0xFF;
+	}
+	/* Writing out the response */
+	if (sd_mode == 2) {
+		if (sd_outp + 1 == sd_outlen)
+			sd_mode = 0;
+		return sd_out[sd_outp++];
+	}
+	/* Commands that need input blocks first */
+	if (sd_mode == 3) {
+		sd_in[sd_inp++] = in;
+		if (sd_inp == sd_inlen)
+			return sd_process_data();
+		/* Keep sending */
+		return 0xFF;
+	}
+	/* Sync up before data flow starts */
+	if (sd_mode == 4) {
+		/* Sync */
+		if (in == 0xFE)
+			sd_mode = 3;
+		return 0xFF;
+	}
+	return 0xFF;
+}
+
+struct z80_pio {
+	uint8_t data[2];
+	uint8_t mask[2];
+	uint8_t mode[2];
+	uint8_t intmask[2];
+	uint8_t icw[2];
+	uint8_t mpend[2];
+	uint8_t irq[2];
+	uint8_t vector[2];
+	uint8_t in[2];
+};
+
+static struct z80_pio pio[1];
+
+static uint8_t pio_cs;
+
+/* Software SPI test: one device for now */
+
+static uint8_t spi_byte_sent(uint8_t val)
+{
+	uint8_t r = sd_card_byte(val);
+	if (trace & TRACE_SPI)
+		fprintf(stderr,	"[SPI %02X:%02X]\n", val, r);
+	return r;
+}
+
+/* Bit 2: CLK, 1: MOSI, 0: MISO */
+static void bitbang_spi(uint8_t val)
+{
+	static uint8_t old = 0xFF;
+	static uint8_t oldcs = 1;
+	static uint8_t bits;
+	static uint8_t bitct;
+	static uint8_t rxbits = 0xFF;
+	uint8_t delta = old ^ val;
+
+	old = val;
+
+	if ((pio_cs & 0x03) == 0x01) {		/* CS high - deselected */
+		if ((trace & TRACE_SPI) && !oldcs)
+			fprintf(stderr,	"[Raised \\CS]\n");
+		bits = 0;
+		sd_mode = 0;	/* FIXME: layering */
+		oldcs = 1;
+		return;
+	}
+	if ((trace & TRACE_SPI) && oldcs)
+		fprintf(stderr, "[Lowered \\CS]\n");
+	oldcs = 0;
+	/* Capture clock edge */
+	if (delta & 0x04) {		/* Clock edge */
+		if (val & 0x04) {	/* Rising - capture in SPI0 */
+			bits <<= 1;
+			bits |= (val & 0x02) ? 1 : 0;
+			bitct++;
+			if (bitct == 8) {
+				rxbits = spi_byte_sent(bits);
+				bitct = 0;
+			}
+		} else {
+			/* Falling edge */
+			pio->in[1] &= 0xFE;
+			pio->in[1] |= (rxbits & 0x80) ? 0x01 : 0x00;
+			rxbits <<= 1;
+			rxbits |= 0x01;
+		}
+	}
+}
+
+/* Bus emulation helpers */
+
+void pio_data_write(struct z80_pio *pio, uint8_t port, uint8_t val)
+{
+	if (port == 1)
+		bitbang_spi(val);
+	else if (port == 2)
+		pio_cs = val & 7;
+}
+
+void pio_strobe(struct z80_pio *pio, uint8_t port)
+{
+}
+
+uint8_t pio_data_read(struct z80_pio *pio, uint8_t port)
+{
+	return pio->in[port];
+}
+
+static void pio_recalc(void)
+{
+	/* For now we don't model interrupts at all */
+}
+
+/* Simple Z80 PIO model. We don't yet deal with the fancy bidirectional mode
+   or the strobes in mode 0-2. We don't do interrupt mask triggers on mode 3 */
+
+/* TODO: interrupts, strobes */
+
+static void pio_write(uint8_t addr, uint8_t val)
+{
+	uint8_t pio_port = (addr & 2) >> 1;
+	uint8_t pio_ctrl = addr & 1;
+
+	if (pio_ctrl) {
+		if (pio->icw[pio_port] & 1) {
+			pio->intmask[pio_port] = val;
+			pio->icw[pio_port] &= ~1;
+			pio_recalc();
+			return;
+		}
+		if (pio->mpend[pio_port]) {
+			pio->mask[pio_port] = val;
+			pio_recalc();
+			pio->mpend[pio_port] = 0;
+			return;
+		}
+		if (!(val & 1)) {
+			pio->vector[pio_port] = val;
+			return;
+		}
+		if ((val & 0x0F) == 0x0F) {
+			pio->mode[pio_port] = val >> 6;
+			if (pio->mode[pio_port] == 3)
+				pio->mpend[pio_port] = 1;
+			pio_recalc();
+			return;
+		}
+		if ((val & 0x0F) == 0x07) {
+			pio->icw[pio_port] = val >> 4;
+			return;
+		}
+		return;
+	} else {
+		pio->data[pio_port] = val;
+		switch(pio->mode[pio_port]) {
+		case 0:
+		case 2:	/* Not really emulated */
+			pio_data_write(pio, pio_port, val);
+			pio_strobe(pio, pio_port);
+			break;
+		case 1:
+			break;
+		case 3:
+			/* Force input lines to floating high */
+			val |= pio->mask[pio_port];
+			pio_data_write(pio, pio_port, val);
+			break;
+		}
+	}
+}
+
+static uint8_t pio_read(uint8_t addr)
+{
+	uint8_t pio_port = (addr & 2) >> 1;
+	uint8_t val;
+	uint8_t rx;
+
+	/* Output lines */
+	val = pio->data[pio_port];
+	rx = pio_data_read(pio, pio_port);
+
+	switch(pio->mode[pio_port]) {
+	case 0:
+		/* Write only */
+		break;
+	case 1:
+		/* Read only */
+		val = rx;
+		break;
+	case 2:
+		/* Bidirectional (not really emulated) */
+	case 3:
+		/* Control mode */
+		val &= ~pio->mask[pio_port];
+		val |= rx & pio->mask[pio_port];
+		break;
+	}
+	return val;
+}
+
+static void pio_reset(void)
+{
+	/* Input mode */
+	pio->mask[0] = 0xFF;
+	pio->mask[1] = 0xFF;
+	/* Mode 1 */
+	pio->mode[0] = 1;
+	pio->mode[1] = 1;
+	/* No output data value */
+	pio->data[0] = 0;
+	pio->data[1] = 0;
+	/* Nothing pending */
+	pio->mpend[0] = 0;
+	pio->mpend[1] = 0;
+	/* Clear icw */
+	pio->icw[0] = 0;
+	pio->icw[1] = 0;
+	/* No interrupt */
+	pio->irq[0] = 0;
+	pio->irq[1] = 0;
+}
+
 
 /*
  *	Emulate the switchable ROM card. We switch between the ROM and
@@ -1948,8 +2311,8 @@ static uint8_t io_read_micro80(uint16_t addr)
 		return ctc_read(addr & 3);
 	else if (r >= 0x18 && r <= 0x1B)
 		return sio2_read((r & 3) ^ 1);
-//	else if (r >= 0x1C && r <= 0x1F)
-//		return pio_read(r & 3);
+	else if (r >= 0x1C && r <= 0x1F)
+		return pio_read(r & 3);
 	else if (r >= 0xEE && r <= 0xF1)
 		return z84c15_read(r);
 	else if (r >= 0x90 && r <= 0x97)
@@ -1966,8 +2329,8 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 		ctc_write(addr & 3, val);
 	else if (r >= 0x18 && r <= 0x1B)
 		sio2_write((r & 3) ^ 1, val);
-//	else if (r >= 0x1C && r <= 0x1F)
-//		pio_write(r & 3, val);
+	else if (r >= 0x1C && r <= 0x1F)
+		pio_write(r & 3, val);
 	else if ((r >= 0xEE && r <= 0xF1) || r == 0xF4)
 		z84c15_write(r, val);
 	else if (r >= 0x90 && r <= 0x97)
@@ -1979,7 +2342,7 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-static void io_write(int unused, uint16_t addr, uint8_t val)
+void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
 	case CPUBOARD_Z80:
@@ -2007,7 +2370,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	}
 }
 
-static uint8_t io_read(int unused, uint16_t addr)
+uint8_t io_read(int unused, uint16_t addr)
 {
 	switch (cpuboard) {
 	case CPUBOARD_Z80:
@@ -2110,7 +2473,8 @@ int main(int argc, char *argv[])
 	int rom = 1;
 	int rombank = 0;
 	char *rompath = "rc2014.rom";
-	char *idepath;
+	char *sdpath = NULL;
+	char *idepath = NULL;
 	int save = 0;
 	uint8_t *p = ramrom;
 	while (p < ramrom + sizeof(ramrom))
@@ -2145,6 +2509,9 @@ int main(int argc, char *argv[])
 			if (!acia_narrow)
 				acia = 0;
 			acia_input = 0;
+			break;
+		case 'S':
+			sdpath = optarg;
 			break;
 		case 'e':
 			rombank = atoi(optarg);
@@ -2355,6 +2722,14 @@ int main(int argc, char *argv[])
 			ide = 0;
 	}
 
+	if (sdpath) {
+		sd_fd = open(sdpath, O_RDWR);
+		if (sd_fd == -1) {
+			perror(sdpath);
+			exit(1);
+		}
+	}
+
 	if (sio2)
 		sio_reset();
 	if (have_ctc)
@@ -2366,6 +2741,8 @@ int main(int argc, char *argv[])
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
 	}
+
+	pio_reset();
 
 	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
@@ -2414,8 +2791,12 @@ int main(int argc, char *argv[])
 				uart_event(&uart[0]);
 			if (cpld_serial)
 				sbc64_cpld_timer();
-			if (have_ctc)
-				ctc_tick(tstate_steps);
+			if (have_ctc) {
+				if (cpuboard != CPUBOARD_MICRO80)
+					ctc_tick(tstate_steps);
+				else	/* Micro80 it's not off the CPU clock */
+					ctc_tick(184);
+			}
 			if (cpuboard == CPUBOARD_EASYZ80) {
 				/* Feed the uart clock into the CTC */
 				int c;
