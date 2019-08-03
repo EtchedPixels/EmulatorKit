@@ -9,3 +9,6 @@ extern void io_write(int unused, uint16_t port, uint8_t val);
 
 extern int check_chario(void);
 extern unsigned int next_char(void);
+
+/* Interrupt helpers */
+extern void recalc_interrupts(void);
