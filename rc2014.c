@@ -2251,7 +2251,7 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_Z80SBC64;
 				bankreg[0] = 3;
 				/* Triple RC2014 rate */
-				tstate_steps = 123;
+				tstate_steps = 369 * 3;
 			} else if (strcmp(optarg, "easyz80") == 0) {
 				bank512 = 1;
 				cpuboard = CPUBOARD_EASYZ80;
