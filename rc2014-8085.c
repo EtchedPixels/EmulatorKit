@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "intel_8085_emulator.h"
+#include "acia.h"
 #include "ide.h"
 #include "w5100.h"
 
@@ -36,13 +37,12 @@ static unsigned int bankreg[4];
 static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
-static uint8_t have_ctc = 0;
-static uint8_t have_m1 = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
+static uint8_t acia_uart;
 
-static uint16_t tstate_steps = 307;	/* RC2014 speed (6.144MHz)*/
+static uint16_t tstate_steps = 369;	/* RC2014 speed (7.4MHz)*/
 
 /* Who is pulling on the interrupt line */
 
@@ -72,8 +72,6 @@ static volatile int done;
 #define TRACE_UART	2048
 
 static int trace = 0;
-
-static void reti_event(void);
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
@@ -128,7 +126,7 @@ void i8085_write(uint16_t addr, uint8_t val)
 	}
 }
 
-static int check_chario(void)
+int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -154,7 +152,7 @@ static int check_chario(void)
 	return r;
 }
 
-static unsigned int next_char(void)
+unsigned int next_char(void)
 {
 	char c;
 	if (read(0, &c, 1) != 1) {
@@ -166,7 +164,7 @@ static unsigned int next_char(void)
 	return c;
 }
 
-static void recalc_interrupts(void)
+void recalc_interrupts(void)
 {
 	if (live_irq)
 		i8085_set_int(INT_RST65);
@@ -186,110 +184,15 @@ static void int_clear(int src)
 	recalc_interrupts();
 }
 
+struct acia *acia;
 
-static uint8_t acia_status = 2;
-static uint8_t acia_config;
-static uint8_t acia_char;
-static uint8_t acia;
-static uint8_t acia_input;
-static uint8_t acia_inint = 0;
-static uint8_t acia_narrow;
 
-static void acia_irq_compute(void)
+static void acia_check_irq(struct acia *acia)
 {
-	if (!acia_inint && acia_config && acia_status & 0x80) {
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "ACIA interrupt.\n");
-		acia_inint = 1;
+	if (acia_irq_pending(acia))
 		int_set(IRQ_ACIA);
-	}
-	if (acia_inint) {
+	else
 		int_clear(IRQ_ACIA);
-		acia_inint = 0;
-	}
-}
-
-static void acia_receive(void)
-{
-	uint8_t old_status = acia_status;
-	acia_status = old_status & 0x02;
-	if (old_status & 1)
-		acia_status |= 0x20;
-	acia_char = next_char();
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "ACIA rx.\n");
-	acia_status |= 0x81;	/* IRQ, and rx data full */
-}
-
-static void acia_transmit(void)
-{
-	if (!(acia_status & 2)) {
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "ACIA tx is clear.\n");
-		acia_status |= 0x82;	/* IRQ, and tx data empty */
-	}
-}
-
-static void acia_timer(void)
-{
-	int s = check_chario();
-	if ((s & 1) && acia_input)
-		acia_receive();
-	if (s & 2)
-		acia_transmit();
-	if (s)
-		acia_irq_compute();
-}
-
-/* Very crude for initial testing ! */
-static uint8_t acia_read(uint8_t addr)
-{
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "acia_read %d ", addr);
-	switch (addr) {
-	case 0:
-		/* bits 7: irq pending, 6 parity error, 5 rx over
-		 * 4 framing error, 3 cts, 2 dcd, 1 tx empty, 0 rx full.
-		 * Bits are set on char arrival and cleared on next not by
-		 * user
-		 */
-		acia_status &= ~0x80;
-		acia_irq_compute();
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "acia_status %d\n", acia_status);
-		return acia_status;
-	case 1:
-		acia_status &= ~0x81;	/* No IRQ, rx empty */
-		acia_irq_compute();
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "acia_char %d\n", acia_char);
-		return acia_char;
-	default:
-		fprintf(stderr, "acia: bad addr.\n");
-		exit(1);
-	}
-}
-
-static void acia_write(uint16_t addr, uint8_t val)
-{
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "acia_write %d %d\n", addr, val);
-	switch (addr) {
-	case 0:
-		/* bit 7 enables interrupts, bits 5-6 are tx control
-		   bits 2-4 select the word size and 0-1 counter divider
-		   except 11 in them means reset */
-		acia_config = val;
-		if ((acia_config & 3) == 3)
-			acia_status = 2;
-		acia_irq_compute();
-		return;
-	case 1:
-		write(1, &val, 1);
-		/* Clear any existing int state and tx empty */
-		acia_status &= ~0x82;
-		break;
-	}
 }
 
 
@@ -750,7 +653,7 @@ uint8_t i8085_inport(uint8_t addr)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia)
-		return acia_read(addr & 1);
+		return acia_read(acia, addr & 1);
 	if ((addr >= 0x10 && addr <= 0x17) && ide)
 		return my_ide_read(addr & 7);
 	if ((addr >= 0x90 && addr <= 0x97) && ide)
@@ -771,7 +674,7 @@ void i8085_outport(uint8_t addr, uint8_t val)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia)
-		acia_write(addr & 1, val);
+		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide)
 		my_ide_write(addr & 7, val);
 	else if ((addr >= 0x90 && addr <= 0x97) && ide)
@@ -813,13 +716,8 @@ void i8085_set_output(int value)
 
 static void poll_irq_event(void)
 {
-}
-
-static void reti_event(void)
-{
-	/* The ACIA and 16550A do not care about reti */
-	live_irq &= ~(1 << (IRQ_ACIA | IRQ_16550A));
-	poll_irq_event();
+	if (acia)
+		acia_check_irq(acia);
 }
 
 static struct termios saved_term, term;
@@ -850,15 +748,16 @@ int main(int argc, char *argv[])
 	int rombank = 0;
 	char *rompath = "rc2014-8085.rom";
 	char *idepath;
+	int acia_input;
 
 	while ((opt = getopt(argc, argv, "1abd:e:fi:r:Rw")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
-			acia = 0;
+			acia_uart = 0;
 			break;
 		case 'a':
-			acia = 1;
+			acia_uart = 1;
 			acia_input = 1;
 			uart_16550a = 0;
 			break;
@@ -895,9 +794,9 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	if (acia == 0 && uart_16550a == 0) {
+	if (acia_uart == 0 && uart_16550a == 0) {
 		fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
-		acia = 1;
+		acia_uart = 1;
 		acia_input = 1;
 	}
 	if (rtc && uart_16550a) {
@@ -960,6 +859,12 @@ int main(int argc, char *argv[])
 			ide = 0;
 	}
 
+	if (acia_uart) {
+		acia = acia_create();
+		if (trace & TRACE_ACIA)
+			acia_trace(acia, 1);
+		acia_set_input(acia, acia_input);
+	}
 	if (uart_16550a)
 		uart_init(&uart);
 
@@ -1007,7 +912,7 @@ int main(int argc, char *argv[])
 		for (i = 0; i < 100; i++) {
 			i8085_exec(tstate_steps);
 			if (acia)
-				acia_timer();
+				acia_timer(acia);
 			if (uart_16550a)
 				uart_event(&uart);
 		}

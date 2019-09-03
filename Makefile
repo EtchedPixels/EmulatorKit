@@ -27,8 +27,8 @@ mbc2:	mbc2.o ide.o
 rc2014-6502: rc2014-6502.o 6502.o 6502dis.o
 	cc -g3 rc2014-6502.o ide.o w5100.o 6502.o 6502dis.o -o rc2014-6502
 
-rc2014-8085: rc2014-8085.o intel_8085_emulator.o
-	cc -g3 rc2014-8085.o ide.o w5100.o intel_8085_emulator.o -o rc2014-8085
+rc2014-8085: rc2014-8085.o intel_8085_emulator.o ide.o acia.o w5100.o
+	cc -g3 rc2014-8085.o acia.o ide.o w5100.o intel_8085_emulator.o -o rc2014-8085
 
 smallz80: smallz80.o ide.o
 	(cd libz80; make)
