@@ -72,7 +72,7 @@ static volatile int done;
 #define TRACE_IO	2
 #define TRACE_ROM	4
 #define TRACE_UNK	8
-#define TRACE_SIO	16
+#define TRACE_PPIDE	16
 #define TRACE_512	32
 #define TRACE_RTC	64
 #define TRACE_ACIA	128
@@ -737,7 +737,8 @@ int main(int argc, char *argv[])
 				ide = 0;
 			} else
 				ppide_attach(ppide, 0, ide_fd);
-			/* FIXME: PPIDE trace */
+			if (trace & TRACE_PPIDE)
+				ppide_trace(ppide, 1);
 		}
 	}
 
