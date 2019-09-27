@@ -33,6 +33,7 @@
 #include "acia.h"
 #include "ide.h"
 #include "ppide.h"
+#include "rtc_bitbang.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
@@ -43,12 +44,13 @@ static uint8_t bankenable;
 static uint8_t bank512 = 0;
 static uint8_t bankhigh = 0;
 static uint8_t mmureg = 0;
-static uint8_t rtc = 0;
+static uint8_t rtc;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 static uint8_t acia_uart;
 
 struct ppide *ppide;
+struct rtc *rtcdev;
 
 static uint16_t tstate_steps = 369;	/* RC2014 speed (7.4MHz)*/
 
@@ -497,202 +499,6 @@ static void my_ide_write(uint16_t addr, uint8_t val)
    the 24/12 hour setting.
    
  */
-static uint8_t rtcw;
-static uint8_t rtcst;
-static uint16_t rtcr;
-static uint8_t rtccnt;
-static uint8_t rtcstate;
-static uint8_t rtcreg;
-static uint8_t rtcram[32];
-static uint8_t rtcwp = 0x80;
-static uint8_t rtc24 = 1;
-static uint8_t rtcbp = 0;
-static uint8_t rtcbc = 0;
-static struct tm *rtc_tm;
-
-static uint8_t rtc_read(void)
-{
-	if (rtcst & 0x30)
-		return (rtcr & 0x01) ? 1 : 0;
-	return 0xFF;
-}
-
-static uint16_t rtcregread(uint8_t reg)
-{
-	uint8_t val, v;
-
-	switch (reg) {
-	case 0:
-		val = (rtc_tm->tm_sec % 10) + ((rtc_tm->tm_sec / 10) << 4);
-		break;
-	case 1:
-		val = (rtc_tm->tm_min % 10) + ((rtc_tm->tm_min / 10) << 4);
-		break;
-	case 2:
-		v = rtc_tm->tm_hour;
-		if (!rtc24) {
-			v %= 12;
-			v++;
-		}
-		val = (v % 10) + ((v / 10) << 4);
-		if (!rtc24) {
-			if (rtc_tm->tm_hour > 11)
-				val |= 0x20;
-			val |= 0x80;
-		}
-		break;
-	case 3:
-		val = (rtc_tm->tm_mday % 10) + ((rtc_tm->tm_mday / 10) << 4);
-		break;
-	case 4:
-		val = ((rtc_tm->tm_mon + 1) % 10) + (((rtc_tm->tm_mon + 1) / 10) << 4);
-		break;
-	case 5:
-		val = rtc_tm->tm_wday + 1;
-		break;
-	case 6:
-		v = rtc_tm->tm_year % 100;
-		val = (v % 10) + ((v / 10) << 4);
-		break;
-	case 7:
-		val = rtcwp ? 0x80 : 0x00;
-		break;
-	case 8:
-		val = 0;
-		break;
-	default:
-		val = 0xFF;
-		/* Check */
-		break;
-	}
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "RTCreg %d = %02X\n", reg, val);
-	return val;
-}
-
-static void rtcop(void)
-{
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "rtcbyte %02X\n", rtcw);
-	/* The emulated task asked us to write a byte, and has now provided
-	   the data byte to go with it */
-	if (rtcstate == 2) {
-		if (!rtcwp) {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC write %d as %d\n", rtcreg, rtcw);
-			/* We did a real write! */
-			/* Not yet tackled burst mode */
-			if (rtcreg != 0x3F && (rtcreg & 0x20))	/* NVRAM */
-				rtcram[rtcreg & 0x1F] = rtcw;
-			else if (rtcreg == 2)
-				rtc24 = rtcw & 0x80;
-			else if (rtcreg == 7)
-				rtcwp = rtcw & 0x80;
-		}
-		/* For now don't emulate writes to the time */
-		rtcstate = 0;
-	}
-	/* Check for broken requests */
-	if (!(rtcw & 0x80)) {
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtcw makes no sense %d\n", rtcw);
-		rtcstate = 0;
-		rtcr = 0x1FF;
-		return;
-	}
-	/* Clock burst ? : for now we only emulate time burst */
-	if (rtcw == 0xBF) {
-		rtcstate = 3;
-		rtcbp = 0;
-		rtcbc = 0;
-		rtcr = rtcregread(rtcbp++) << 1;
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtc command BF: burst clock read.\n");
-		return;
-	}
-	/* A write request */
-	if (!(rtcw & 0x01)) {
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtc write request, waiting byte 2.\n");
-		rtcstate = 2;
-		rtcreg = (rtcw >> 1) & 0x3F;
-		rtcr = 0x1FF;
-		return;
-	}
-	/* A read request */
-	rtcstate = 1;
-	if (rtcw & 0x40) {
-		/* RAM */
-		if (rtcw != 0xFE)
-			rtcr = rtcram[(rtcw >> 1) & 0x1F] << 1;
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n", (rtcw >> 1) & 0xFF, rtcr);
-		return;
-	}
-	/* Register read */
-	rtcr = rtcregread((rtcw >> 1) & 0x1F) << 1;
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "RTC read of time register %d is %d\n", (rtcw >> 1) & 0x1F, rtcr);
-}
-
-static void rtc_write(uint8_t val)
-{
-	uint8_t changed = val ^ rtcst;
-	uint8_t is_read;
-	/* Direction */
-	if ((trace & TRACE_RTC) && (changed & 0x20))
-		fprintf(stderr, "RTC direction now %s.\n", (val & 0x20) ? "read" : "write");
-	is_read = val & 0x20;
-	/* Clock */
-	if (changed & 0x40) {
-		/* The rising edge samples, the falling edge clocks receive */
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "RTC clock low.\n");
-		if (!(val & 0x40)) {
-			rtcr >>= 1;
-			/* Burst read of time */
-			rtcbc++;
-			if (rtcbc == 8 && rtcbp) {
-				rtcr = rtcregread(rtcbp++) << 1;
-				rtcbc = 0;
-			}
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "rtcr now %02X\n", rtcr);
-		} else {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC clock high.\n");
-			rtcw >>= 1;
-			if ((val & 0x30) == 0x10)
-				rtcw |= val & 0x80;
-			else
-				rtcw |= 0xFF;
-			rtccnt++;
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "rtcw now %02x (%d)\n", rtcw, rtccnt);
-			if (rtccnt == 8 && !is_read)
-				rtcop();
-		}
-	}
-	/* CE */
-	if (changed & 0x10) {
-		if (rtcst & 0x10) {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC CE dropped.\n");
-			rtccnt = 0;
-			rtcr = 0;
-			rtcw = 0;
-			rtcstate = 0;
-		} else {
-			/* Latch imaginary registers on rising edge */
-			time_t t = time(NULL);
-			rtc_tm = localtime(&t);
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC CE raised and latched time.\n");
-		}
-	}
-	rtcst = val;
-}
-
 
 uint8_t i8085_inport(uint8_t addr)
 {
@@ -709,7 +515,7 @@ uint8_t i8085_inport(uint8_t addr)
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0x0C && rtc)
-		return rtc_read();
+		return rtc_read(rtcdev);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		return uart_read(&uart, addr & 0x0F);
 	if (trace & TRACE_UNK)
@@ -745,7 +551,7 @@ void i8085_outport(uint8_t addr, uint8_t val)
 			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
 		bankenable = val & 1;
 	} else if (addr == 0x0C && rtc)
-		rtc_write(val);
+		rtc_write(rtcdev, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		uart_write(&uart, addr & 0x0F, val);
 	else if (addr == 0xFD) {
@@ -931,6 +737,7 @@ int main(int argc, char *argv[])
 				ide = 0;
 			} else
 				ppide_attach(ppide, 0, ide_fd);
+			/* FIXME: PPIDE trace */
 		}
 	}
 
@@ -946,6 +753,13 @@ int main(int argc, char *argv[])
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
+	}
+
+	if (rtc) {
+		rtcdev = rtc_create();
+		rtc_reset(rtcdev);
+		if (trace & TRACE_RTC)
+			rtc_trace(rtcdev, 1);
 	}
 
 	/* 5ms - it's a balance between nice behaviour and simulation
