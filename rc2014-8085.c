@@ -11,9 +11,12 @@
  *	16550A at 0xC0
  *	WizNET ethernet
  *
+ *	Alternate MMU option using highmmu on 8085/MMU card
+ *
  *	TODO:
  *	Bitbang serial emulation
  *	82C54 timer
+ *	Emulate TMS9918A timer bits at least
  */
 
 #include <stdio.h>
@@ -29,6 +32,7 @@
 #include "intel_8085_emulator.h"
 #include "acia.h"
 #include "ide.h"
+#include "ppide.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
@@ -37,10 +41,14 @@ static unsigned int bankreg[4];
 static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
+static uint8_t bankhigh = 0;
+static uint8_t mmureg = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 static uint8_t acia_uart;
+
+struct ppide *ppide;
 
 static uint16_t tstate_steps = 369;	/* RC2014 speed (7.4MHz)*/
 
@@ -77,10 +85,26 @@ static int trace = 0;
    memory fitted */
 uint8_t i8085_do_read(uint16_t addr)
 {
-	/* We don't look for ED with M1, followed directly by 4D as the current
-	   8085 board lacks an M1 cycle generator so even though we can fake a
-	   RETI sequence on the CPU we can't do so on the board! */
-	if (bankenable) {
+	if (bankhigh) {
+		uint8_t reg = mmureg;
+		uint8_t val;
+		uint32_t higha;
+		if (addr < 0xE000)
+			reg >>= 1;
+		higha = (reg & 0x40) ? 1 : 0;
+		higha |= (reg & 0x10) ? 2 : 0;
+		higha |= (reg & 0x4) ? 4 : 0;
+		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
+
+		val = ramrom[(higha << 16) + addr];
+		if (trace & TRACE_MEM) {
+			fprintf(stderr, "R %04X[%02X] = %02X\n",
+				(unsigned int)addr,
+				(unsigned int)higha,
+				(unsigned int)val);
+		}
+		return val;
+	} else 	if (bankenable) {
 		unsigned int bank = (addr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
@@ -105,7 +129,29 @@ uint8_t i8085_read(uint16_t addr)
 
 void i8085_write(uint16_t addr, uint8_t val)
 {
-	if (bankenable) {
+	if (bankhigh) {
+		uint8_t reg = mmureg;
+		uint8_t higha;
+		if (addr < 0xE000)
+			reg >>= 1;
+		higha = (reg & 0x40) ? 1 : 0;
+		higha |= (reg & 0x10) ? 2 : 0;
+		higha |= (reg & 0x4) ? 4 : 0;
+		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
+		
+		if (trace & TRACE_MEM) {
+			fprintf(stderr, "W %04X[%02X] = %02X\n",
+				(unsigned int)addr,
+				(unsigned int)higha,
+				(unsigned int)val);
+		}
+		if (!(higha & 8)) {
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "[Discard: ROM]\n");
+			return;
+		}
+		ramrom[(higha << 16)+ addr] = val;
+	} else if (bankenable) {
 		unsigned int bank = (addr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W %04x[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
@@ -654,10 +700,12 @@ uint8_t i8085_inport(uint8_t addr)
 		fprintf(stderr, "read %02x\n", addr);
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia)
 		return acia_read(acia, addr & 1);
-	if ((addr >= 0x10 && addr <= 0x17) && ide)
+	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
-	if ((addr >= 0x90 && addr <= 0x97) && ide)
+	if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
 		return my_ide_read(addr & 7);
+	if (addr >= 0x20 && addr <= 0x23 && ide == 2)
+		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0x0C && rtc)
@@ -673,12 +721,18 @@ void i8085_outport(uint8_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
-	if ((addr >= 0xA0 && addr <= 0xA7) && acia)
+	if (addr == 0xFF && bankhigh) {
+		mmureg = val;
+		if (trace & TRACE_512)
+			fprintf(stderr, "MMUreg set to %02X\n", val);
+	} else if ((addr >= 0xA0 && addr <= 0xA7) && acia)
 		acia_write(acia, addr & 1, val);
-	else if ((addr >= 0x10 && addr <= 0x17) && ide)
+	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
-	else if ((addr >= 0x90 && addr <= 0x97) && ide)
+	else if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
 		my_ide_write(addr & 7, val);
+	else if (addr >= 0x20 && addr <= 0x23 && ide == 2)
+		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
@@ -750,7 +804,7 @@ int main(int argc, char *argv[])
 	char *idepath;
 	int acia_input;
 
-	while ((opt = getopt(argc, argv, "1abd:e:fi:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:Rw")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -769,10 +823,20 @@ int main(int argc, char *argv[])
 			break;
 		case 'b':
 			bank512 = 1;
+			bankhigh = 0;
+			rom = 0;
+			break;
+		case 'B':
+			bankhigh = 1;
+			bank512 = 0;
 			rom = 0;
 			break;
 		case 'i':
 			ide = 1;
+			idepath = optarg;
+			break;
+		case 'I':
+			ide = 2;
 			idepath = optarg;
 			break;
 		case 'd':
@@ -803,7 +867,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "rc2014: RTC and 16550A clash at 0xC0.\n");
 		exit(1);
 	}
-	if (rom == 0 && bank512 == 0) {
+	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
 		fprintf(stderr, "rc2014: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
@@ -829,7 +893,7 @@ int main(int argc, char *argv[])
 		close(fd);
 	}
 
-	if (bank512) {
+	if (bank512|| bankhigh ) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
@@ -844,19 +908,30 @@ int main(int argc, char *argv[])
 	}
 
 	if (ide) {
-		ide0 = ide_allocate("cf");
-		if (ide0) {
+		/* FIXME: clean up when classic cf becomes a driver */
+		if (ide == 1) {
+			ide0 = ide_allocate("cf");
+			if (ide0) {
+				int ide_fd = open(idepath, O_RDWR);
+				if (ide_fd == -1) {
+					perror(idepath);
+					ide = 0;
+				}
+				else if (ide_attach(ide0, 0, ide_fd) == 0) {
+					ide = 1;
+					ide_reset_begin(ide0);
+				}
+			} else
+				ide = 0;
+		} else {
+			ppide = ppide_create("ppide");
 			int ide_fd = open(idepath, O_RDWR);
 			if (ide_fd == -1) {
 				perror(idepath);
 				ide = 0;
-			}
-			if (ide_attach(ide0, 0, ide_fd) == 0) {
-				ide = 1;
-				ide_reset_begin(ide0);
-			}
-		} else
-			ide = 0;
+			} else
+				ppide_attach(ppide, 0, ide_fd);
+		}
 	}
 
 	if (acia_uart) {
