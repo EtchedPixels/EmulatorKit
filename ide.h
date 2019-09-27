@@ -1,3 +1,6 @@
+#ifndef __IDE_H
+#define __IDE_H
+
 #include <stdint.h>
 
 #define ACME_ROADRUNNER		1	/* 504MB classic IDE drive */
@@ -80,3 +83,4 @@ void ide_detach(struct ide_drive *d);
 void ide_free(struct ide_controller *c);
 
 int ide_make_drive(uint8_t type, int fd);
+#endif
