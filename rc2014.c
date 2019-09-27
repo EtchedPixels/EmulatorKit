@@ -41,6 +41,7 @@
 
 #include "acia.h"
 #include "ide.h"
+#include "ppide.h"
 #include "rtc_bitbang.h"
 #include "w5100.h"
 #include "z80dma.h"
@@ -73,6 +74,8 @@ static uint8_t cpld_serial = 0;
 static uint8_t has_im2;
 static uint8_t has_16x50;
 
+static struct ppide *ppide;
+
 static uint16_t tstate_steps = 369;	/* RC2014 speed */
 
 /* IRQ source that is live in IM2 */
@@ -104,6 +107,7 @@ static volatile int done;
 #define TRACE_IDE	8192
 #define TRACE_SPI	16384
 #define TRACE_SD	32768
+#define TRACE_PPIDE	65536
 
 static int trace = 0;
 
@@ -1782,8 +1786,10 @@ static uint8_t io_read_2014(uint16_t addr)
 		return acia_read(acia, addr & 1);
 	if ((addr >= 0x80 && addr <= 0x83) && sio2)
 		return sio2_read(addr & 3);
-	if ((addr >= 0x10 && addr <= 0x17) && ide)
+	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
+	if (addr >= 0x20 && addr <= 0x27 && ide == 2)
+		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0xC0 && rtc)
@@ -1813,8 +1819,10 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0x83) && sio2)
 		sio2_write(addr & 3, val);
-	else if ((addr >= 0x10 && addr <= 0x17) && ide)
+	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
+	else if (addr >= 0x20 && addr <= 0x27 && ide == 2)
+		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
@@ -2174,7 +2182,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "Aabcd:e:fi:m:pr:sRuw8")) != -1) {
+	while ((opt = getopt(argc, argv, "Aabcd:e:fi:I:m:pr:sRuw8")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2220,6 +2228,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			ide = 1;
+			idepath = optarg;
+			break;
+		case 'I':
+			ide = 2;
 			idepath = optarg;
 			break;
 		case 'c':
@@ -2399,7 +2411,7 @@ int main(int argc, char *argv[])
 		close(fd);
 	}
 
-	if (ide) {
+	if (ide == 1 ) {
 		ide0 = ide_allocate("cf");
 		if (ide0) {
 			int ide_fd = open(idepath, O_RDWR);
@@ -2413,6 +2425,20 @@ int main(int argc, char *argv[])
 			}
 		} else
 			ide = 0;
+	}
+
+	/* FIXME: merge IDE handling once cf is a driver */
+	if (ide == 2) {
+		ppide = ppide_create("ppide");
+		int ide_fd = open(idepath, O_RDWR);
+		if (ide_fd == -1) {
+			perror(idepath);
+			ide = 0;
+		} else
+			ppide_attach(ppide, 0, ide_fd);
+		if (trace & TRACE_PPIDE)
+			ppide_trace(ppide, 1);
+		ide = 0;
 	}
 
 	if (sdpath) {
