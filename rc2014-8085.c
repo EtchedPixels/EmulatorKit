@@ -437,6 +437,8 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
 
     switch(addr) {
     case 0:
+	if (uptr->dlab)
+		return uptr->ls;
         /* receive buffer */
         if (uptr == &uart && uptr->dlab == 0) {
             uart_clear_interrupt(uptr, RXDA);
@@ -444,6 +446,8 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
         }
         break;
     case 1:
+	if (uptr->dlab)
+		return uptr->ms;
         /* IER */
         return uptr->ier;
     case 2:
