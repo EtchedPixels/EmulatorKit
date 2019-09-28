@@ -673,10 +673,6 @@ int main(int argc, char *argv[])
 		acia_uart = 1;
 		acia_input = 1;
 	}
-	if (rtc && uart_16550a) {
-		fprintf(stderr, "rc2014: RTC and 16550A clash at 0xC0.\n");
-		exit(1);
-	}
 	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
 		fprintf(stderr, "rc2014: no ROM\n");
 		exit(EXIT_FAILURE);
