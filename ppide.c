@@ -29,11 +29,11 @@ void ppide_write(struct ppide *ppide, uint8_t addr, uint8_t val)
             break;
         case 2:	/* Port C - address/control lines */
             ppide->pioreg[addr] = val;
-            if (ppide->ide)
+            if (ppide->ide == NULL)
                 return;
             if (val & 0x80) {
                 if (ppide->trace)
-                    fprintf(stderr, "ide in reset.\n");
+                    fprintf(stderr, "ide reset state (%02X).\n", val);
                 ide_reset_begin(ppide->ide);
                 return;
             }
