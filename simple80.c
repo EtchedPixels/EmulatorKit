@@ -19,6 +19,17 @@
  *	paged in.
  *
  *	Also emulated: RTC card at 0xC0, CTC at 0xD0
+ *
+ *	The following variants are emulated
+ *	-b: Simple80 as built with R16 wrongly wired to VCC
+ *	-1: Simple80 with RTSB wired to A16 and DTRB to CS2
+ *		(emulates wiring to allow 512K RAM but 128K fitted)
+ *	-5: Simple80 with 512 RAM via RTSB/DTRB/RTSA
+ *
+ *	Not yet emulated
+ *	- SPI hack
+ *	- Timer hack
+ *	- SIO relocation hack
  */
 
 #include <stdio.h>
@@ -33,12 +44,19 @@
 #include "libz80/z80.h"
 #include "ide.h"
 
-static uint8_t ram[131072];
+static uint8_t ram[512 * 1024];
 static uint8_t rom[65536];
 
 static uint8_t romen = 1;
 static uint8_t fast = 0;
 static uint8_t banknum = 1;
+static uint8_t ramen = 0;	/* For read, write is always enabled */
+static uint8_t ramen2 = 1;	/* CS2 - pulled up on unmodified board */
+static uint8_t ram128 = 0;
+static uint8_t ram512 = 0;
+static uint8_t boardmod = 0;	/* Unmodified */
+
+static unsigned int r16bug = 0;
 
 static Z80Context cpu_z80;
 static uint8_t int_recalc = 0;
@@ -72,10 +90,18 @@ static uint8_t mem_read(int unused, uint16_t addr)
 
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R");
-	if (romen)
+	if (romen) {
 		r = rom[addr];
-	else
+		if (r != ram[addr + 65536 * banknum] && ramen && ramen2)
+			fprintf(stderr, "[PC = %04X: RHAZARD %04X %02x %02X]\n",
+				cpu_z80.PC, addr, rom[addr], ram[addr + 65536 * banknum]);
+	} else if (ramen && ramen2) {
 		r = ram[addr + 65536 * banknum];
+	} else {
+		fprintf(stderr, "[PC = %04X: NO DATA %04X]\n",
+				cpu_z80.PC, addr);
+		r = 0xFF;
+	}
 	if (trace & TRACE_MEM)
 		fprintf(stderr, " %04X <- %02X\n", addr, r);
 
@@ -105,7 +131,7 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X -> %02X\n", addr, val);
 	if (romen && val != rom[addr]) {
-		fprintf(stderr, "[PC = %04X: HAZARD %04X %02x %02X]\n",
+		fprintf(stderr, "[PC = %04X: WHAZARD %04X %02x %02X]\n",
 			cpu_z80.PC, addr, rom[addr], val);
 	}
 	ram[addr + 65536 * banknum] = val;
@@ -457,7 +483,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 				romen = (val & 0x40) ? 0 : 1;
 				if (trace & TRACE_BANK)
 					fprintf(stderr, "[ROMen = %d.]\n", romen);
-			} else {
+			} else if (!r16bug && !boardmod) {
 				banknum = (val & 0x40) ? 0 : 1;
 				if (trace & TRACE_BANK)
 					fprintf(stderr, "[RAM A16 = %d.]\n", banknum);
@@ -477,6 +503,44 @@ static void sio2_write(uint16_t addr, uint8_t val)
 			if (chan != sio && r == 2)
 				chan->rr[2] = val;
 			chan->wr[0] &= ~007;
+			if (r == 5 && chan == sio) {
+				/* Setting DTRA high sets the pin low which turns on
+				   the RAM */
+				ramen = (val & 0x80) ? 1 : 0;
+				if (trace & TRACE_BANK)
+					fprintf(stderr, "[RAMen = %d.]\n", ramen);
+			}
+			if (boardmod) {
+				/* Modified board */
+				if (r == 5 && chan == sio && ram512) {
+					banknum &= ~0x04;
+					/* RTSA is A18 */
+					banknum |= (val & 0x02) ? 0x00 : 0x04;
+					if (trace & TRACE_BANK)
+						fprintf(stderr, "[banknum = %d.]\n", banknum);
+				}
+				/* DTRB is A17, RTSB is A16 */
+				if (r == 5 && chan == sio + 1) {
+					banknum &= ~0x03;
+					/* DTRB is A17 */
+					banknum |= (val & 0x80) ? 0x00 : 0x02;
+					/* RTSB is A16 */
+					banknum |= (val & 0x02) ? 0x00 : 0x01;
+					/* If the RAM chip is a 128K RAM then A18
+					   is not connected and A17 actually drives
+					   CS1 which needs to be high */
+					if (ram128) {
+						/* DTRB high so !DTRB pin low */
+						if (banknum & 0x02)
+							ramen2 = 0;
+						else
+							ramen2 = 1;
+						banknum &= 1;
+					}
+					if (trace & TRACE_BANK)
+						fprintf(stderr, "[banknum = %d, RAMen2 = %d.]\n", banknum, ramen2);
+				}
+			}
 			break;
 		}
 		/* Control */
@@ -999,7 +1063,7 @@ int main(int argc, char *argv[])
 	char *rompath = "simple80.rom";
 	char *idepath = "simple80.cf";
 
-	while ((opt = getopt(argc, argv, "d:i:r:ft")) != -1) {
+	while ((opt = getopt(argc, argv, "d:i:r:ftb15")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -1013,6 +1077,21 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'b':
+			r16bug = 1;
+			break;
+		case '1':
+			/* Modified board, 128K RAM */
+			ram128 = 1;
+			ram512 = 0;
+			boardmod = 1;
+			break;
+		case '5':
+			/* Modified board, 512K RAM */
+			ram512 = 1;
+			ram128 = 0;
+			boardmod = 1;
 			break;
 		default:
 			usage();
