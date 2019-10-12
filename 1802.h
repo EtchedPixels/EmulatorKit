@@ -32,6 +32,6 @@ extern void cp1802_dma_out(struct cp1802 *, uint8_t);
 /* Provided by the CPU emulation */
 extern void cp1802_reset(struct cp1802 *);
 extern void cp1802_interrupt(struct cp1802 *, int);
-extern void cp1802_run_cycles(struct cp1802 *);
+extern int cp1802_run(struct cp1802 *);
 extern void cp1802_dma_in_cycle(struct cp1802 *);
 extern void cp1802_dma_out_cycle(struct cp1802 *);

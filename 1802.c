@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "1802.h"
 
@@ -333,4 +334,10 @@ int cp1802_run(struct cp1802 *cpu)
         interrupt(cpu);
     execute_op(cpu);
     return cpu->mcycles;
+}
+
+/* This is near enough right - D in fact isn not always 0 */
+void cp1802_reset(struct cp1802 *cpu)
+{
+    memset(cpu, 0, sizeof(*cpu));
 }

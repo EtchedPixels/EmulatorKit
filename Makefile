@@ -1,7 +1,7 @@
 
 CFLAGS = -Wall -pedantic
 
-all:	rc2014 rc2014-6502 rc2014-8085 rbcv2 searle linc80 makedisk \
+all:	rc2014 rc2014-1802 rc2014-6502 rc2014-8085 rbcv2 searle linc80 makedisk \
 	mbc2 smallz80 sbc2g z80mc simple80
 
 rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o
@@ -23,6 +23,9 @@ linc80:	linc80.o ide.o
 mbc2:	mbc2.o ide.o
 	(cd libz80; make)
 	cc -g3 mbc2.o libz80/libz80.o -o mbc2
+
+rc2014-1802: rc2014-1802.o 1802.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
+	cc -g3 rc2014-1802.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o 1802.o -o rc2014-1802
 
 rc2014-6502: rc2014-6502.o 6502.o 6502dis.o
 	cc -g3 rc2014-6502.o ide.o w5100.o 6502.o 6502dis.o -o rc2014-6502
