@@ -39,7 +39,7 @@ static uint8_t have_ctc = 0;
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
-static uint8_t iopage = 0xC0;
+static uint8_t iopage = 0xFE;
 static uint16_t addrinvert = 0x0000;
 
 static uint8_t fake_m1;
