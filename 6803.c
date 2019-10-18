@@ -1967,6 +1967,14 @@ void m6803_rx_byte(struct m6803 *cpu, uint8_t c)
     }
 }
 
+void m6803_tx_done(struct m6803 *cpu)
+{
+    if (!(cpu->trcsr & TRCSR_TDRE)) {
+        cpu->trcsr |= TRCSR_TDRE;
+        m6803_sci_ints(cpu);
+    }
+}
+
 uint8_t m6803_read_io(struct m6803 *cpu, uint8_t addr)
 {
     uint8_t val;

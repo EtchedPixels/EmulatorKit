@@ -74,10 +74,17 @@ extern uint8_t m6803_read(struct m6803 *cpu, uint16_t addr);
 extern void m6803_write(struct m6803 *cpu, uint16_t addr, uint8_t data);
 
 extern void m6803_sci_change(struct m6803 *cpu);
-extern uint8_t m6803_tx_byte(struct m6803 *cpu, uint8_t byte);
+extern void m6803_tx_byte(struct m6803 *cpu, uint8_t byte);
 extern void m6803_port_output(struct m6803 *cpu, int port);
 extern uint8_t m6803_port_input(struct m6803 *cpu, int port);
 
+/* Provided by the 6803 emulator */
+extern void m6803_reset(struct m6803 *cpu, int mode);
+extern int m6803_execute(struct m6803 *cpu);
+extern void m6803_clear_interrupt(struct m6803 *cpu, int irq);
+extern void m6803_raise_interrupt(struct m6803 *cpu, int irq);
+extern void m6803_rx_byte(struct m6803 *cpu, uint8_t byte);
 /* These are more internal but useful for debug/trace */
 extern void m6803_do_write(struct m6803 *cpu, uint16_t addr, uint8_t val);
 extern uint8_t m6803_do_read(struct m6803 *cpu, uint16_t addr);
+extern void m6803_tx_done(struct m6803 *cpu);
