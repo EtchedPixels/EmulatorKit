@@ -48,7 +48,7 @@ struct rtc *rtcdev;
 
 /* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
    rate and get 115200 baud - which is pushing it admittedly! */
-static uint16_t clockrate =  364;
+static uint16_t clockrate =  364/4;
 
 /* Who is pulling on the IRQ1 interrupt line */
 
@@ -211,6 +211,8 @@ void m6803_outport(uint8_t addr, uint8_t val)
 		if (trace & TRACE_512)
 			fprintf(stderr, "MMUreg set to %02X\n", val);
 	}
+	else if (addr == 0x80)
+		fprintf(stderr, "[%02X] ", val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
 	else if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
@@ -237,10 +239,13 @@ void m6803_outport(uint8_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-uint8_t m6803_read(struct m6803 *cpu, uint16_t addr)
+uint8_t m6803_read_op(struct m6803 *cpu, uint16_t addr, int debug)
 {
-	if (addr >> 8 == 0xFE)
+	if (addr >> 8 == 0xFE) {
+		if (debug)
+			return 0xFF;
 		return m6803_inport(addr & 0xFF);
+	}
 	if (bankhigh) {
 		uint8_t reg = mmureg;
 		uint8_t val;
@@ -253,7 +258,7 @@ uint8_t m6803_read(struct m6803 *cpu, uint16_t addr)
 		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
 
 		val = ramrom[(higha << 16) + addr];
-		if (trace & TRACE_MEM) {
+		if (!debug && (trace & TRACE_MEM)) {
 			fprintf(stderr, "R %04X[%02X] = %02X\n",
 				(unsigned int)addr,
 				(unsigned int)higha,
@@ -262,15 +267,26 @@ uint8_t m6803_read(struct m6803 *cpu, uint16_t addr)
 		return val;
 	} else 	if (bankenable) {
 		unsigned int bank = (addr & 0xC000) >> 14;
-		if (trace & TRACE_MEM)
+		if (!debug && (trace & TRACE_MEM))
 			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
 		addr &= 0x3FFF;
 		return ramrom[(bankreg[bank] << 14) + addr];
 	}
-	if (trace & TRACE_MEM)
+	if (!debug && (trace & TRACE_MEM))
 		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
 	return ramrom[addr];
 }
+
+uint8_t m6803_debug_read(struct m6803 *cpu, uint16_t addr)
+{
+	return m6803_read_op(cpu, addr, 1);
+}
+
+uint8_t m6803_read(struct m6803 *cpu, uint16_t addr)
+{
+	return m6803_read_op(cpu, addr, 0);
+}
+
 
 void m6803_write(struct m6803 *cpu, uint16_t addr, uint8_t val)
 {
