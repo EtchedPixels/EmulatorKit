@@ -55,6 +55,7 @@ static uint8_t ramen2 = 1;	/* CS2 - pulled up on unmodified board */
 static uint8_t ram128 = 0;
 static uint8_t ram512 = 0;
 static uint8_t boardmod = 0;	/* Unmodified */
+static uint8_t sioa15 = 0;	/* SIO on A15 not A7 */
 
 static unsigned int r16bug = 0;
 
@@ -980,11 +981,13 @@ static uint8_t ctc_read(uint8_t channel)
 static uint8_t io_read(int unused, uint16_t addr)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
-	addr &= 0xFF;
-	if (!(addr & 0x80))
+		fprintf(stderr, "read %04x\n", addr);
+	if (sioa15 && addr < 0x8000)
 		return sio2_read(addr & 3);
-	if (ide && !(addr & 0x40))
+	addr &= 0xFF;
+	if (!(addr & 0x80) && !sioa15)
+		return sio2_read(addr & 3);
+	if (ide && !(addr & 0x40) && (addr & 0x80))
 		return my_ide_read(addr & 7);
 	if ((addr & 0xF0) == 0xC0)
 		return rtc_read();
@@ -998,11 +1001,13 @@ static uint8_t io_read(int unused, uint16_t addr)
 static void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %02x <- %02x\n", addr, val);
-	addr &= 0xFF;
-	if (!(addr & 0x80))
+		fprintf(stderr, "write %04x <- %02x\n", addr, val);
+	if (sioa15 && addr < 0x8000)
 		sio2_write(addr & 3, val);
-	else if (ide && !(addr & 0x40))
+	addr &= 0xFF;
+	if (!(addr & 0x80) && !sioa15)
+		sio2_write(addr & 3, val);
+	else if (ide && !(addr & 0x40) && (addr & 0x80))
 		my_ide_write(addr & 7, val);
 	else if ((addr & 0xF0) == 0xC0)
 		rtc_write(val);
@@ -1063,7 +1068,7 @@ int main(int argc, char *argv[])
 	char *rompath = "simple80.rom";
 	char *idepath = "simple80.cf";
 
-	while ((opt = getopt(argc, argv, "d:i:r:ftb15")) != -1) {
+	while ((opt = getopt(argc, argv, "d:i:r:ftb15S")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -1092,6 +1097,9 @@ int main(int argc, char *argv[])
 			ram512 = 1;
 			ram128 = 0;
 			boardmod = 1;
+			break;
+		case 'S':
+			sioa15 = 1;
 			break;
 		default:
 			usage();
