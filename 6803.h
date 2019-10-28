@@ -71,6 +71,7 @@ struct m6803 {
 #define IRQ_SCI		0x20
 
 extern uint8_t m6803_read(struct m6803 *cpu, uint16_t addr);
+extern uint8_t m6803_debug_read(struct m6803 *cpu, uint16_t addr);
 extern void m6803_write(struct m6803 *cpu, uint16_t addr, uint8_t data);
 
 extern void m6803_sci_change(struct m6803 *cpu);
@@ -87,4 +88,5 @@ extern void m6803_rx_byte(struct m6803 *cpu, uint8_t byte);
 /* These are more internal but useful for debug/trace */
 extern void m6803_do_write(struct m6803 *cpu, uint16_t addr, uint8_t val);
 extern uint8_t m6803_do_read(struct m6803 *cpu, uint16_t addr);
+extern uint8_t m6803_do_debug_read(struct m6803 *cpu, uint16_t addr);
 extern void m6803_tx_done(struct m6803 *cpu);
