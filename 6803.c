@@ -69,7 +69,7 @@ static char *m6803_flags(struct m6803 *cpu)
         if (cpu->p & (1 << i))
             buf[i] = "CVZNIH"[i];
         else
-            buf[i] = 0;
+            buf[i] = '-';
     }
     return buf;
 }
@@ -80,275 +80,338 @@ static void m6803_cpu_state(struct m6803 *cpu)
         cpu->pc, m6803_flags(cpu), cpu->a, cpu->b, cpu->x, cpu->s);
 }
 
-static char *opmap[] = {
+static char *opmap[256] = {
     /* 0x00 */
     NULL,
     "NOP",
     NULL,
     NULL,
+
     "LSRD",
     "ASLD",
     "TAP",
     "TPA",
+
     "INX",
     "DEX",
     "CLV",
     "SEV",
+
     "CLC",
     "SEC",
     "CLI",
     "SEI",
+
     /* 0x10 */
     "SBA",
     "CBA",
     NULL,
     NULL,
+
     NULL,
     NULL,
     "TAB",
     "TBA",
+
     NULL,
     "DAA",
     NULL,
     "ABA",
+
     NULL,
     NULL,
     NULL,
     NULL,
+
     /* 0x20 */
     "BRA b",
     "BRN b",
     "BHI b",
     "BLS b",
+
     "BCC b",
     "BCS b",
     "BNE b",
     "BEQ b",
+
     "BVC b",
     "BVS b",
     "BPL b",
     "BMI b",
+
     "BGE b",
     "BLT b",
     "BGT b",
     "BLE b",
+
     /* 0x30 */
     "TSX",
     "INS",
     "PULA",
     "PULB",
+
     "DES",
     "TXS",
     "PSHA",
-    "PSHB"
+    "PSHB",
+
     "PULX",
     "RTS",
     "ABX",
     "RTI",
+
     "PSHX",
     "MUL",
     "WAI",
     "SWI",
+
     /* 0x40 */
     "NEGA",
     NULL,
     NULL,
     "COMA",
+
     "LSRA",
     NULL,
     "RORA",
     "ASRA",
+
     "ASLA",
     "ROLA",
     "DECA",
     NULL,
+
     "INCA",
     "TSTA",
     "T(HCF)",
     "CLRA",
+
     /* 0x50 */
     "NEGB",
     NULL,
     NULL,
     "COMB",
+
     "LSRB",
     NULL,
     "RORB",
     "ASRB",
+
     "ASLB",
     "ROLB",
     "DECB",
     NULL,
+
     "INCB",
     "TSTB",
     "T(HCF)",
     "CLRB",
+
     /* 0x60 */
     "NEG x",
     NULL,
     NULL,
     "COM x,X",
+
     "LSR x,X",
     NULL,
     "ROR x,X",
     "ASR x,X",
+
     "ASL x,X",
     "ROL x,X",
     "DEC x,X",
     NULL,
+
     "INC x,X",
     "TST x,X",
     "JMP x,X0",
     "CLR x,X",
+
     /* 0x70 */
     "NEG e",
     NULL,
     NULL,
     "COM e",
+
     "LSR e",
     NULL,
     "ROR e",
     "ASR e",
+
     "ASL e",
     "ROL e",
     "DEC e",
     NULL,
+
     "INC e",
     "TST e",
     "JMP e0",
     "CLR e",
+
     /* 0x80 */
     "SUBA #i",
     "CMPA #i",
     "SBCA #i",
     "SUBD #ii",
+
     "ANDA #i",
     "BITA #i",
     "LDAA #i",
     NULL,
+
     "EORA #i",
     "ADCA #i",
     "ORAA #i",
     "ADDA #i",
+
     "CPX #ii",
     "BSR b",
     "LDS #ii",
     NULL,
+
     /* 0x90 */
     "SUBA d",
     "CMPA d",
     "SBCA d",
     "SUBD d",
+
     "ANDA d",
     "BITA d",
     "LDAA d",
     "STAA d",
+
     "EORA d",
     "ADCA d",
     "ORAA d",
     "ADDA d",
+
     "CPX d2",
     "JSR d0",
     "LDS d2",
     "STS d2",
+
     /* 0xA0 */
     "SUBA x,X",
     "CMPA x,X",
     "SBCA x,X",
     "SUBD x,X",
+
     "ANDA x,X",
     "BITA x,X",
     "LDAA x,X",
     "STAA x,X",
+
     "EORA x,X",
     "ADCA x,X",
     "ORAA x,X",
     "ADDA x,X",
+
     "CPX x,X2",
     "JSR x,X0",
     "LDS x,X2",
     "STS x,X2",
+
     /* 0xB0 */
     "SUBA e",
     "CMPA e",
     "SBCA e",
     "SUBD e",
+
     "ANDA e",
     "BITA e",
     "LDAA e",
     "STAA e",
+
     "EORA e",
     "ADCA e",
     "ORAA e",
     "ADDA e",
+
     "CPX e2",
     "JSR e0",
     "LDS e2",
     "STS e2",
+
     /* 0xC0 */
     "SUBB #i",
     "CMPB #i",
     "SBCB #i",
     "ADDD #ii",
+
     "ANDB #i",
     "BITB #i",
     "LDAB #i",
     NULL,
+
     "EORB #i",
     "ADCB #i",
     "ORAB #i",
     "ADDB #i",
+
     "LDD #ii",
     NULL,
     "LDX #ii",
     NULL,
+
     /* 0xD0 */
     "SUBB d",
     "CMPB d",
     "SBCB d",
     "ADDD d",
+
     "ANDB d",
     "BITB d",
     "LDAB d",
     "STAB d",
+
     "EORB d",
     "ADCB d",
     "ORAB d",
     "ADDB d",
+
     "LDD d2",
     "STD d2",
     "LDX d2",
     "STX d2",
+
     /* 0xE0 */
     "SUBB x,X",
     "CMPB x,X",
     "SBCB x,X",
     "ADDD x,X",
+
     "ANDB x,X",
     "BITB x,X",
     "LDAB x,X",
     "STAB x,X",
+
     "EORB x,X",
     "ADCB x,X",
     "ORAB x,X",
     "ADDB x,X",
+
     "LDD x,X2",
     "STD x,X2",
     "LDX x,X2",
     "STX x,X2",
+
     /* 0xF0 */
     "SUBB e",
     "CMPB e",
     "SBCB e",
     "ADDD e",
+
     "ANDB e",
     "BITB e",
     "LDAB e",
     "STAB e",
+
     "EORB e",
     "ADCB e",
     "ORAB e",
     "ADDB e",
+
     "LDD e2",
     "STD e2",
     "LDX e2",
@@ -375,37 +438,39 @@ static void m6803_disassemble(struct m6803 *cpu, uint16_t pc)
         if (*x == '2') {
             ppair = 1;
             x++;
+            continue;
         }
         /* Supress data info for JMP/JSR etc */
         if (*x == '0') {
             pcontent = 0;
             x++;
+            continue;
         }
         if (*x == 'd') {
             /* Direct */
-            addr = m6803_read(cpu, pc++);
+            addr = m6803_do_debug_read(cpu, pc++);
             pcontent = 1;
             fprintf(stderr, "%02X", addr);
         } else if (*x == 'e') {
             /* Extended */
-            addr = m6803_read(cpu, pc++) << 8;
-            addr |= m6803_read(cpu, pc++);
+            addr = m6803_do_debug_read(cpu, pc++) << 8;
+            addr |= m6803_do_debug_read(cpu, pc++);
             pcontent = 1;
             fprintf(stderr, "%04X", addr);
         } else if (*x == 'b') {
             /* Branch */
-            data = m6803_read(cpu, pc++);
+            data = m6803_do_debug_read(cpu, pc++);
             data = (int8_t)data + pc;
             pcontent = 1;
             fprintf(stderr, "%04X", data);
         } else if (*x == 'x') {
             /* Indexed */
-            addr = m6803_read(cpu, pc++);
+            addr = m6803_do_debug_read(cpu, pc++);
             fprintf(stderr, "%02X", addr);
             addr += cpu->x;
             pcontent = 1;
         } else if (*x == 'i')
-            fprintf(stderr, "%02X", m6803_read(cpu, pc++));
+            fprintf(stderr, "%02X", m6803_do_debug_read(cpu, pc++));
         else if (*x == 'a')
             fprintf(stderr, " (%04X)", addr);
         else
@@ -417,11 +482,11 @@ static void m6803_disassemble(struct m6803 *cpu, uint16_t pc)
        MMIO */
     if (pcontent && addr > 0x1f) {
         if (ppair) {
-            data = m6803_read(cpu, addr++) << 8;
-            data |= m6803_read(cpu, addr);
+            data = m6803_do_debug_read(cpu, addr++) << 8;
+            data |= m6803_do_debug_read(cpu, addr);
             fprintf(stderr, " [%04X]", data);
         } else {
-            fprintf(stderr, " [%02X]", m6803_read(cpu, addr));
+            fprintf(stderr, " [%02X]", m6803_do_debug_read(cpu, addr));
         }
     }
     fprintf(stderr, "\n");
@@ -510,9 +575,11 @@ static uint8_t m6803_maths8(struct m6803 *cpu, uint8_t a, uint8_t b, uint8_t r)
         cpu->p |= P_V;
     if (!((a | b) & 0x80) && (r & 0x80))
         cpu->p |= P_V;
-    if (a & b & 0x80)
+    if (~a & b & 0x80)
         cpu->p |= P_C;
-    if (!(r & 0x80) && ((a | b) & 0x80))
+    if (b & r & 0x80)
+        cpu->p |= P_C;
+    if (~a & r & 0x80)
         cpu->p |= P_C;
     /* And half carry for DAA */
     if ((a & b & 0x08) || ((b & ~r) & 0x08) || ((a & ~r) & 0x08))
@@ -533,9 +600,11 @@ static uint8_t m6803_maths8_noh(struct m6803 *cpu, uint8_t a, uint8_t b, uint8_t
         cpu->p |= P_V;
     if (!((a | b) & 0x80) && (r & 0x80))
         cpu->p |= P_V;
-    if (a & b & 0x80)
+    if (~a & b & 0x80)
         cpu->p |= P_C;
-    if (!(r & 0x80) && ((a | b) & 0x80))
+    if (b & r & 0x80)
+        cpu->p |= P_C;
+    if (~a & r & 0x80)
         cpu->p |= P_C;
     return r;
 }
@@ -624,14 +693,16 @@ static void m6803_hcf(struct m6803 *cpu)
 static uint8_t m6803_execute_one(struct m6803 *cpu)
 {
     uint16_t fetch_pc = cpu->pc;
-    uint8_t opcode = m6803_do_read(cpu, cpu->pc++);
+    uint8_t opcode = m6803_do_read(cpu, cpu->pc);
     uint8_t data8, tmp8;
     uint16_t data16, tmp16;
     uint8_t tmpc, tmp2;
     uint8_t add;
 
     if (cpu->debug)
-        m6803_disassemble(cpu, fetch_pc);
+        m6803_disassemble(cpu, cpu->pc);
+
+    cpu->pc++;
 
     /* Fetch address/data for non immediate opcodes */
     switch(opcode & 0xF0) {
@@ -875,7 +946,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         /* No flags */
         return 3;
     case 0x32:	/* PULA */
-        cpu->a = m6803_do_read(cpu, cpu->s++);	/* check order */
+        cpu->a = m6803_pull(cpu);
         /* No flags */
         return 4;
     case 0x33:	/* PULB */
@@ -1047,9 +1118,9 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         return 2;
     case 0x5A: 	/* DECB */
         /* Weird as the don't affect C */
-        cpu->a--;
-        m6803_logic8(cpu, cpu->a);
-        if (cpu->a == 0x7F)	/* DEC from 0x80) */
+        cpu->b--;
+        m6803_logic8(cpu, cpu->b);
+        if (cpu->b == 0x7F)	/* DEC from 0x80) */
             cpu->p |= P_V;
         return 2;
         return 2;
@@ -1252,7 +1323,6 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         cpu->a = m6803_maths8_noh(cpu, cpu->a, data8, cpu->a - data8);
         return 2;
     case 0x81:	/* CMPA immed */
-        tmp8 = cpu->a - data8;
         m6803_maths8_noh(cpu, cpu->a, data8, cpu->a - data8);
         return 2;
     case 0x82:	/* SBCA immed */
@@ -1313,7 +1383,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         return 3;
     case 0x91:	/* CMPA dir */
         tmp8 = m6803_do_read(cpu, data8);
-        m6803_maths8_noh(cpu, cpu->a, data8, cpu->a - data8);
+        m6803_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8);
         return 3;
     case 0x92:	/* SBCA dir */
         tmp8 = m6803_do_read(cpu, data8);
@@ -1339,8 +1409,9 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0x96:	/* LDAA */
         tmp8 = m6803_do_read(cpu, data8);
         cpu->a = tmp8;
+        m6803_logic8(cpu, cpu->a);
         return 3;
-    case 0x97:	/* STA */
+    case 0x97:	/* STAA */
         m6803_do_write(cpu, data8, cpu->a);
         m6803_logic8(cpu, cpu->a);
         return 3;
@@ -1390,7 +1461,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         return 4;
     case 0xA1:	/* CMPA indexed */
         tmp8 = m6803_do_read(cpu, data16);
-        m6803_maths8_noh(cpu, cpu->a, data8, cpu->a - data8);
+        m6803_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8);
         return 4;
     case 0xA2:	/* SBCA indexed */
         tmp8 = m6803_do_read(cpu, data16);
@@ -1416,8 +1487,9 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xA6:	/* LDAA */
         tmp8 = m6803_do_read(cpu, data16);
         cpu->a = tmp8;
+        m6803_logic8(cpu, cpu->a);
         return 4;
-    case 0xA7:	/* STA */
+    case 0xA7:	/* STAA */
         m6803_do_write(cpu, data16, cpu->a);
         m6803_logic8(cpu, cpu->a);
         return 4;
@@ -1467,7 +1539,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         return 4;
     case 0xB1:	/* CMPA extended */
         tmp8 = m6803_do_read(cpu, data16);
-        m6803_maths8_noh(cpu, cpu->a, data8, cpu->a - data8);
+        m6803_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8);
         return 4;
     case 0xB2:	/* SBCA extended */
         tmp8 = m6803_do_read(cpu, data16);
@@ -1493,8 +1565,9 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xB6:	/* LDAA */
         tmp8 = m6803_do_read(cpu, data16);
         cpu->a = tmp8;
+        m6803_logic8(cpu, cpu->a);
         return 4;
-    case 0xB7:	/* STA */
+    case 0xB7:	/* STAA */
         m6803_do_write(cpu, data16, cpu->a);
         m6803_logic8(cpu, cpu->a);
         return 4;
@@ -1537,7 +1610,6 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         cpu->b = m6803_maths8_noh(cpu, cpu->b, data8, cpu->b - data8);
         return 2;
     case 0xC1:	/* CMPB immed */
-        tmp8 = cpu->b - data8;
         m6803_maths8_noh(cpu, cpu->b, data8, cpu->b - data8);
         return 2;
     case 0xC2:	/* SBCB immed */
@@ -1594,7 +1666,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         return 3;
     case 0xD1:	/* CMPB dir */
         tmp8 = m6803_do_read(cpu, data8);
-        m6803_maths8_noh(cpu, cpu->b, data8, cpu->b - data8);
+        m6803_maths8_noh(cpu, cpu->b, tmp8, cpu->b - tmp8);
         return 3;
     case 0xD2:	/* SBCB dir */
         tmp8 = m6803_do_read(cpu, data8);
@@ -1620,8 +1692,9 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xD6:	/* LDAB */
         tmp8 = m6803_do_read(cpu, data8);
         cpu->b = tmp8;
+        m6803_logic8(cpu, cpu->b);
         return 3;
-    case 0xD7:	/* STB */
+    case 0xD7:	/* STAB */
         m6803_do_write(cpu, data8, cpu->b);
         m6803_logic8(cpu, cpu->b);
         return 3;
@@ -1669,7 +1742,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         return 4;
     case 0xE1:	/* CMPB indexed */
         tmp8 = m6803_do_read(cpu, data16);
-        m6803_maths8_noh(cpu, cpu->b, data8, cpu->b - data8);
+        m6803_maths8_noh(cpu, cpu->b, tmp8, cpu->b - tmp8);
         return 4;
     case 0xE2:	/* SBCB indexed */
         tmp8 = m6803_do_read(cpu, data16);
@@ -1695,8 +1768,9 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xE6:	/* LDAB */
         tmp8 = m6803_do_read(cpu, data16);
         cpu->b = tmp8;
+        m6803_logic8(cpu, cpu->b);
         return 4;
-    case 0xE7:	/* STB */
+    case 0xE7:	/* STAB */
         m6803_do_write(cpu, data16, cpu->b);
         m6803_logic8(cpu, cpu->b);
         return 4;
@@ -1744,7 +1818,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         return 4;
     case 0xF1:	/* CMPB extended */
         tmp8 = m6803_do_read(cpu, data16);
-        m6803_maths8_noh(cpu, cpu->b, data8, cpu->b - data8);
+        m6803_maths8_noh(cpu, cpu->b, tmp8, cpu->b - tmp8);
         return 4;
     case 0xF2:	/* SBCB extended */
         tmp8 = m6803_do_read(cpu, data16);
@@ -1770,8 +1844,9 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xF6:	/* LDAB */
         tmp8 = m6803_do_read(cpu, data16);
         cpu->b = tmp8;
+        m6803_logic8(cpu, cpu->b);
         return 4;
-    case 0xF7:	/* STB */
+    case 0xF7:	/* STAB */
         m6803_do_write(cpu, data16, cpu->b);
         m6803_logic8(cpu, cpu->b);
         return 4;
@@ -1911,6 +1986,7 @@ void m6803_reset(struct m6803 *cpu, int mode)
     cpu->p2dr = mode << 5;
     cpu->p2ddr = 0;
     cpu->p1ddr = 0;
+    cpu->iram_base = 0x80;	/* We don't yet emulate X/Y1 CPUs */
 }
 
 
@@ -2171,4 +2247,15 @@ void m6803_do_write(struct m6803 *cpu, uint16_t addr, uint8_t val)
         cpu->iram[addr - cpu->iram_base] = val;
     else
         m6803_write(cpu, addr, val);
+}
+
+uint8_t m6803_do_debug_read(struct m6803 *cpu, uint16_t addr)
+{
+    if (addr >= 0x0100)
+        return m6803_debug_read(cpu, addr);
+    if (addr < 0x20)
+        return 0xFF;	/* Strictly we should handle the holes.. */
+    if (cpu->mode == 2 && (cpu->ramcr & RAMCR_RAME) && (addr >= cpu->iram_base && addr <= 0xFF))
+        return cpu->iram[addr - cpu->iram_base];
+    return m6803_debug_read(cpu, addr);
 }
