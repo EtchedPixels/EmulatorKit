@@ -44,6 +44,7 @@
 #include "ppide.h"
 #include "rtc_bitbang.h"
 #include "w5100.h"
+#include "z80copro.h"
 #include "z80dma.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
@@ -73,8 +74,10 @@ static uint8_t wiznet = 0;
 static uint8_t cpld_serial = 0;
 static uint8_t has_im2;
 static uint8_t has_16x50;
+static uint8_t has_copro;
 
 static struct ppide *ppide;
+static struct z80copro *copro;
 
 static uint16_t tstate_steps = 369;	/* RC2014 speed */
 
@@ -108,6 +111,8 @@ static volatile int done;
 #define TRACE_SPI	16384
 #define TRACE_SD	32768
 #define TRACE_PPIDE	65536
+#define TRACE_COPRO	131072
+#define TRACE_COPRO_IO	262144
 
 static int trace = 0;
 
@@ -1777,6 +1782,8 @@ static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
+	if (copro && (addr & 0xFC) == 0xBC)
+		return z80copro_ioread(copro, addr);
 	addr &= 0xFF;
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		return acia_read(acia, addr & 1);
@@ -1810,6 +1817,12 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
+
+	if (copro && (addr & 0xFC) == 0xBC) {
+		z80copro_iowrite(copro, addr, val);
+		return;
+	}
+		
 	addr &= 0xFF;
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		acia_write(acia, addr & 1, val);
@@ -2169,6 +2182,7 @@ int main(int argc, char *argv[])
 	char *rompath = "rc2014.rom";
 	char *sdpath = NULL;
 	char *idepath = NULL;
+	char *copro_rom;
 	int save = 0;
 	int has_acia = 0;
 	int indev;
@@ -2182,7 +2196,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "Aabcd:e:fi:I:m:pr:sRuw8")) != -1) {
+	while ((opt = getopt(argc, argv, "Aabcd:e:fi:I:m:pr:sRuw8C:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2313,6 +2327,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 'C':
+			has_copro = 1;
+			copro_rom = optarg;
 			break;
 		default:
 			usage();
@@ -2468,8 +2486,24 @@ int main(int argc, char *argv[])
 		nic_w5100_reset(wiz);
 	}
 
-
-
+	if (has_copro) {
+		int eprom_fd;
+		copro = z80copro_create();
+		eprom_fd = open(copro_rom, O_RDONLY);
+		if (eprom_fd == -1) {
+			perror(copro_rom);
+			exit(1);
+		}
+		if (read(eprom_fd, z80copro_eprom(copro), 32768) != 32768) {
+			fprintf(stderr, "%s: should be 32K.\n", copro_rom);
+			exit(1);
+		}
+		close(eprom_fd);
+		/* Assume same speed as main processor */
+		copro->tstates = (tstate_steps + 5) / 10;
+		z80copro_trace(copro, (trace >> 17) & 3);
+	}
+		
 	switch(indev) {
 	case INDEV_ACIA:
 		acia_set_input(acia, 1);
@@ -2523,7 +2557,12 @@ int main(int argc, char *argv[])
 		int i;
 		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 100; i++) {
-			Z80ExecuteTStates(&cpu_z80, tstate_steps);
+			int j;
+			for (j = 0; j < 10; j++) {
+				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/10);
+				if (copro)
+					z80copro_run(copro);
+			}
 			if (acia)
 				acia_timer(acia);
 			if (sio2)
@@ -2552,6 +2591,8 @@ int main(int argc, char *argv[])
 				}
 			}
 		}
+		/* TODO: coprocessor int to main if we implement it */
+
 		if (wiznet)
 			w5100_process(wiz);
 		/* Do 5ms of I/O and delays */
