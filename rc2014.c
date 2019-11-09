@@ -66,6 +66,7 @@ static uint8_t switchrom = 1;
 static uint8_t cpuboard = CPUBOARD_Z80;
 
 static uint8_t have_ctc = 0;
+static uint8_t have_pio = 0;
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
 static uint8_t fast = 0;
@@ -75,7 +76,6 @@ static uint8_t cpld_serial = 0;
 static uint8_t has_im2;
 static uint8_t has_16x50;
 static uint8_t has_copro;
-
 static struct ppide *ppide;
 static struct z80copro *copro;
 
@@ -1254,6 +1254,12 @@ static uint8_t ctc_read(uint8_t channel)
 	return val;
 }
 
+static uint8_t sd_clock = 0x10;	/* Bit masks */
+static uint8_t sd_mosi = 0x01;
+static uint8_t sd_miso = 0x80;
+
+static uint8_t sd_port = 1;	/* Channel for data in */
+
 static int sd_mode = 0;
 static int sd_cmdp = 0;
 static int sd_ext = 0;
@@ -1264,6 +1270,8 @@ static uint8_t sd_out[520];
 static int sd_outlen, sd_outp;
 static int sd_fd = -1;
 static off_t sd_lba;
+static int sd_stuff;
+static uint8_t sd_poststuff;
 static const uint8_t sd_csd[17] = {
 
 	0xFE,		/* Sync byte before CSD */
@@ -1285,6 +1293,7 @@ static uint8_t sd_process_command(void)
 	}
 	if (trace & TRACE_SD)
 		fprintf(stderr, "Command received %x\n", sd_cmd[0]);
+	sd_stuff = 1 + (rand() & 7);
 	switch(sd_cmd[0]) {
 	case 0x40+0:		/* CMD 0 */
 		return 0x01;	/* Just respond 0x01 */
@@ -1359,6 +1368,13 @@ static uint8_t sd_card_byte(uint8_t in)
 	if (sd_fd == -1)
 		return 0xFF;
 
+	/* Stuffing on commands */
+	if (sd_stuff) {
+		if (--sd_stuff)
+			return 0xFF;
+		return sd_poststuff;
+	}
+
 	if (sd_mode == 0) {
 		if (in != 0xFF) {
 			sd_mode = 1;	/* Command wait */
@@ -1374,7 +1390,8 @@ static uint8_t sd_card_byte(uint8_t in)
 			sd_mode = 0;
 			/* Reply with either a stuff byte (CMD12) or a
 			   status */
-			return sd_process_command();
+			sd_poststuff = sd_process_command();
+			return 0xFF;
 		}
 		/* Keep talking */
 		return 0xFF;
@@ -1453,10 +1470,10 @@ static void bitbang_spi(uint8_t val)
 		fprintf(stderr, "[Lowered \\CS]\n");
 	oldcs = 0;
 	/* Capture clock edge */
-	if (delta & 0x04) {		/* Clock edge */
-		if (val & 0x04) {	/* Rising - capture in SPI0 */
+	if (delta & sd_clock) {		/* Clock edge */
+		if (val & sd_clock) {	/* Rising - capture in SPI0 */
 			bits <<= 1;
-			bits |= (val & 0x02) ? 1 : 0;
+			bits |= (val & sd_mosi) ? 1 : 0;
 			bitct++;
 			if (bitct == 8) {
 				rxbits = spi_byte_sent(bits);
@@ -1464,8 +1481,8 @@ static void bitbang_spi(uint8_t val)
 			}
 		} else {
 			/* Falling edge */
-			pio->in[1] &= 0xFE;
-			pio->in[1] |= (rxbits & 0x80) ? 0x01 : 0x00;
+			pio->in[sd_port] &= ~sd_miso;
+			pio->in[sd_port] |= (rxbits & 0x80) ? sd_miso : 0x00;
 			rxbits <<= 1;
 			rxbits |= 0x01;
 		}
@@ -1476,10 +1493,17 @@ static void bitbang_spi(uint8_t val)
 
 void pio_data_write(struct z80_pio *pio, uint8_t port, uint8_t val)
 {
-	if (port == 1)
-		bitbang_spi(val);
-	else if (port == 2)
-		pio_cs = val & 7;
+	if (cpuboard == CPUBOARD_MICRO80) {
+		if (port == 0)
+			bitbang_spi(val);
+		else if (port == 1)
+			pio_cs = val & 7;
+	} else {
+		if (port == 1) {
+			pio_cs = (val & 0x08) >> 3;
+			bitbang_spi(val);
+		}
+	}
 }
 
 void pio_strobe(struct z80_pio *pio, uint8_t port)
@@ -1581,6 +1605,24 @@ static uint8_t pio_read(uint8_t addr)
 		break;
 	}
 	return val;
+}
+
+static uint8_t pio_remap[4] = {
+	0,
+	2,
+	1,
+	3
+};
+
+/* With the C/D and A/B lines the other way around */
+static void pio_write2(uint8_t addr, uint8_t val)
+{
+	pio_write(pio_remap[addr], val);
+}
+
+static uint8_t pio_read2(uint8_t addr)
+{
+	return pio_read(pio_remap[addr]);
 }
 
 static void pio_reset(void)
@@ -1784,6 +1826,9 @@ static uint8_t io_read_2014(uint16_t addr)
 		fprintf(stderr, "read %02x\n", addr);
 	if (copro && (addr & 0xFC) == 0xBC)
 		return z80copro_ioread(copro, addr);
+	if ((addr & 0xFF) == 0xBA) {
+		return 0xCC;
+	}
 	addr &= 0xFF;
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		return acia_read(acia, addr & 1);
@@ -1791,7 +1836,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return acia_read(acia, addr & 1);
 	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		return acia_read(acia, addr & 1);
-	if ((addr >= 0x80 && addr <= 0x83) && sio2)
+	if ((addr >= 0x80 && addr <= 0x87) && sio2)
 		return sio2_read(addr & 3);
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
@@ -1799,6 +1844,8 @@ static uint8_t io_read_2014(uint16_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
+	else if (addr >= 0x68 && addr <= 0x6F && have_pio)
+		return pio_read2(addr & 3);
 	if (addr == 0xC0 && rtc)
 		return rtc_read(rtc);
 	/* Scott Baker is 0x90-93, suggested defaults for the
@@ -1822,15 +1869,18 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		z80copro_iowrite(copro, addr, val);
 		return;
 	}
-		
+	if ((addr & 0xFF) == 0xBA) {
+		printf("quart: %02x,%02x\n", (addr >> 11), val);
+		return;
+	}
 	addr &= 0xFF;
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		acia_write(acia, addr & 1, val);
-	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
+	else if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
 		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		acia_write(acia, addr & 1, val);
-	else if ((addr >= 0x80 && addr <= 0x83) && sio2)
+	else if ((addr >= 0x80 && addr <= 0x87) && sio2)
 		sio2_write(addr & 3, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
@@ -1838,6 +1888,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
+	else if (addr >= 0x68 && addr <= 0x6F && have_pio)
+		pio_write2(addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
@@ -2196,7 +2248,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "Aabcd:e:fi:I:m:pr:sRuw8C:")) != -1) {
+	while ((opt = getopt(argc, argv, "Aabcd:e:fi:I:m:pr:sRS:uw8C:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2228,6 +2280,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'S':
 			sdpath = optarg;
+			have_pio = 1;
 			break;
 		case 'e':
 			rombank = atoi(optarg);
@@ -2458,7 +2511,13 @@ int main(int argc, char *argv[])
 			ppide_trace(ppide, 1);
 		ide = 0;
 	}
-
+	/* SD mapping */
+	if (cpuboard == CPUBOARD_MICRO80) {
+		sd_clock = 0x04;
+		sd_mosi = 0x02;
+		sd_port = 1;
+		sd_miso = 1;
+	}
 	if (sdpath) {
 		sd_fd = open(sdpath, O_RDWR);
 		if (sd_fd == -1) {
@@ -2478,6 +2537,8 @@ int main(int argc, char *argv[])
 		sio_reset();
 	if (have_ctc)
 		ctc_init();
+	if (have_pio)
+		pio_reset();
 	if (has_16x50)
 		uart_init(&uart[0]);
 
