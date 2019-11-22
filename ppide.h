@@ -1,5 +1,5 @@
 #ifndef __PPIDE_H
-#define __PIPDE_H
+#define __PPIDE_H
 #include "ide.h"
 
 struct ppide {
