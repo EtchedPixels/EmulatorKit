@@ -118,9 +118,6 @@ static int trace = 0;
 
 static void reti_event(void);
 
-
-/* FIXME: emulate paging off correctly, also be nice to emulate with less
-   memory fitted */
 static uint8_t mem_read0(uint16_t addr)
 {
 	if (bankenable) {
@@ -130,6 +127,8 @@ static uint8_t mem_read0(uint16_t addr)
 		addr &= 0x3FFF;
 		return ramrom[(bankreg[bank] << 14) + addr];
 	}
+	if (bank512 && !bankenable)
+		addr &= 0x3FFF;
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
 	return ramrom[addr];
@@ -2395,7 +2394,7 @@ int main(int argc, char *argv[])
 	if (cpuboard == CPUBOARD_Z80SBC64) {
 		cpld_serial = 1;
 		indev = INDEV_CPLD;
-	} else if (acia == 0 && sio2 == 0) {
+	} else if (has_acia == 0 && sio2 == 0) {
 		if (cpuboard != 3) {
 			fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
 			has_acia = 1;
