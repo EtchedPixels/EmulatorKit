@@ -41,6 +41,10 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#ifdef __OpenBSD__
+#include <sys/select.h>
+#endif
+
 #include "w5100.h"
 
 typedef enum w5100_socket_mode {

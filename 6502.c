@@ -19,7 +19,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#ifndef __MACH__
+#ifdef __OpenBSD__
+#include <sys/malloc.h>
+#elif !defined __MACH__
 #include <malloc.h>
 #endif
 
