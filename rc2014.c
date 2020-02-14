@@ -1869,7 +1869,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		return;
 	}
 	if ((addr & 0xFF) == 0xBA) {
-		printf("quart: %02x,%02x\n", (addr >> 11), val);
+		/* Quart */
 		return;
 	}
 	addr &= 0xFF;
