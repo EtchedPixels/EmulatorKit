@@ -19,9 +19,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#ifndef __MACH__
-#include <malloc.h>
-#endif
 
 #define _6502_PRIVATE
 #include "6502.h"
