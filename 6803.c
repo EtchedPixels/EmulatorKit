@@ -632,7 +632,7 @@ static void m6803_shift8(struct m6803 *cpu, uint8_t r, int c)
 
 /* 16bit maths like this does affect N and V but not necessarily usefully.
    However the behaviour is documented */
-static uint8_t m6803_maths16_noh(struct m6803 *cpu, uint16_t a, uint16_t b, uint16_t r)
+static uint16_t m6803_maths16_noh(struct m6803 *cpu, uint16_t a, uint16_t b, uint16_t r)
 {
     cpu->p &= (P_C|P_Z|P_N);
     if (r == 0)
@@ -1328,8 +1328,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0x82:	/* SBCA immed */
         m6803_maths8_noh(cpu, cpu->a, data8, cpu->a - data8 - CARRY);
         return 2;
-    case 0x83:	/* SUBD immed16 : weird case where the arg is 16bit */
-        data16 = m6803_do_read(cpu, cpu->pc++) | (data8 << 8);
+    case 0x83:	/* SUBD immed16 */
         /* FIXME: flags */
         tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D - data16);
         cpu->a = tmp16 >> 8;
