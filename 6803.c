@@ -503,8 +503,8 @@ static void m6803_push(struct m6803 *cpu, uint8_t val)
 
 static void m6803_push16(struct m6803 *cpu, uint16_t val)
 {
-    m6803_push(cpu, val >> 8);
     m6803_push(cpu, val);
+    m6803_push(cpu, val >> 8);
 }
 
 static uint8_t m6803_pull(struct m6803 *cpu)
@@ -514,8 +514,8 @@ static uint8_t m6803_pull(struct m6803 *cpu)
 
 static uint16_t m6803_pull16(struct m6803 *cpu)
 {
-    uint16_t r = m6803_pull(cpu);
-    r |= m6803_pull(cpu) << 8;
+    uint16_t r = m6803_pull(cpu) << 8;
+    r |= m6803_pull(cpu);
     return r;
 }
 
