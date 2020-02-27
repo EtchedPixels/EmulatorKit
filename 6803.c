@@ -274,7 +274,7 @@ static char *opmap[256] = {
     "SUBA d",
     "CMPA d",
     "SBCA d",
-    "SUBD d",
+    "SUBD d2",
 
     "ANDA d",
     "BITA d",
@@ -358,7 +358,7 @@ static char *opmap[256] = {
     "SUBB d",
     "CMPB d",
     "SBCB d",
-    "ADDD d",
+    "ADDD d2",
 
     "ANDB d",
     "BITB d",
@@ -1615,8 +1615,6 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         m6803_maths8_noh(cpu, cpu->b, data8, cpu->b - data8 - CARRY);
         return 2;
     case 0xC3:	/* ADDD immed16 : weird case where the arg is 16bit */
-        data16 = m6803_do_read(cpu, cpu->pc++) | (data8 << 8);
-        /* FIXME: flags */
         tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D + data16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
