@@ -634,7 +634,7 @@ static void m6803_shift8(struct m6803 *cpu, uint8_t r, int c)
    However the behaviour is documented */
 static uint16_t m6803_maths16_noh(struct m6803 *cpu, uint16_t a, uint16_t b, uint16_t r)
 {
-    cpu->p &= (P_C|P_Z|P_N);
+    cpu->p &= ~(P_C|P_Z|P_N);
     if (r == 0)
         cpu->p |= P_Z;
     if (r & 0x8000)
@@ -788,7 +788,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         cpu->p |= P_C;
         return 2;
     case 0x0E:	/* CLI */
-        cpu->p &= P_I;
+        cpu->p &= ~P_I;
         return 2;
     case 0x0F:	/* SEI */
         cpu->p |= P_I;
