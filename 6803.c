@@ -639,15 +639,15 @@ static uint16_t m6803_maths16_noh(struct m6803 *cpu, uint16_t a, uint16_t b, uin
         cpu->p |= P_Z;
     if (r & 0x8000)
         cpu->p |= P_N;
-    /* V is applied to the high comparison */
-    if ((a & 0x8000) && !((r | b) & 0x8000))
+    if ((a & b & 0x8000) && !(r & 0x8000))
         cpu->p |= P_V;
-    if ((!(a & 0x8000)) && (r & b & 0x8000))
+    if (!((a | b) & 0x8000) && (r & 0x8000))
         cpu->p |= P_V;
-    /* This is how it is documented for the 6303, the 6803 is unclear */
-    if (a & b & 0x8000)
+    if (~a & b & 0x8000)
         cpu->p |= P_C;
-    if (!(r & 0x8000) && ((a | b) & 0x8000))
+    if (b & r & 0x8000)
+        cpu->p |= P_C;
+    if (~a & r & 0x8000)
         cpu->p |= P_C;
     return r;
 }
@@ -1443,7 +1443,8 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         /* No flags */
         return 5;
     case 0x9E:	/* LDS */
-        tmp16 = m6803_do_read(cpu, data8);
+        tmp16 = m6803_do_read(cpu, data8) << 8;
+        tmp16 |= m6803_do_read(cpu, data8 + 1);
         /* Weirdly LDS *does* affect flags */
         cpu->s = tmp16;
         m6803_logic16(cpu, cpu->s);
@@ -1521,14 +1522,15 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         /* No flags */
         return 6;
     case 0xAE:	/* LDS */
-        tmp16 = m6803_do_read(cpu, data8);
+        tmp16 = m6803_do_read(cpu, data16) << 8;
+        tmp16 |= m6803_do_read(cpu, data16 + 1);
         /* Weirdly LDS *does* affect flags */
         cpu->s = tmp16;
         m6803_logic16(cpu, cpu->s);
         return 5;
     case 0xAF:	/* STS */
-        m6803_do_write(cpu, data8, cpu->s >> 8);
-        m6803_do_write(cpu, data8 + 1, cpu->s);	/* Do these wrap ?? */
+        m6803_do_write(cpu, data16, cpu->s >> 8);
+        m6803_do_write(cpu, data16 + 1, cpu->s);
         m6803_logic16(cpu, cpu->s);
         return 5;
     /* 0xBX: extended */
