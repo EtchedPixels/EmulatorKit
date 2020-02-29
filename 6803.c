@@ -1391,8 +1391,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0x93:	/* SUBD dir */
         tmp16 = m6803_do_read(cpu, data8) << 8;
         tmp16 |= m6803_do_read(cpu, data8 + 1);
-        /* FIXME: flags */
-        tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D - tmp16);
+        tmp16 = m6803_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return 5;
@@ -1470,8 +1469,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xA3:	/* SUBD indexed */
         tmp16 = m6803_do_read(cpu, data16) << 8;
         tmp16 |= m6803_do_read(cpu, data16 + 1);
-        /* FIXME: flags */
-        tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D - tmp16);
+        tmp16 = m6803_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return 6;
@@ -1549,8 +1547,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xB3:	/* SUBD extended */
         tmp16 = m6803_do_read(cpu, data16) << 8;
         tmp16 |= m6803_do_read(cpu, data16 + 1);
-        /* FIXME: flags */
-        tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D - tmp16);
+        tmp16 = m6803_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return 6;
@@ -1680,8 +1677,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xD3:	/* ADDD dir */
         tmp16 = m6803_do_read(cpu, data8) << 8;
         tmp16 |= m6803_do_read(cpu, data8 + 1);
-        /* FIXME: flags */
-        tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D + tmp16);
+        tmp16 = m6803_maths16_noh(cpu, REG_D, tmp16, REG_D + tmp16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return 5;
@@ -1756,8 +1752,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xE3:	/* SUBD indexed */
         tmp16 = m6803_do_read(cpu, data16) << 8;
         tmp16 |= m6803_do_read(cpu, data16 + 1);
-        /* FIXME: flags */
-        tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D + tmp16);
+        tmp16 = m6803_maths16_noh(cpu, REG_D, tmp16, REG_D + tmp16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return 6;
@@ -1832,8 +1827,7 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
     case 0xF3:	/* SUBD extended */
         tmp16 = m6803_do_read(cpu, data16) << 8;
         tmp16 |= m6803_do_read(cpu, data16 + 1);
-        /* FIXME: flags */
-        tmp16 = m6803_maths16_noh(cpu, REG_D, data16, REG_D + tmp16);
+        tmp16 = m6803_maths16_noh(cpu, REG_D, tmp16, REG_D + tmp16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return 6;
