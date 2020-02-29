@@ -113,7 +113,7 @@ static char *opmap[256] = {
     "TAB",
     "TBA",
 
-    NULL,
+    "XGDX",
     "DAA",
     NULL,
     "ABA",
@@ -1600,6 +1600,12 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         cpu->pc = data16;
         /* No flags */
         return 8;
+    case 0xBE: /* LDS */
+        tmp16 = m6803_do_read(cpu, data16) << 8;
+        tmp16 |= m6803_do_read(cpu, data16 + 1);
+        cpu->s = tmp16;
+        m6803_logic16(cpu, cpu->s);
+        return 5;
     case 0xBF:	/* STS */
         m6803_do_write(cpu, data16, cpu->s >> 8);
         m6803_do_write(cpu, data16 + 1, cpu->s);
@@ -1882,9 +1888,16 @@ static uint8_t m6803_execute_one(struct m6803 *cpu)
         cpu->x |= m6803_do_read(cpu, data16 + 1);
         m6803_logic16(cpu, cpu->x);
         return 3;
+    case 0xFF:	/* STX extened */
+        m6803_do_write(cpu, data16, cpu->a);
+        m6803_do_write(cpu, data16 + 1, cpu->b);
+        m6803_logic16(cpu, cpu->x);
+        return 5;
     }
     if (cpu->type == 6303) {
         /* TRAP pushes the faulting address */
+        fprintf(stderr, "illegal instruction %02X at %04X\n",
+            opcode, fetch_pc);
         cpu->pc = fetch_pc;
         m6803_vector(cpu, 0xFFEE);
         return 12;	/* Not correct */
@@ -1955,14 +1968,14 @@ int m6803_execute(struct m6803 *cpu)
     /* See if we passed the output compare, and as we don't check every
        cycle deal with wraps */
     n = cpu->counter + cycles;
-    if (cpu->oc_hold == 0 && cpu->ocr >= cpu->counter) {
+    if (cpu->oc_hold == 0 && cpu->counter >= cpu->ocr && cpu->counter < n) {
         cpu->tcsr |= TCSR_OCF;	/* OCF */
         if (cpu->tcsr & TCSR_EOCI)
             m6803_raise_interrupt(cpu, IRQ_OCF);
         cpu->tcsr ^= TCSR_OLVL;
     }
     cpu->oc_hold = 0;
-    if (cpu->ocr > 0xFFFF) {
+    if (n > 0xFFFF) {
         cpu->tcsr |= TCSR_TOF;	/* TOF */
         if (cpu->tcsr & TCSR_ETOI)
             m6803_raise_interrupt(cpu, IRQ_TOF);
