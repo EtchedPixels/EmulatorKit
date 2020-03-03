@@ -1,4 +1,4 @@
-struct m6803 {
+struct m6800 {
     uint8_t a;
     uint8_t b;
     uint8_t p;
@@ -10,6 +10,13 @@ struct m6803 {
     int wait;
     int oc_hold;
     int type;
+#define CPU_6800	0
+#define CPU_6803	1
+#define	CPU_6303	2
+    int intio;
+#define INTIO_NONE	0
+#define INTIO_6802	1
+#define INTIO_6803	2
     uint8_t irq;
     uint8_t mode;
     int debug;
@@ -70,23 +77,23 @@ struct m6803 {
 #define IRQ_TOF		0x10
 #define IRQ_SCI		0x20
 
-extern uint8_t m6803_read(struct m6803 *cpu, uint16_t addr);
-extern uint8_t m6803_debug_read(struct m6803 *cpu, uint16_t addr);
-extern void m6803_write(struct m6803 *cpu, uint16_t addr, uint8_t data);
+extern uint8_t m6800_read(struct m6800 *cpu, uint16_t addr);
+extern uint8_t m6800_debug_read(struct m6800 *cpu, uint16_t addr);
+extern void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t data);
 
-extern void m6803_sci_change(struct m6803 *cpu);
-extern void m6803_tx_byte(struct m6803 *cpu, uint8_t byte);
-extern void m6803_port_output(struct m6803 *cpu, int port);
-extern uint8_t m6803_port_input(struct m6803 *cpu, int port);
+extern void m6800_sci_change(struct m6800 *cpu);
+extern void m6800_tx_byte(struct m6800 *cpu, uint8_t byte);
+extern void m6800_port_output(struct m6800 *cpu, int port);
+extern uint8_t m6800_port_input(struct m6800 *cpu, int port);
 
-/* Provided by the 6803 emulator */
-extern void m6803_reset(struct m6803 *cpu, int mode);
-extern int m6803_execute(struct m6803 *cpu);
-extern void m6803_clear_interrupt(struct m6803 *cpu, int irq);
-extern void m6803_raise_interrupt(struct m6803 *cpu, int irq);
-extern void m6803_rx_byte(struct m6803 *cpu, uint8_t byte);
+/* Provided by the 6800 emulator */
+extern void m6800_reset(struct m6800 *cpu, int mode);
+extern int m6800_execute(struct m6800 *cpu);
+extern void m6800_clear_interrupt(struct m6800 *cpu, int irq);
+extern void m6800_raise_interrupt(struct m6800 *cpu, int irq);
+extern void m6800_rx_byte(struct m6800 *cpu, uint8_t byte);
 /* These are more internal but useful for debug/trace */
-extern void m6803_do_write(struct m6803 *cpu, uint16_t addr, uint8_t val);
-extern uint8_t m6803_do_read(struct m6803 *cpu, uint16_t addr);
-extern uint8_t m6803_do_debug_read(struct m6803 *cpu, uint16_t addr);
-extern void m6803_tx_done(struct m6803 *cpu);
+extern void m6800_do_write(struct m6800 *cpu, uint16_t addr, uint8_t val);
+extern uint8_t m6800_do_read(struct m6800 *cpu, uint16_t addr);
+extern uint8_t m6800_do_debug_read(struct m6800 *cpu, uint16_t addr);
+extern void m6800_tx_done(struct m6800 *cpu);

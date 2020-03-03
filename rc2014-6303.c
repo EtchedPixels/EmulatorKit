@@ -1,12 +1,12 @@
 /*
  *	Platform features
  *
- *	6303 (actually the emulator times it as 6803)
- *	IDE at 0x10-0x17 no high or control access (mirrored at 0x90-97)
+ *	6303 CPU
+ *	IDE at $FE10-$FE17 no high or control access (mirrored at $FE90-97)
  *	Simple memory 32K ROM / 32K RAM
- *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
+ *	Memory banking Zeta style 16K page at $FE78-$FE7B (enable at $FE7C)
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
- *	RTC at 0x0C
+ *	RTC at $FE0C
  *	WizNET ethernet
  *
  *	Alternate MMU option using highmmu on 8085/MMU card
@@ -25,7 +25,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
-#include "6803.h"
+#include "6800.h"
 #include "ide.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
@@ -79,7 +79,7 @@ static volatile int done;
 
 static int trace = 0;
 
-struct m6803 cpu;
+struct m6800 cpu;
 
 int check_chario(void)
 {
@@ -122,9 +122,9 @@ unsigned int next_char(void)
 void recalc_interrupts(void)
 {
 	if (live_irq)
-		m6803_raise_interrupt(&cpu, IRQ_IRQ1);
+		m6800_raise_interrupt(&cpu, IRQ_IRQ1);
 	else
-		m6803_clear_interrupt(&cpu, IRQ_IRQ1);
+		m6800_clear_interrupt(&cpu, IRQ_IRQ1);
 }
 
 static void int_set(int src)
@@ -142,23 +142,23 @@ static void int_clear(int src)
 /* Serial glue: a bit different as the serial port is on chip and emulated
    by the CPU emulator */
 
-void m6803_sci_change(struct m6803 *cpu)
+void m6800_sci_change(struct m6800 *cpu)
 {
 	/* SCI changed status - could add debug here FIXME */
 }
 
-void m6803_tx_byte(struct m6803 *cpu, uint8_t byte)
+void m6800_tx_byte(struct m6800 *cpu, uint8_t byte)
 {
 	write(1, &byte, 1);
 }
 
 /* I/O ports: nothing for now */
 
-void m6803_port_output(struct m6803 *cpu, int port)
+void m6800_port_output(struct m6800 *cpu, int port)
 {
 }
 
-uint8_t m6803_port_input(struct m6803 *cpu, int port)
+uint8_t m6800_port_input(struct m6800 *cpu, int port)
 {
 	return 0xFF;
 }
@@ -183,7 +183,7 @@ static void my_ide_write(uint16_t addr, uint8_t val)
    
  */
 
-uint8_t m6803_inport(uint8_t addr)
+uint8_t m6800_inport(uint8_t addr)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
@@ -202,7 +202,7 @@ uint8_t m6803_inport(uint8_t addr)
 	return 0xFF;
 }
 
-void m6803_outport(uint8_t addr, uint8_t val)
+void m6800_outport(uint8_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
@@ -239,12 +239,12 @@ void m6803_outport(uint8_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-uint8_t m6803_read_op(struct m6803 *cpu, uint16_t addr, int debug)
+uint8_t m6800_read_op(struct m6800 *cpu, uint16_t addr, int debug)
 {
 	if (addr >> 8 == 0xFE) {
 		if (debug)
 			return 0xFF;
-		return m6803_inport(addr & 0xFF);
+		return m6800_inport(addr & 0xFF);
 	}
 	if (bankhigh) {
 		uint8_t reg = mmureg;
@@ -277,21 +277,21 @@ uint8_t m6803_read_op(struct m6803 *cpu, uint16_t addr, int debug)
 	return ramrom[addr];
 }
 
-uint8_t m6803_debug_read(struct m6803 *cpu, uint16_t addr)
+uint8_t m6800_debug_read(struct m6800 *cpu, uint16_t addr)
 {
-	return m6803_read_op(cpu, addr, 1);
+	return m6800_read_op(cpu, addr, 1);
 }
 
-uint8_t m6803_read(struct m6803 *cpu, uint16_t addr)
+uint8_t m6800_read(struct m6800 *cpu, uint16_t addr)
 {
-	return m6803_read_op(cpu, addr, 0);
+	return m6800_read_op(cpu, addr, 0);
 }
 
 
-void m6803_write(struct m6803 *cpu, uint16_t addr, uint8_t val)
+void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 {
 	if (addr >> 8 == 0xFE) {
-		m6803_outport(addr & 0xFF, val);
+		m6800_outport(addr & 0xFF, val);
 		return;
 	}
 	if (bankhigh) {
@@ -469,7 +469,7 @@ int main(int argc, char *argv[])
 				}
 				else if (ide_attach(ide0, 0, ide_fd) == 0) {
 					ide = 1;
-					ide_reset_begin(ide0);
+						ide_reset_begin(ide0);
 				}
 			} else
 				ide = 0;
@@ -518,8 +518,9 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	cpu.type = 6303;
-	m6803_reset(&cpu, 3);
+	cpu.type = CPU_6303;
+	cpu.intio = INTIO_6803;
+	m6800_reset(&cpu, 3);
 
 	if (trace & TRACE_CPU)
 		cpu.debug = 1;
@@ -534,15 +535,15 @@ int main(int argc, char *argv[])
 		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 100; i++) {
 			while(cycles < clockrate)
-				cycles += m6803_execute(&cpu);
+				cycles += m6800_execute(&cpu);
 			cycles -= clockrate;
 		}
 		/* Drive the internal serial */
 		i = check_chario();
 		if (i & 1)
-			m6803_rx_byte(&cpu, next_char());
+			m6800_rx_byte(&cpu, next_char());
 		if (i & 2)
-			m6803_tx_done(&cpu);
+			m6800_tx_done(&cpu);
 		/* Wiznet timer */
 		if (wiznet)
 			w5100_process(wiz);

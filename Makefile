@@ -27,8 +27,8 @@ mbc2:	mbc2.o ide.o
 rc2014-1802: rc2014-1802.o 1802.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-1802.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o 1802.o -o rc2014-1802
 
-rc2014-6303: rc2014-6303.o 6803.o ide.o w5100.o ppide.o rtc_bitbang.o
-	cc -g3 rc2014-6303.o ide.o ppide.o rtc_bitbang.o w5100.o 6803.o -o rc2014-6303
+rc2014-6303: rc2014-6303.o 6800.o ide.o w5100.o ppide.o rtc_bitbang.o
+	cc -g3 rc2014-6303.o ide.o ppide.o rtc_bitbang.o w5100.o 6800.o -o rc2014-6303
 
 rc2014-6502: rc2014-6502.o 6502.o 6502dis.o
 	cc -g3 rc2014-6502.o ide.o w5100.o 6502.o 6502dis.o -o rc2014-6502
