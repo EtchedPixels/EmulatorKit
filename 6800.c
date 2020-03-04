@@ -45,8 +45,13 @@
  *	strictly an interrupt that occurs in the last cycle of
  *	an instruction is ignored. Also we should model the TPA
  *	and SEI subtle delay behaviours. Even more so on 6303
- *	6802 (6800 with 128 bytes RAM at 00-7F)
  *	6800 and 6803 exact emulation for undocumented
+ *
+ *	68HC11 TODO:
+ *	Are there any non trapping undefined opcodes ?
+ *	Add the rest of the 68HC11 interrupt source/vectors
+ *	68HC11 I/O model
+ *	Test with something like Buffalo ?
  *	
  */
 
@@ -70,17 +75,19 @@
  *
  *	CPU-wise the 6808 and 6802 are the same so we don't treat the CPU
  *	part differently. The 6808 in fact to us is just a 6800.
+ *
+ *	The 68HC11 is a soemwhat extended CPU but basically a 6803 with
+ *	extras, and lacking the 6303 pipelining.
  */
 
-#define INVALID 	128
 
-static uint8_t clock_count[256][3] = {
-    { INVALID, INVALID, INVALID },
+static uint8_t clock_count[256][4] = {
+    { 0, 0, 0 },
     { 2, 2, 1 }, 			/* NOP */
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
-    { INVALID, 3, 1 },			/* LSRD */
-    { INVALID, 3, 1 },			/* ASLD */
+    { 0, 0, 0 },			/* 68HC11: IDIV */
+    { 0, 0, 0 },			/* 68HC11: FDIV */
+    { 0, 3, 1 },			/* LSRD */
+    { 0, 3, 1 },			/* ASLD */
     { 2, 2, 1 },			/* TAP */
     { 2, 2, 1 },			/* TPA */
     { 4, 3, 1 },			/* INX */
@@ -94,20 +101,20 @@ static uint8_t clock_count[256][3] = {
     /* 0x10 */
     { 2, 2, 1 },			/* SBA */
     { 2, 2, 1 },			/* CBA */
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
+    { 0, 0, 0 },			/* 68HC11: BRCLR dir */
+    { 0, 0, 0 },			/* 68HC11: BRSET dir */
+    { 0, 0, 0 },			/* 68HC11: BCLR dir */
     { 2, 2, 1 },			/* TAB */
     { 2, 2, 1 },			/* TBA */
-    { INVALID, INVALID, 2 },		/* XGDX */
+    { 0, 0, 2 },			/* 6303: XGDX  (Y prefix on HC11) */
     { 2, 2, 1 },			/* DAA */
-    { INVALID, INVALID, 4 },		/* SLP */
-    { 2, 2, 1},				/* ABA */
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 4 },			/* SLP , 68HC11: prefix 1A */
+    { 2, 2, 1 },			/* ABA */
+    { 0, 0, 0 },
+    { 0, 0, 0 },			/* 68HC11: BCLR indexed */
+    { 0, 0, 0 },			/* 68HC11: BRSET indexed */
+    { 0, 0, 0 },			/* 68HC11: BRCLR indexed */
     /* 0x20 */
     { 4, 3, 3 },			/* BRA */
     { 4, 3, 3 },			/* BRN - undocumented on 6800 */
@@ -134,78 +141,78 @@ static uint8_t clock_count[256][3] = {
     { 3, 3, 1 },			/* TXS */
     { 3, 3, 4 },			/* PSHA */
     { 3, 3, 4 },			/* PSHB */
-    { INVALID, 5, 4 },			/* PULX */
+    { 0, 5, 4 },			/* PULX */
     { 5, 5, 5 },			/* RTS */
-    { INVALID, 3, 1 },			/* ABX */
+    { 0, 3, 1 },			/* ABX */
     { 10, 10, 10 },			/* RTI */
-    { INVALID, 4, 5 },			/* PSHX */
-    { INVALID, 10, 7 },			/* MUL */
+    { 0, 4, 5 },			/* PSHX */
+    { 0, 10, 7 },			/* MUL */
     { 9, 9, 9 },			/* WAI */
     { 12, 12, 12 },			/* SWI */
     /* 0x40 A form */
     { 2, 2, 1 },			/* NEGA */
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
+    { 0, 0, 0 },
     { 2, 2, 1 },			/* COMA */
     { 2, 2, 1 },			/* LSRA */
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
     { 2, 2, 1 },			/* RORA */
     { 2, 2, 1 },			/* ASRA */
     { 2, 2, 1 },			/* ASLA */
     { 2, 2, 1 },			/* ROLA */
     { 2, 2, 1 },			/* DECA */
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
     { 2, 2, 1 },			/* INCA */
     { 2, 2, 1 },			/* TSTA */
     { 255, 255, 255 },			/* HCF / T */
     { 2, 2, 1 },			/* CLRA */
     /* 0x50 B form */
     { 2, 2, 1 },			/* NEGB */
-    { INVALID, INVALID, INVALID },
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
+    { 0, 0, 0 },
     { 2, 2, 1 },			/* COMB */
     { 2, 2, 1 },			/* LSRB */
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
     { 2, 2, 1 },			/* RORB */
     { 2, 2, 1 },			/* ASRB */
     { 2, 2, 1 },			/* ASLB */
     { 2, 2, 1 },			/* ROLB */
     { 2, 2, 1 },			/* DECB */
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
     { 2, 2, 1 },			/* INCB */
     { 2, 2, 1 },			/* TSTB */
     { 2, 2, 1 },			/* HCF / T */
     { 2, 2, 1 },			/* CLRB */
     /* 0x60 : indexed form */
     { 6, 6, 6 },			/* NEG */
-    { INVALID, INVALID, 7 },		/* AIM */
-    { INVALID, INVALID, 7 },		/* OIM */
+    { 0, 0, 7 },			/* AIM */
+    { 0, 0, 7 },			/* OIM */
     { 6, 6, 6 },			/* COM */
     { 6, 6, 6 },			/* LSR */
-    { INVALID, INVALID, 6 },		/* EIM */
+    { 0, 0, 6 },			/* EIM */
     { 6, 6, 6 },			/* ROR */
     { 6, 6, 6 },			/* ASR */
     { 6, 6, 6 },			/* ASL */
     { 6, 6, 6 },			/* ROL */
     { 6, 6, 6 },			/* DEC */
-    { INVALID, INVALID,  5},		/* TIM */
+    { 0, 0, 5 },			/* TIM */
     { 6, 6, 6 },			/* INC */
     { 6, 6, 4 },			/* TST */
     { 3, 3, 3 },			/* JMP */
     { 6, 6, 5 },			/* CLR */
     /* 70: extended form (immediate for AIM/OIM etc) */
     { 7, 6, 6 },			/* NEG */
-    { INVALID, INVALID, 6 },		/* AIM */
-    { INVALID, INVALID, 6 },		/* OIM */
+    { 0, 0, 6 },			/* AIM */
+    { 0, 0, 6 },			/* OIM */
     { 7, 6, 6 },			/* COM */
     { 7, 6, 6 },			/* LSR */
-    { INVALID, INVALID, 6 },		/* EIM */
+    { 0, 0, 6 },			/* EIM */
     { 7, 6, 6 },			/* ROR */
     { 7, 6, 6 },			/* ASR */
     { 7, 6, 6 },			/* ASL */
     { 7, 6, 6 },			/* ROL */
     { 7, 6, 6 },			/* DEC */
-    { INVALID, INVALID, 4 },		/* TIM */
+    { 0, 0, 4 },			/* TIM */
     { 7, 6, 6 },			/* INC */
     { 7, 6, 4 },			/* TST */
     { 3, 3, 3 },			/* JMP */
@@ -214,11 +221,11 @@ static uint8_t clock_count[256][3] = {
     { 2, 2, 2 },			/* SUBA */
     { 2, 2, 2 },			/* CMPA */
     { 2, 2, 2 },			/* SBCA */
-    { INVALID, 4, 3 },			/* SUBD */
+    { 0, 4, 3 },			/* SUBD */
     { 2, 2, 2 },			/* ANDA */
     { 2, 2, 2 },			/* BITA */
     { 2, 2, 2 },			/* LDAA */
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },
     { 2, 2, 2 },			/* EORA */
     { 2, 2, 2 },			/* ADCA */
     { 2, 2, 2 },			/* ORAA */
@@ -226,12 +233,12 @@ static uint8_t clock_count[256][3] = {
     { 4, 4, 3 },			/* CPX */
     { 8, 6, 5 },			/* BSR */
     { 3, 3, 3 },			/* LDS */
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },			/* 68HC11 only: XGDX */
     /* 90: A ops, dir */
     { 3, 3, 3 },			/* SUBA */
     { 3, 3, 3 },			/* CMPA */
     { 3, 3, 3 },			/* SBCA */
-    { INVALID, 5, 4 },			/* SUBD */
+    { 0, 5, 4 },			/* SUBD */
     { 3, 3, 3 },			/* ANDA */
     { 3, 3, 3 },			/* BITA */
     { 3, 3, 3 },			/* LDAA */
@@ -241,14 +248,14 @@ static uint8_t clock_count[256][3] = {
     { 3, 3, 3 },			/* ORAA */
     { 3, 3, 3 },			/* ADDA */
     { 5, 5, 4 },			/* CPX */
-    { INVALID, 5, 5 },			/* JSR */
+    { 0, 5, 5 },			/* JSR */
     { 4, 4, 4 },			/* LDS */
     { 4, 4, 4 },			/* STS */
     /* A0: A ops, indexed */
     { 5, 4, 4 },			/* SUBA */
     { 5, 4, 4 },			/* CMPA */
     { 5, 4, 4 },			/* SBCA */
-    { INVALID, 6, 5 },			/* SUBD */
+    { 0, 6, 5 },			/* SUBD */
     { 5, 4, 4 },			/* ANDA */
     { 5, 4, 4 },			/* BITA */
     { 5, 4, 4 },			/* LDAA */
@@ -265,7 +272,7 @@ static uint8_t clock_count[256][3] = {
     { 4, 4, 4 },			/* SUBA */
     { 4, 4, 4 },			/* CMPA */
     { 4, 4, 4 },			/* SBCA */
-    { INVALID, 6, 5 },			/* SUBD */
+    { 0, 6, 5 },			/* SUBD */
     { 4, 4, 4 },			/* ANDA */
     { 4, 4, 4 },			/* BITA */
     { 4, 4, 4 },			/* LDAA */
@@ -282,24 +289,24 @@ static uint8_t clock_count[256][3] = {
     { 2, 2, 2 },			/* SUBB */
     { 2, 2, 2 },			/* CMPB */
     { 2, 2, 2 },			/* SBCB */
-    { INVALID, 4, },			/* ADDD */
+    { 0, 4, 4 },			/* ADDD */
     { 2, 2, 2 },			/* ANDB */
     { 2, 2, 2 },			/* BITB */
-    { 2, 2, 3 },			/* LDAB */
-    { INVALID, INVALID, INVALID },
+    { 2, 2, 2 },			/* LDAB */
+    { 0, 0, 0 },
     { 2, 2, 2 },			/* EORB */
     { 2, 2, 2 },			/* ADCB */
     { 2, 2, 2 },			/* ORAB */
     { 2, 2, 2 },			/* ADDB */
-    { INVALID, 3, 3 },			/* LDD */
-    { INVALID, INVALID, INVALID },
+    { 0, 3, 3 },			/* LDD */
+    { 0, 0, 0 },			/* 68HC11:Prefix CD */
     { 3, 3, 3 },			/* LDX */
-    { INVALID, INVALID, INVALID },
+    { 0, 0, 0 },			/* 68HC11: STOP */
     /* D0: A ops, dir */
     { 3, 3, 3 },			/* SUBB */
     { 3, 3, 3 },			/* CMPB */
     { 3, 3, 3 },			/* SBCB */
-    { INVALID, 5, 5 },			/* ADDD */
+    { 0, 5, 5 },			/* ADDD */
     { 3, 3, 3 },			/* ANDB */
     { 3, 3, 3 },			/* BITB */
     { 3, 3, 3 },			/* LDAB */
@@ -308,15 +315,15 @@ static uint8_t clock_count[256][3] = {
     { 3, 3, 3 },			/* ADCB */
     { 3, 3, 3 },			/* ORAB */
     { 3, 3, 3 },			/* ADDB */
-    { INVALID, 4, 4 },			/* LDD */
-    { INVALID, 4, 4 },			/* STD */
+    { 0, 4, 4 },			/* LDD */
+    { 0, 4, 4 },			/* STD */
     { 4, 4, 4 },			/* LDX */
     { 4, 4, 4 },			/* STX */
     /* E0: B ops, indexed */
     { 5, 4, 4 },			/* SUBB */
     { 5, 4, 4 },			/* CMPB */
     { 5, 4, 4 },			/* SBCB */
-    { INVALID, 6, 5 },			/* ADDD */
+    { 0, 6, 5 },			/* ADDD */
     { 5, 4, 4 },			/* ANDB */
     { 5, 4, 4 },			/* BITB */
     { 5, 4, 4 },			/* LDAB */
@@ -325,15 +332,15 @@ static uint8_t clock_count[256][3] = {
     { 5, 4, 4 },			/* ADCB */
     { 5, 4, 4 },			/* ORAB */
     { 5, 4, 4 },			/* ADDB */
-    { INVALID, 5, 5 },			/* LDD */
-    { INVALID, 5, 5 },			/* STD */
+    { 0, 5, 5 },			/* LDD */
+    { 0, 5, 5 },			/* STD */
     { 5, 5, 5 },			/* LDX */
     { 5, 5, 5 },			/* STX */
     /* F0: B ops, extended */
     { 4, 4, 4 },			/* SUBB */
     { 4, 4, 4 },			/* CMPB */
     { 4, 4, 4 },			/* SBCB */
-    { INVALID, 6, },			/* ADDD */
+    { 0, 6, 6 },			/* ADDD */
     { 4, 4, 4 },			/* ANDB */
     { 4, 4, 4 },			/* BITB */
     { 4, 4, 4 },			/* LDAB */
@@ -342,10 +349,285 @@ static uint8_t clock_count[256][3] = {
     { 4, 4, 4 },			/* ADCB */
     { 4, 4, 4 },			/* ORAB */
     { 4, 4, 4 },			/* ADDB */
-    { INVALID, 5, 5 },			/* LDD */
-    { INVALID, 5, 5 },			/* STD */
+    { 0, 5, 5 },			/* LDD */
+    { 0, 5, 5 },			/* STD */
     { 5, 5, 5 },			/* LDX */
     { 5, 5, 5 }				/* STX */
+};
+
+/* By page 00/18/1A/CD */
+static uint8_t clock_hc11[256][4] = {
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 }, 			/* NOP */
+    { 41, 0, 0, 0 },			/* IDIV */
+    { 41, 0, 0, 0 },			/* FDIV */
+    { 3, 0, 0, 0 },			/* LSRD */
+    { 3, 0, 0, 0 },			/* ASLD */
+    { 2, 0, 0, 0 },			/* TAP */
+    { 2, 0, 0, 0 },			/* TPA */
+    { 3, 3, 0, 0 },			/* INX */
+    { 3, 3, 0, 0 },			/* DEX */
+    { 2, 0, 0, 0 },			/* CLV */
+    { 2, 0, 0, 0 },			/* SEV */
+    { 2, 0, 0, 0 },			/* CLC */
+    { 2, 0, 0, 0 },			/* SEC */
+    { 2, 0, 0, 0 },			/* CLI */
+    { 2, 0, 0, 0 },			/* SEI */
+    /* 0x10 */
+    { 2, 0, 0, 0 },			/* SBA */
+    { 2, 0, 0, 0 },			/* CBA */
+    { 0, 0, 0, 0 },
+    { 6, 0, 0, 0 },			/* BRCLR dir */
+    { 6, 0, 0, 0 },			/* BRSET dir */
+    { 6, 0, 0, 0 },			/* BCLR dir */
+    { 2, 0, 0, 0 },			/* TAB */
+    { 2, 0, 0, 0 },			/* TBA */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* DAA */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* ABA */
+    { 0, 0, 0, 0 },
+    { 7, 7, 0, 0 },			/* BCLR indexed */
+    { 7, 7, 0, 0 },			/* BRSET indexed */
+    { 7, 7, 0, 0 },			/* BRCLR indexed */
+    /* 0x20 */
+    { 3, 0, 0, 0 },			/* BRA */
+    { 3, 0, 0, 0 },			/* BRN */
+    { 3, 0, 0, 0 },			/* BHI */
+    { 3, 0, 0, 0 },			/* BLS */
+    { 3, 0, 0, 0 },			/* BCC */
+    { 3, 0, 0, 0 },			/* BCS */
+    { 3, 0, 0, 0 },			/* BNE */
+    { 3, 0, 0, 0 },			/* BEQ */
+    { 3, 0, 0, 0 },			/* BVC */
+    { 3, 0, 0, 0 },			/* BVS */
+    { 3, 0, 0, 0 },			/* BPL */
+    { 3, 0, 0, 0 },			/* BMI */
+    { 3, 0, 0, 0 },			/* BGE */
+    { 3, 0, 0, 0 },			/* BLT */
+    { 3, 0, 0, 0 },			/* BGT */
+    { 3, 0, 0, 0 },			/* BLE */
+    /* 0x30 */
+    { 3, 3, 0, 0 },			/* TSX */
+    { 3, 0, 0, 0 },			/* INS */
+    { 3, 0, 0, 0 },			/* PULA */
+    { 3, 0, 0, 0 },			/* PULB */
+    { 3, 0, 0, 0 },			/* DES */
+    { 3, 3, 0, 0 },			/* TXS */
+    { 3, 0, 0, 0 },			/* PSHA */
+    { 3, 0, 0, 0 },			/* PSHB */
+    { 5, 5, 0, 0 },			/* PULX/Y */
+    { 5, 0, 0, 0 },			/* RTS */
+    { 3, 3, 0, 0 },			/* ABX */
+    { 12, 0, 0, 0 },			/* RTI */
+    { 4, 4, 0, 0 },			/* PSHX/Y */
+    { 10, 0, 0, 0 },			/* MUL */
+    { 12, 0, 0, 0 },			/* WAI */
+    { 14, 0, 0, 0 },			/* SWI */
+    /* 0x40 A form */
+    { 2, 0, 0, 0 },			/* NEGA */
+    { 0, 0, 0, 0 },
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* COMA */
+    { 2, 0, 0, 0 },			/* LSRA */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* RORA */
+    { 2, 0, 0, 0 },			/* ASRA */
+    { 2, 0, 0, 0 },			/* ASLA */
+    { 2, 0, 0, 0 },			/* ROLA */
+    { 2, 0, 0, 0 },			/* DECA */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* INCA */
+    { 2, 0, 0, 0 },			/* TSTA */
+    { 255, 255, 255, 255 },		/* HCF / T */
+    { 2, 0, 0, 0 },			/* CLRA */
+    /* 0x50 B form */
+    { 2, 0, 0, 0 },			/* NEGB */
+    { 0, 0, 0, 0 },
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* COMB */
+    { 2, 0, 0, 0 },			/* LSRB */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* RORB */
+    { 2, 0, 0, 0 },			/* ASRB */
+    { 2, 0, 0, 0 },			/* ASLB */
+    { 2, 0, 0, 0 },			/* ROLB */
+    { 2, 0, 0, 0 },			/* DECB */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* INCB */
+    { 2, 0, 0, 0 },			/* TSTB */
+    { 255, 255, 255, 255 },		/* HCF / T */
+    { 2, 0, 0, 0 },			/* CLRB */
+    /* 0x60 : indexed form */
+    { 6, 6, 0, 0 },			/* NEG */
+    { 0, 0, 0, 0 },
+    { 0, 0, 0, 0 },
+    { 6, 6, 0, 0 },			/* COM */
+    { 6, 6, 0, 0 },			/* LSR */
+    { 0, 0, 0, 0 },
+    { 6, 6, 0, 0 },			/* ROR */
+    { 6, 6, 0, 0 },			/* ASR */
+    { 6, 6, 0, 0 },			/* ASL */
+    { 6, 6, 0, 0 },			/* ROL */
+    { 6, 6, 0, 0 },			/* DEC */
+    { 0, 0, 0, 0 },
+    { 6, 6, 0, 0 },			/* INC */
+    { 6, 6, 0, 0 },			/* TST */
+    { 3, 3, 0, 0 },			/* JMP */
+    { 6, 6, 0, 0 },			/* CLR */
+    /* 70: extended form (immediate for AIM/OIM etc) */
+    { 6, 0, 0, 0 },			/* NEG */
+    { 0, 0, 0, 0 },
+    { 0, 0, 0, 0 },
+    { 6, 0, 0, 0 },			/* COM */
+    { 6, 0, 0, 0 },			/* LSR */
+    { 0, 0, 0, 0 },
+    { 6, 0, 0, 0 },			/* ROR */
+    { 6, 0, 0, 0 },			/* ASR */
+    { 6, 0, 0, 0 },			/* ASL */
+    { 6, 0, 0, 0 },			/* ROL */
+    { 6, 0, 0, 0 },			/* DEC */
+    { 0, 0, 0, 0 },
+    { 6, 0, 0, 0 },			/* INC */
+    { 6, 0, 0, 0 },			/* TST */
+    { 3, 0, 0, 0 },			/* JMP */
+    { 6, 0, 0, 0 },			/* CLR */
+    /* 80: A ops, immed */
+    { 2, 0, 0, 0 },			/* SUBA */
+    { 2, 0, 0, 0 },			/* CMPA */
+    { 2, 0, 0, 0 },			/* SBCA */
+    { 4, 0, 4, 0 },			/* SUBD / CPD */
+    { 2, 0, 0, 0 },			/* ANDA */
+    { 2, 0, 0, 0 },			/* BITA */
+    { 2, 0, 0, 0 },			/* LDAA */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* EORA */
+    { 2, 0, 0, 0 },			/* ADCA */
+    { 2, 0, 0, 0 },			/* ORAA */
+    { 2, 0, 0, 0 },			/* ADDA */
+    { 4, 4, 0, 0 },			/* CPX / CPY */
+    { 6, 0, 0, 0 },			/* BSR */
+    { 3, 0, 0, 0 },			/* LDS */
+    { 3, 3, 0, 0 },			/* XGDX / XGDY */
+    /* 90: A ops, dir */
+    { 3, 0, 0, 0 },			/* SUBA */
+    { 3, 0, 0, 0 },			/* CMPA */
+    { 3, 0, 0, 0 },			/* SBCA */
+    { 5, 0, 5, 0 },			/* SUBD / CPD */
+    { 3, 0, 0, 0 },			/* ANDA */
+    { 3, 0, 0, 0 },			/* BITA */
+    { 3, 0, 0, 0 },			/* LDAA */
+    { 3, 0, 0, 0 },			/* STAA */
+    { 3, 0, 0, 0 },			/* EORA */
+    { 3, 0, 0, 0 },			/* ADCA */
+    { 3, 0, 0, 0 },			/* ORAA */
+    { 3, 0, 0, 0 },			/* ADDA */
+    { 5, 5, 0, 0 },			/* CPX */
+    { 5, 0, 0, 0 },			/* JSR */
+    { 4, 0, 0, 0 },			/* LDS */
+    { 4, 0, 0, 0 },			/* STS */
+    /* A0: A ops, indexed */
+    { 4, 4, 0, 0 },			/* SUBA */
+    { 4, 4, 0, 0 },			/* CMPA */
+    { 4, 4, 0, 0 },			/* SBCA */
+    { 6, 6, 6, 6 },			/* SUBD / CPD */
+    { 4, 4, 0, 0 },			/* ANDA */
+    { 4, 4, 0, 0 },			/* BITA */
+    { 4, 4, 0, 0 },			/* LDAA */
+    { 4, 4, 0, 0 },			/* STAA */
+    { 4, 4, 0, 0 },			/* EORA */
+    { 4, 4, 0, 0 },			/* ADCA */
+    { 4, 4, 0, 0 },			/* ORAA */
+    { 4, 4, 0, 0 },			/* ADDA */
+    { 6, 6, 6, 6 },			/* CPX / CPY */
+    { 6, 6, 0, 0 },			/* JSR */
+    { 5, 5, 0, 0 },			/* LDS */
+    { 5, 5, 0, 0 },			/* STS */
+    /* B0: A ops, extended */
+    { 4, 0, 0, 0 },			/* SUBA */
+    { 4, 0, 0, 0 },			/* CMPA */
+    { 4, 0, 0, 0 },			/* SBCA */
+    { 6, 0, 6, 0 },			/* SUBD / CPD */
+    { 4, 0, 0, 0 },			/* ANDA */
+    { 4, 0, 0, 0 },			/* BITA */
+    { 4, 0, 0, 0 },			/* LDAA */
+    { 4, 0, 0, 0 },			/* STAA */
+    { 4, 0, 0, 0 },			/* EORA */
+    { 4, 0, 0, 0 },			/* ADCA */
+    { 4, 0, 0, 0 },			/* ORAA */
+    { 4, 0, 0, 0 },			/* ADDA */
+    { 6, 6, 0, 0 },			/* CPX / CPY */
+    { 6, 0, 0, 0 },			/* JSR */
+    { 6, 0, 0, 0 },			/* LDS */
+    { 6, 0, 0, 0 },			/* STS */
+    /* C0: B ops, immed */
+    { 2, 0, 0, 0 },			/* SUBB */
+    { 2, 0, 0, 0 },			/* CMPB */
+    { 2, 0, 0, 0 },			/* SBCB */
+    { 4, 0, 0, 0 },			/* ADDD */
+    { 2, 0, 0, 0 },			/* ANDB */
+    { 2, 0, 0, 0 },			/* BITB */
+    { 2, 0, 0, 0 },			/* LDAB */
+    { 0, 0, 0, 0 },
+    { 2, 0, 0, 0 },			/* EORB */
+    { 2, 0, 0, 0 },			/* ADCB */
+    { 2, 0, 0, 0 },			/* ORAB */
+    { 2, 0, 0, 0 },			/* ADDB */
+    { 3, 0, 0, 0 },			/* LDD */
+    { 0, 0, 0, 0 },
+    { 3, 3, 0, 0 },			/* LDX / LDY */
+    { 2, 0, 0, 0 },
+    /* D0: A ops, dir */
+    { 3, 0, 0, 0 },			/* SUBB */
+    { 3, 0, 0, 0 },			/* CMPB */
+    { 3, 0, 0, 0 },			/* SBCB */
+    { 5, 0, 0, 0 },			/* ADDD */
+    { 3, 0, 0, 0 },			/* ANDB */
+    { 3, 0, 0, 0 },			/* BITB */
+    { 3, 0, 0, 0 },			/* LDAB */
+    { 3, 0, 0, 0 },			/* STAB */
+    { 3, 0, 0, 0 },			/* EORB */
+    { 3, 0, 0, 0 },			/* ADCB */
+    { 3, 0, 0, 0 },			/* ORAB */
+    { 3, 0, 0, 0 },			/* ADDB */
+    { 4, 0, 0, 0 },			/* LDD */
+    { 4, 0, 0, 0 },			/* STD */
+    { 4, 4, 0, 0 },			/* LDX / STY */
+    { 4, 4, 0, 0 },			/* STX / STY */
+    /* E0: B ops, indexed */
+    { 4, 4, 0, 0 },			/* SUBB */
+    { 4, 4, 0, 0 },			/* CMPB */
+    { 4, 4, 0, 0 },			/* SBCB */
+    { 6, 6, 0, 0 },			/* ADDD */
+    { 4, 4, 0, 0 },			/* ANDB */
+    { 4, 4, 0, 0 },			/* BITB */
+    { 4, 4, 0, 0 },			/* LDAB */
+    { 4, 4, 0, 0 },			/* STAB */
+    { 4, 4, 0, 0 },			/* EORB */
+    { 4, 4, 0, 0 },			/* ADCB */
+    { 4, 4, 0, 0 },			/* ORAB */
+    { 4, 4, 0, 0 },			/* ADDB */
+    { 5, 5, 0, 0 },			/* LDD */
+    { 5, 5, 0, 0 },			/* STD */
+    { 5, 5, 5, 5 },			/* LDX / LDY */
+    { 5, 5, 5, 5 },			/* STX / STY */
+    /* F0: B ops, extended */
+    { 4, 0, 0, 0 },			/* SUBB */
+    { 4, 0, 0, 0 },			/* CMPB */
+    { 4, 0, 0, 0 },			/* SBCB */
+    { 6, 0, 0, 0 },			/* ADDD */
+    { 4, 0, 0, 0 },			/* ANDB */
+    { 4, 0, 0, 0 },			/* BITB */
+    { 4, 0, 0, 0 },			/* LDAB */
+    { 4, 0, 0, 0 },			/* STAB */
+    { 4, 0, 0, 0 },			/* EORB */
+    { 4, 0, 0, 0 },			/* ADCB */
+    { 4, 0, 0, 0 },			/* ORAB */
+    { 4, 0, 0, 0 },			/* ADDB */
+    { 5, 0, 0, 0 },			/* LDD */
+    { 5, 0, 0, 0 },			/* STD */
+    { 6, 6, 0, 0 },			/* LDX / LDY */
+    { 6, 6, 0, 0 }			/* STX / STY */
 };
 
 /*
@@ -814,6 +1096,8 @@ static uint16_t m6800_pull16(struct m6800 *cpu)
 static void m6800_push_interrupt(struct m6800 *cpu)
 {
     m6800_push16(cpu, cpu->pc);
+    if (cpu->type == CPU_68HC11)
+        m6800_push16(cpu, cpu->y);
     m6800_push16(cpu, cpu->x);
     m6800_push(cpu, cpu->a);
     m6800_push(cpu, cpu->b);
@@ -822,7 +1106,14 @@ static void m6800_push_interrupt(struct m6800 *cpu)
 
 static int m6800_vector(struct m6800 *cpu, uint16_t vector)
 {
-    m6800_push_interrupt(cpu);
+    int clocks = 2;
+    if (cpu->wait == 0) {
+        m6800_push_interrupt(cpu);
+        if (cpu->type == CPU_68HC11)
+            clocks += 12;
+        else
+            clocks += 10;
+    }
     cpu->p |= P_I;
     /* What's the vector Victor ? */
     cpu->pc = m6800_do_read(cpu, vector) << 8;
@@ -830,7 +1121,7 @@ static int m6800_vector(struct m6800 *cpu, uint16_t vector)
     cpu->wait = 0;
     if (cpu->debug)
         fprintf(stderr, "*** Vector %04X\n", vector);
-    return 12;
+    return clocks;
 }
 
 static int m6800_vector_masked(struct m6800 *cpu, uint16_t vector)
@@ -1004,18 +1295,43 @@ static void m6800_hcf(struct m6800 *cpu)
 static int m6800_execute_one(struct m6800 *cpu)
 {
     uint16_t fetch_pc = cpu->pc;
-    uint8_t opcode = m6800_do_read(cpu, cpu->pc);
+    uint16_t opcode = m6800_do_read(cpu, cpu->pc);
     uint8_t data8, tmp8;
     uint16_t data16, tmp16;
     uint8_t tmpc, tmp2;
     uint8_t add;
-    int clocks;
+    int clocks = 0;
+    int table = 0;
 
     if (cpu->debug)
         m6800_disassemble(cpu, cpu->pc);
 
     cpu->pc++;
 
+
+    /* The 68HC11 has some prefixes so treat them as a single 16bit opcode
+       where 00xx matches the other processors. Multiple prefixes will mean
+       only the last one is considered which I believe is correct */
+    if (cpu->type == CPU_68HC11) {
+        while ((opcode & 0xFF)== 0x18 || (opcode & 0xFF) == 0x1A ||
+                (opcode & 0xFF) == 0xCD) {
+            switch(opcode) {
+            case 0x18:
+                table = 1;
+                break;
+            case 0x1A:
+                table = 2;
+                break;
+            case 0xCD:
+                table = 3;
+                break;
+            }
+            opcode <<= 8;
+            opcode |= m6800_do_read(cpu, cpu->pc);
+            cpu->pc++;
+            clocks++;
+        }
+    }
     /* Fetch address/data for non immediate opcodes */
     switch(opcode & 0xF0) {
         case 0x80:	/* Immediate 8/16bit */
@@ -1037,6 +1353,11 @@ static int m6800_execute_one(struct m6800 *cpu)
             /* Save the first byte for the strange 6303 logic immediate ops */
             data8 = m6800_do_read(cpu, cpu->pc++);
             data16 = data8 + cpu->x;
+            /* 0x18: Use y, index via Y
+               0x1A: Use Y, index via X
+               0xCD: Use X, index via Y - some exceptions */
+            if ((opcode & 0xFF00) == 0x1800 || (opcode & 0xFF00) == 0xCD00)
+                data16 = data8 + cpu->y;
             break;
         case 0x70:	/* Extended */
         case 0xB0:	/* Extended */
@@ -1046,15 +1367,26 @@ static int m6800_execute_one(struct m6800 *cpu)
             data16 |= m6800_do_read(cpu, cpu->pc++);
             break;
     }
-    clocks = clock_count[opcode][cpu->type];
-    if (clocks == INVALID) {
-        if (cpu->type == CPU_6303) {
+    /* 68HC11 prefixed opcodes match the non prefix form plus the clock.
+       We need per prefix tables adding because a 68HC11 doens't implement
+       all prefixes of all forms */
+    if (cpu->type == CPU_68HC11)
+        tmp8 = clock_hc11[opcode & 0xFF][table];
+    else
+        tmp8 = clock_count[opcode][cpu->type];
+    clocks += tmp8;
+    /* Not valid on this processor */
+    if (tmp8 == 0) {
+        /* Q: does the HC11 push the prefix or post prefix address ? */
+        if (cpu->type == CPU_6303 || cpu->type == CPU_68HC11) {
             /* TRAP pushes the faulting address */
             fprintf(stderr, "illegal instruction %02X at %04X\n",
                 opcode, fetch_pc);
             cpu->pc = fetch_pc;
-            m6800_vector(cpu, 0xFFEE);
-            clocks = 12;
+            if (cpu->type == CPU_6303)
+                m6800_vector(cpu, 0xFFEE);
+            else
+                m6800_vector(cpu, 0xFFF8);
             return clocks;	/* Not correct */
         } else {
             /* An invalid instruction we don't yet model */
@@ -1067,6 +1399,39 @@ static int m6800_execute_one(struct m6800 *cpu)
     switch(opcode) {
     case 0x01:	/* NOP */
         /* No flags */
+        return clocks;
+    case 0x02:	/* IDIV */
+        if (cpu->x == 0) {
+            cpu->x = 0xFFFF;
+            cpu->p |= P_C;
+        } else {
+            tmp16 = REG_D / cpu->x;
+            data16 = REG_D % cpu->x;
+            cpu->a = data16 >> 8;
+            cpu->b = data16;
+            cpu->x = tmp16;
+            cpu->p &= ~(P_C|P_V|P_Z);
+            if (cpu->x == 0)
+                cpu->p |= P_Z;
+        }
+        return clocks;
+    case 0x03:	/* FDIV */
+        if (cpu->x == 0) {
+            cpu->x = 0xFFFF;
+            cpu->p |= P_C;
+        } else {
+            uint32_t d32 = ((uint32_t)REG_D) << 16;
+            uint32_t tmp32 = d32 / cpu->x;
+            cpu->p &= ~(P_C|P_V|P_Z);
+            if (cpu->x <= REG_D)
+                cpu->p |= P_V;
+            tmp16 = (uint16_t)(d32/cpu->x);
+            cpu->a = tmp16 >> 8;
+            cpu->b = tmp16;
+            cpu->x = (uint16_t)tmp32;
+            if (cpu->x == 0)
+                cpu->p |= P_Z;
+        }
         return clocks;
     case 0x04: /* LSRD */
         tmpc = cpu->b & 1;
@@ -1093,10 +1458,22 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x07: /* TPA */    
         cpu->a = cpu->p | 0xC0;
         return clocks;
+    case 0x1808:/* INY */
+        cpu->y++;
+        cpu->p &= ~P_Z;
+        if (cpu->y == 0)
+            cpu->p |= P_Z;
+        return clocks;
     case 0x08:	/* INX */
         cpu->x++;
         cpu->p &= ~P_Z;
         if (cpu->x == 0)
+            cpu->p |= P_Z;
+        return clocks;
+    case 0x1809:/* DEY */
+        cpu->y--;
+        cpu->p &= ~P_Z;
+        if (cpu->y == 0)
             cpu->p |= P_Z;
         return clocks;
     case 0x09:	/* DEX */
@@ -1129,6 +1506,30 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x11:	/* CBA */
         m6800_maths8(cpu, cpu->a, cpu->b, cpu->a - cpu->b);
         return clocks;
+    case 0x12:	/* BRSET direct */
+        data8 = m6800_do_read(cpu, m6800_do_read(cpu, cpu->pc++));
+        if((data8 & m6800_do_read(cpu, cpu->pc++)) == data8)
+            m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
+        else
+            cpu->pc++;
+        return clocks;
+    case 0x13:	/* BRCLR direct */
+        data8 = m6800_do_read(cpu, m6800_do_read(cpu, cpu->pc++));
+        if(!(data8 & m6800_do_read(cpu, cpu->pc++)))
+            m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
+        else
+            cpu->pc++;
+        return clocks;
+    case 0x14:  /* BSET direct */
+        data8 = m6800_do_read(cpu, cpu->pc++);
+        m6800_do_write(cpu, data8, m6800_do_read(cpu, data8) |
+                                    m6800_do_read(cpu, cpu->pc++));
+        return clocks;
+    case 0x15:  /* BCLR direct */
+        data8 = m6800_do_read(cpu, cpu->pc++);
+        m6800_do_write(cpu, data8, m6800_do_read(cpu, data8) &
+                                    ~m6800_do_read(cpu, cpu->pc++));
+        return clocks;
     case 0x16:	/* TAB */
         cpu->b = cpu->a;
         m6800_logic8(cpu, cpu->b);
@@ -1137,7 +1538,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->a = cpu->b;
         m6800_logic8(cpu, cpu->a);
         return clocks;
-    case 0x18:  /* XGDX (6303) */
+    case 0x18:  /* XGDX (6303) - prefix on HC11 so will never reach here */
         tmp16 = cpu->x;
         cpu->x = (cpu->a << 8) | cpu->b;
         cpu->a = tmp16 >> 8;
@@ -1193,6 +1594,54 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     case 0x1B:	/* ABA */
         cpu->a = m6800_maths8(cpu, cpu->a, cpu->b, cpu->a + cpu->b);
+        return clocks;
+    case 0x181C:  /* BSET indexed,Y */
+        data16 = cpu->y + m6800_do_read(cpu, cpu->pc++);
+        tmp8 = m6800_do_read(cpu, cpu->pc++);
+        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) | tmp8);
+        return clocks;
+    case 0x1C:  /* BSET indexed */
+        data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
+        tmp8 = m6800_do_read(cpu, cpu->pc++);
+        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) | tmp8);
+        return clocks;
+    case 0x181D:  /* BCLR indexed,Y */
+        data16 = cpu->y + m6800_do_read(cpu, cpu->pc++);
+        tmp8 = m6800_do_read(cpu, cpu->pc++);
+        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) &~tmp8);
+        return clocks;
+    case 0x1D:  /* BCLR indexed */
+        data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
+        tmp8 = m6800_do_read(cpu, cpu->pc++);
+        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) &~tmp8);
+        return clocks;
+    case 0x181E:
+        data8 = m6800_do_read(cpu, cpu->y + m6800_do_read(cpu, cpu->pc++));
+        if((data8 & m6800_do_read(cpu, cpu->pc++)) == data8)
+            m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
+        else
+            cpu->pc++;
+        return clocks;
+    case 0x1E:	/* BRSET indexed */
+        data8 = m6800_do_read(cpu, cpu->x + m6800_do_read(cpu, cpu->pc++));
+        if((data8 & m6800_do_read(cpu, cpu->pc++)) == data8)
+            m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
+        else
+            cpu->pc++;
+        return clocks;
+    case 0x181F:
+        data8 = m6800_do_read(cpu, cpu->y + m6800_do_read(cpu, cpu->pc++));
+        if((data8 & m6800_do_read(cpu, cpu->pc++)) == 0)
+            m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
+        else
+            cpu->pc++;
+        return clocks;
+    case 0x1F:	/* BRCLR indexed */
+        data8 = m6800_do_read(cpu, cpu->x + m6800_do_read(cpu, cpu->pc++));
+        if((data8 & m6800_do_read(cpu, cpu->pc++)) == 0)
+            m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
+        else
+            cpu->pc++;
         return clocks;
     /* 2x is branches : 3 or 4 cycle check - 4 on 6800, 3 on 6803 ? */
     case 0x20:	/* BRA */
@@ -1261,6 +1710,10 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_bra(cpu, data8, !tmp8);
         return clocks;
     /* 3x is stack stuff mostly */
+    case 0x1830:/* TSY */
+        cpu->y = cpu->s;
+        /* No flags */
+        return clocks;		/* 4 on 6800 ? */
     case 0x30:	/* TSX */
         cpu->x = cpu->s;
         /* No flags */
@@ -1281,6 +1734,10 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->s--;
         /* No flags */
         return clocks;
+    case 0x1835:/* TYS */
+        cpu->s = cpu->y;
+        /* No flags */
+        return clocks;		/* 4 on 6800 ? */
     case 0x35:	/* TXS */
         cpu->s = cpu->x;
         /* No flags */
@@ -1293,12 +1750,20 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_push(cpu, cpu->b);
         /* No flags */
         return clocks;
+    case 0x1838:/* PULY */
+        cpu->y = m6800_pull16(cpu);
+        /* No flags */
+        return clocks;
     case 0x38:	/* PULX */
         cpu->x = m6800_pull16(cpu);
         /* No flags */
         return clocks;
     case 0x39:	/* RTS */
         cpu->pc = m6800_pull16(cpu);
+        /* No flags */
+        return clocks;
+    case 0x183A:/* ABY */
+        cpu->y += cpu->b;
         /* No flags */
         return clocks;
     case 0x3A:	/* ABX */
@@ -1310,7 +1775,13 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->b = m6800_pull(cpu);
         cpu->a = m6800_pull(cpu);
         cpu->x = m6800_pull16(cpu);
+        if (cpu->type == CPU_68HC11)
+            cpu->y = m6800_pull16(cpu);
         cpu->pc = m6800_pull16(cpu);
+        return clocks;
+    case 0x183C:
+        m6800_push16(cpu, cpu->y);
+        /* No flags */
         return clocks;
     case 0x3C:	/* PSHX */
         m6800_push16(cpu, cpu->x);
@@ -1334,8 +1805,13 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x3F:	/* SWI */
         m6800_push_interrupt(cpu);
         cpu->p |= P_I;
-        cpu->pc = m6800_do_read(cpu, 0xFFFB);
-        cpu->pc |= m6800_do_read(cpu, 0xFFFA) << 8;
+        if (cpu->type == CPU_68HC11) {
+            cpu->pc = m6800_do_read(cpu, 0xFFF7);
+            cpu->pc |= m6800_do_read(cpu, 0xFFF6) << 8;
+        } else {
+            cpu->pc = m6800_do_read(cpu, 0xFFFB);
+            cpu->pc |= m6800_do_read(cpu, 0xFFFA) << 8;
+        }
         return clocks;
     /* Implicit logic on A */
     case 0x40:	/* NEGA */
@@ -1467,6 +1943,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     /* As 0x4x but indexed and includes jumps */
     /* And 0x70 is the same but extended */
+    case 0x1860:/* NEG ,Y */
     case 0x60:	/* NEG ,X */
     case 0x70:	/* NEG addr */
         tmp8 = m6800_do_read(cpu, data16);
@@ -1502,6 +1979,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data16 & 0xFF, tmp8);
         m6800_logic8(cpu, tmp8);
         return clocks;
+    case 0x1863:/* COM ,Y */
     case 0x63:	/* COM ,X */
     case 0x73:	/* COM addr */
         tmp8 = ~m6800_do_read(cpu, data16);
@@ -1509,6 +1987,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, tmp8);
         cpu->p |= P_C;
         return clocks;
+    case 0x1864:/* LSR ,Y */
     case 0x64:	/* LSR ,X */
     case 0x74:	/* LSR addr */
         tmp8 = m6800_do_read(cpu, data16);
@@ -1532,6 +2011,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data16 & 0xFF, tmp8);
         m6800_logic8(cpu, tmp8);
         return clocks;
+    case 0x1866:/* ROR, Y */
     case 0x66:	/* ROR ,X */
     case 0x76:	/* ROR addr */
         tmp8 = m6800_do_read(cpu, data16);
@@ -1542,6 +2022,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_shift8(cpu, tmp8, tmpc);
         m6800_do_write(cpu, data16, tmp8);
         return clocks;
+    case 0x1867: /* ASR ,Y */
     case 0x67:	/* ASR ,X */
     case 0x77:	/* ASR addr */
         tmp8 = m6800_do_read(cpu, data16);
@@ -1553,6 +2034,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_shift8(cpu, tmp8, tmpc);
         m6800_do_write(cpu, data16, tmp8);
         return clocks;
+    case 0x1868: /* ASL ,Y */
     case 0x68:	/* ASL ,X */
     case 0x78:	/* ASL addr */
         tmp16 = m6800_do_read(cpu, data16);
@@ -1560,6 +2042,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_shift8(cpu, tmp16 & 0xFF, tmp16 & 0x100);
         m6800_do_write(cpu, data16, (uint8_t)tmp16);
         return clocks;
+    case 0x1869:/* ROL ,Y */
     case 0x69:	/* ROL ,X */
     case 0x79:	/* ROL addr */
         tmp8 = m6800_do_read(cpu, data16);
@@ -1568,6 +2051,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data16, tmp8);
         m6800_shift8(cpu, tmp8, tmpc);
         return clocks;
+    case 0x186A:/* DEC ,Y */
     case 0x6A: 	/* DEC ,X */
     case 0x7A:	/* DEC addr */
         /* Weird as the don't affect C */
@@ -1590,6 +2074,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         tmp8 &= data16 >> 8;
         m6800_logic8(cpu, tmp8);
         return clocks;
+    case 0x186C:/* INC ,Y */
     case 0x6C:	/* INC ,X */
     case 0x7C:	/* INC addr */
         tmp8 = m6800_do_read(cpu, data16);
@@ -1599,17 +2084,20 @@ static int m6800_execute_one(struct m6800 *cpu)
             cpu->p |= P_V;
         m6800_do_write(cpu, data16, tmp8);
         return clocks;
+    case 0x186D:
     case 0x6D:	/* TST ,X */
     case 0x7D:	/* TST addr */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_logic8(cpu, tmp8);
         cpu->p &= ~P_C;
         return clocks;
+    case 0x186E:/* JMP ,Y */
     case 0x6E:	/* JMP ,X */
     case 0x7E:	/* JMP addr */
         cpu->pc = data16;
         /* No flags */
         return clocks;
+    case 0x186F:/* CLR ,Y */
     case 0x6F:	/* CLR ,X */
     case 0x7F:	/* CLR addr */
         m6800_do_write(cpu, data16, 0);
@@ -1659,6 +2147,9 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x8B:	/* ADDA */
         cpu->a = m6800_maths8(cpu, cpu->a, data8, cpu->a + data8);
         return clocks;
+    case 0x188C:/* CPY */
+        m6800_cpx(cpu, cpu->y, data16, cpu->y - data16);
+        return clocks;
     case 0x8C:	/* CPX */
         m6800_cpx(cpu, cpu->x, data16, cpu->x - data16);
         return clocks;
@@ -1672,7 +2163,20 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* Weirdly LDS *does* affect flags */
         m6800_logic16(cpu, cpu->s);
         return clocks;
-    /* 0x8F would be SDS immediate which is meaningless */
+    /* 0x8F would be SDS immediate which is meaningless. 68HC11 uses it
+       for XGDX */
+    case 0x188F:	/* XGDY */
+        tmp16 = cpu->y;
+        cpu->y = (cpu->a << 8) | cpu->b;
+        cpu->a = tmp16 >> 8;
+        cpu->b = tmp16;
+        return clocks;
+    case 0x8F:		/* XGDX (68HC11 version) */
+        tmp16 = cpu->x;
+        cpu->x = (cpu->a << 8) | cpu->b;
+        cpu->a = tmp16 >> 8;
+        cpu->b = tmp16;
+        return clocks;
     /* Same again for direct */
     case 0x90:	/* SUBA dir */
         tmp8 = m6800_do_read(cpu, data8);
@@ -1729,6 +2233,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         tmp8 = m6800_do_read(cpu, data8);
         cpu->a = m6800_maths8(cpu, cpu->a, tmp8, cpu->a + tmp8);
         return clocks;
+    case 0x189C:/* CPY */
+        tmp16 = m6800_do_read(cpu, data8) << 8;
+        tmp16 |= m6800_do_read(cpu, data8 + 1);
+        m6800_cpx(cpu, cpu->y, data16, cpu->y - data16);
+        return clocks;
     case 0x9C:	/* CPX */
         tmp16 = m6800_do_read(cpu, data8) << 8;
         tmp16 |= m6800_do_read(cpu, data8 + 1);
@@ -1752,18 +2261,22 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic16(cpu, cpu->s);
         return clocks;
     /* 0xAX: indexed version */
+    case 0x18A0:
     case 0xA0:	/* SUBA indexed */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = m6800_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8);
         return clocks;
+    case 0x18A1:/* CMPA ,Y */
     case 0xA1:	/* CMPA indexed */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8);
         return clocks;
+    case 0x18A2:
     case 0xA2:	/* SBCA indexed */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8 - CARRY);
         return clocks;
+    case 0x18A3:
     case 0xA3:	/* SUBD indexed */
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
@@ -1771,52 +2284,69 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return clocks;
+    case 0x18A4:/* ANDA index,Y */
     case 0xA4:	/* ANDA indexed */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a &= tmp8;
         m6800_logic8(cpu, cpu->a);
         return clocks;
+    case 0x18A5:/* BITA */
     case 0xA5:	/* BITA */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_logic8(cpu, tmp8);
         return clocks;
+    case 0x18A6:
     case 0xA6:	/* LDAA */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = tmp8;
         m6800_logic8(cpu, cpu->a);
         return clocks;
+    case 0x18A7:
     case 0xA7:	/* STAA */
         m6800_do_write(cpu, data16, cpu->a);
         m6800_logic8(cpu, cpu->a);
         return clocks;
+    case 0x18A8:
     case 0xA8:	/* EORA */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a ^= tmp8;
         m6800_logic8(cpu, cpu->a);
         return clocks;
+    case 0x18A9:/* ABCA index,Y */
     case 0xA9:	/* ADCA */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = m6800_maths8(cpu, cpu->a, tmp8, cpu->a + tmp8 + CARRY);
         return clocks;
+    case 0x18AA: /* ORA ,Y */
     case 0xAA:	/* ORAA */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a |= tmp8;
         m6800_logic8(cpu, cpu->a);
         return clocks;
+    case 0x18AB:/* ADDA index,Y */
     case 0xAB:	/* ADDA */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = m6800_maths8(cpu, cpu->a, tmp8, cpu->a + tmp8);
         return clocks;
+    case 0x1AAC:/* CPY ,Y */
+    case 0x18AC:/* CPY */
+        tmp16 = m6800_do_read(cpu, data16) << 8;
+        tmp16 |= m6800_do_read(cpu, data16 + 1);
+        m6800_cpx(cpu, cpu->y, data16, cpu->y - data16);
+        return clocks;
+    case 0xCDAC:/* CPX ,Y */
     case 0xAC:	/* CPX */
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
         m6800_cpx(cpu, cpu->x, data16, cpu->x - data16);
         return clocks;
-    case 0xAD:	/* JSR */
+    case 0x18AD:/* JSR ,Y */
+    case 0xAD:	/* JSR ,X */
         m6800_push16(cpu, cpu->pc);
         cpu->pc = data16;
         /* No flags */
         return clocks;
+    case 0x18AE:
     case 0xAE:	/* LDS */
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
@@ -1824,6 +2354,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->s = tmp16;
         m6800_logic16(cpu, cpu->s);
         return clocks;
+    case 0x18AF:
     case 0xAF:	/* STS */
         m6800_do_write(cpu, data16, cpu->s >> 8);
         m6800_do_write(cpu, data16 + 1, cpu->s);
@@ -1884,6 +2415,11 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0xBB:	/* ADDA */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = m6800_maths8(cpu, cpu->a, tmp8, cpu->a + tmp8);
+        return clocks;
+    case 0x18BC:/* CPY */
+        tmp16 = m6800_do_read(cpu, data16) << 8;
+        tmp16 |= m6800_do_read(cpu, data16 + 1);
+        m6800_cpx(cpu, cpu->y, data16, cpu->y - data16);
         return clocks;
     case 0xBC:	/* CPX */
         tmp16 = m6800_do_read(cpu, data16) << 8;
@@ -1953,12 +2489,19 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->b = data16;
         m6800_logic16(cpu, REG_D);
         return clocks;
-    /* No STDD immediate */
+    /* No STDD immediate: prefix on HC11 */
+    case 0x18CE:/* LDY immediate */
+        cpu->y = data16;
+        m6800_logic16(cpu, cpu->y);
+        return clocks;
     case 0xCE:	/* LDX immediate */
         cpu->x = data16;
         m6800_logic16(cpu, cpu->x);
         return clocks;
-    /* No STX immediate */
+    case 0xCF:  /* 68HC11 stop */
+        if (!(cpu->p & P_S))
+            cpu->wait = 2;
+        return clocks;
     /* Same again for direct */
     case 0xD0:	/* SUBB dir */
         tmp8 = m6800_do_read(cpu, data8);
@@ -2025,6 +2568,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data8 + 1, cpu->b);
         m6800_logic16(cpu, REG_D);
         return clocks;
+    case 0x18DE:/* LDY direct */
+        cpu->y = m6800_do_read(cpu, data8) << 8; 
+        cpu->y |= m6800_do_read(cpu, data8 + 1);
+        m6800_logic16(cpu, cpu->y);
+        return clocks;
     case 0xDE:	/* LDX direct */
         cpu->x = m6800_do_read(cpu, data8) << 8; 
         cpu->x |= m6800_do_read(cpu, data8 + 1);
@@ -2035,14 +2583,17 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data8 + 1, cpu->x);
         return clocks;
     /* 0xEX: indexed version */
+    case 0x18E0:
     case 0xE0:	/* SUBB indexed */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b = m6800_maths8_noh(cpu, cpu->b, tmp8, cpu->b - tmp8);
         return clocks;
+    case 0x18E1:/* CMPB ,Y */
     case 0xE1:	/* CMPB indexed */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_maths8_noh(cpu, cpu->b, tmp8, cpu->b - tmp8);
         return clocks;
+    case 0x18E2:
     case 0xE2:	/* SBCB indexed */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_maths8_noh(cpu, cpu->b, tmp8, cpu->b - tmp8 - CARRY);
@@ -2054,57 +2605,80 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return clocks;
+    case 0x18E4:/* ANDB index,Y */
     case 0xE4:	/* ANDB indexed */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b &= tmp8;
         m6800_logic8(cpu, cpu->b);
         return clocks;
+    case 0x18E5:/* BITB */
     case 0xE5:	/* BITB */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_logic8(cpu, tmp8);
         return clocks;
+    case 0x18E6:
     case 0xE6:	/* LDAB */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b = tmp8;
         m6800_logic8(cpu, cpu->b);
         return clocks;
+    case 0x18E7:
     case 0xE7:	/* STAB */
         m6800_do_write(cpu, data16, cpu->b);
         m6800_logic8(cpu, cpu->b);
         return clocks;
+    case 0x18E8:
     case 0xE8:	/* EORB */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b ^= tmp8;
         m6800_logic8(cpu, cpu->b);
         return clocks;
+    case 0x18E9:/* ABCA index,Y */
     case 0xE9:	/* ADCB */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b = m6800_maths8(cpu, cpu->b, tmp8, cpu->b + tmp8 + CARRY);
         return clocks;
+    case 0x18EA: /* ORAB index,Y */
     case 0xEA:	/* ORAB */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b |= tmp8;
         m6800_logic8(cpu, cpu->b);
         return clocks;
+    case 0x18EB:/* ADDA index,Y */
     case 0xEB:	/* ADDB */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b = m6800_maths8(cpu, cpu->b, tmp8, cpu->b + tmp8);
         return clocks;
+    case 0x18EC:
     case 0xEC:	/* LDD indexed */
         cpu->a = m6800_do_read(cpu, data16);
         cpu->b = m6800_do_read(cpu, data16 + 1);
         m6800_logic16(cpu, REG_D);
         return clocks;
+    case 0x18ED:
     case 0xED:	/* STD indexed */
         m6800_do_write(cpu, data16, cpu->a);
         m6800_do_write(cpu, data16 + 1, cpu->b);
         m6800_logic16(cpu, REG_D);
         return clocks;
+    case 0x18EE: /* LDY index,Y */
+    case 0x1AEE: /* LDY index,X */
+        cpu->x = m6800_do_read(cpu, data16) << 8;
+        cpu->x |= m6800_do_read(cpu, data16 + 1);
+        m6800_logic16(cpu, cpu->x);
+        return clocks;
+    case 0xCDEE: /* LDX index,Y */
     case 0xEE:	/* LDX indexed */
         cpu->x = m6800_do_read(cpu, data16) << 8;
         cpu->x |= m6800_do_read(cpu, data16 + 1);
         m6800_logic16(cpu, cpu->x);
         return clocks;
+    case 0x1AEF:/* STY ,X */
+    case 0x18EF:/* STY ,Y */
+        m6800_do_write(cpu, data8, cpu->y >> 8);
+        m6800_do_write(cpu, data8 + 1, cpu->y);
+        return clocks;
+    case 0xCDEF:/* STX index,Y */
     case 0xEF:	/* STX indexed */
         m6800_do_write(cpu, data8, cpu->x >> 8);
         m6800_do_write(cpu, data8 + 1, cpu->x);
@@ -2175,6 +2749,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data16 + 1, cpu->b);
         m6800_logic16(cpu, REG_D);
         return clocks;
+    case 0x18FE:/* LDY extended */
+        cpu->y = m6800_do_read(cpu, data16) << 8;
+        cpu->y |= m6800_do_read(cpu, data16 + 1);
+        m6800_logic16(cpu, cpu->y);
+        return clocks;
     case 0xFE:	/* LDX extended */
         cpu->x = m6800_do_read(cpu, data16) << 8;
         cpu->x |= m6800_do_read(cpu, data16 + 1);
@@ -2222,6 +2801,33 @@ static int m6800_pre_execute(struct m6800 *cpu)
     return 0;
 }
 
+static int m68hc11_pre_execute(struct m6800 *cpu)
+{
+    /* Interrupts are not latched */
+    if (cpu->irq & IRQ_NMI) {
+        if (!(cpu->p & P_X)) {
+            cpu->p |= P_X;
+            return m6800_vector(cpu, 0xFFF4);
+        } else {
+            /* Pop the frame and continue for NMI masked */
+            cpu->p += 9;
+        }
+        cpu->wait = 0;
+    }
+    if (cpu->irq & IRQ_IRQ1)	/* External IRQ */
+        return m6800_vector_masked(cpu, 0xFFF2);
+    if (cpu->irq & IRQ_ICF)	/* ICF1 */
+        return m6800_vector_masked(cpu, 0xFFEE);
+    if (cpu->irq & IRQ_OCF)	/* OCF1 */
+        return m6800_vector_masked(cpu, 0xFFE8);
+    if (cpu->irq & IRQ_TOF)
+        return m6800_vector_masked(cpu, 0xFFDE);
+    if (cpu->irq & IRQ_SCI)
+        return m6800_vector_masked(cpu, 0xFFD6);
+    /* TODO add others */
+    return 0;
+}
+
 void m6800_clear_interrupt(struct m6800 *cpu, int irq)
 {
     cpu->irq &= ~irq;
@@ -2247,6 +2853,41 @@ int m6800_execute(struct m6800 *cpu)
         return 1;
     cycles += m6800_execute_one(cpu);
 
+    /* See if we passed the output compare, and as we don't check every
+       cycle deal with wraps */
+    n = cpu->counter + cycles;
+    if (cpu->oc_hold == 0 && cpu->counter >= cpu->ocr && cpu->counter < n) {
+        cpu->tcsr |= TCSR_OCF;	/* OCF */
+        if (cpu->tcsr & TCSR_EOCI)
+            m6800_raise_interrupt(cpu, IRQ_OCF);
+        cpu->tcsr ^= TCSR_OLVL;
+    }
+    cpu->oc_hold = 0;
+    if (n > 0xFFFF) {
+        cpu->tcsr |= TCSR_TOF;	/* TOF */
+        if (cpu->tcsr & TCSR_ETOI)
+            m6800_raise_interrupt(cpu, IRQ_TOF);
+    }
+    cpu->counter = (uint16_t)n;
+    return cycles;
+}
+
+/*
+ *	Execute a machine cycle and return how many clocks
+ *	we took doing it.
+ */
+int m68hc11_execute(struct m6800 *cpu)
+{
+    int cycles;
+    uint32_t n;
+    /* Interrupts ? */
+    cycles = m68hc11_pre_execute(cpu);
+    /* A cycle passes but we are waiting */
+    if (cpu->wait)
+        return 1;
+    cycles += m6800_execute_one(cpu);
+
+    /* TODO: 68HC11 model here */
     /* See if we passed the output compare, and as we don't check every
        cycle deal with wraps */
     n = cpu->counter + cycles;

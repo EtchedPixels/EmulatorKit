@@ -4,6 +4,7 @@ struct m6800 {
     uint8_t p;
     uint16_t s;
     uint16_t x;
+    uint16_t y;
     uint16_t pc;
 
     /* Internal state */
@@ -13,6 +14,7 @@ struct m6800 {
 #define CPU_6800	0
 #define CPU_6803	1
 #define	CPU_6303	2
+#define	CPU_68HC11	3	/* May need a special type for some types */
     int intio;
 #define INTIO_NONE	0
 #define INTIO_6802	1
@@ -46,6 +48,8 @@ struct m6800 {
 #define P_N		8
 #define P_I		16
 #define P_H		32
+#define P_X		64
+#define P_S		128
 
 #define IRAM_BASE_6803	0x80
 #define IRAM_BASE_6303X	0x40
