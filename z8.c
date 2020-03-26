@@ -12,7 +12,7 @@
 #include "z8.h"
 
 
-static uint8_t getreg(struct z8 *z8, uint8_t reg)
+static uint8_t getreg_internal(struct z8 *z8, uint8_t reg)
 {
 	if (reg > z8->regmax && reg < R_SIO) {
 		fprintf(stderr, "[Read non existent register %d]\n", reg);
@@ -39,7 +39,19 @@ static uint8_t getreg(struct z8 *z8, uint8_t reg)
 	}
 }
 
-static void setreg(struct z8 *z8, uint8_t reg, uint8_t val)
+uint8_t makereg(struct z8 *z8, uint8_t reg)
+{
+	return (z8->reg[R_RP] & 0xF0) | (reg & 0x0F);
+}
+
+static uint8_t getreg(struct z8 *z8, uint8_t reg)
+{
+	if ((reg & 0xF0) == 0xE0)
+		reg = makereg(z8, reg);
+	return getreg_internal(z8, reg);
+}
+
+static void setreg_internal(struct z8 *z8, uint8_t reg, uint8_t val)
 {
 	if (reg > z8->regmax && reg < R_SIO) {
 		fprintf(stderr, "[Wrote non existent register %d with %d]\n", reg, val);
@@ -61,39 +73,43 @@ static void setreg(struct z8 *z8, uint8_t reg, uint8_t val)
 	}
 }
 
+static void setreg(struct z8 *z8, uint8_t reg, uint8_t val)
+{
+	if ((reg & 0xF0) == 0xE0)
+		reg = makereg(z8, reg);
+	return setreg_internal(z8, reg, val);
+}
+
+
 static uint8_t getireg(struct z8 *z8, uint8_t reg)
 {
-	return getreg(z8, getreg(z8, reg));
+	return getreg_internal(z8, getreg(z8, reg));
 }
 
 void setireg(struct z8 *z8, uint8_t reg, uint8_t val)
 {
-	setreg(z8, getreg(z8, reg), val);
+	setreg_internal(z8, getreg(z8, reg), val);
 }
 
-uint8_t makereg(struct z8 *z8, uint8_t reg)
-{
-	return (z8->reg[R_RP] & 0xF0) | (reg & 0x0F);
-}
 
 uint8_t getwreg(struct z8 *z8, uint8_t reg)
 {
-	return getreg(z8, makereg(z8, reg));
+	return getreg_internal(z8, makereg(z8, reg));
 }
 
 static void setwreg(struct z8 *z8, uint8_t reg, uint8_t val)
 {
-	setreg(z8, makereg(z8, reg), val);
+	setreg_internal(z8, makereg(z8, reg), val);
 }
 
 static uint8_t getiwreg(struct z8 *z8, uint8_t reg)
 {
-	return getreg(z8, getwreg(z8, reg));
+	return getreg_internal(z8, getwreg(z8, reg));
 }
 
 static void setiwreg(struct z8 *z8, uint8_t reg, uint8_t val)
 {
-	setreg(z8, getreg(z8, makereg(z8, reg)), val);
+	setreg_internal(z8, getreg_internal(z8, makereg(z8, reg)), val);
 }
 
 static uint16_t getIrr(struct z8 *z8, uint8_t reg)
@@ -105,7 +121,7 @@ static uint16_t getIrr(struct z8 *z8, uint8_t reg)
 static uint16_t getIRR(struct z8 *z8, uint8_t reg)
 {
 	reg = getreg(z8, reg);
-	return (getreg(z8, reg) << 8) | getreg(z8, reg + 1);
+	return (getreg_internal(z8, reg) << 8) | getreg_internal(z8, reg + 1);
 }
 
 static uint8_t z8_pop8(struct z8 *z8)
@@ -113,7 +129,7 @@ static uint8_t z8_pop8(struct z8 *z8)
 	uint16_t sp;
 	uint8_t r;
 	if (z8->reg[R_P01M] & 0x04)
-		return getreg(z8, z8->reg[R_SPL]++);
+		return getreg_internal(z8, z8->reg[R_SPL]++);
 	sp = (z8->reg[R_SPH] << 8) | z8->reg[R_SPL];
 	r = z8_read_data(z8, sp++);
 	z8->reg[R_SPH] = sp >> 8;
@@ -125,7 +141,7 @@ static void z8_push8(struct z8 *z8, uint8_t val)
 {
 	uint16_t sp;
 	if (z8->reg[R_P01M] & 0x04) {
-		setreg(z8, --z8->reg[R_SPL], val);
+		setreg_internal(z8, --z8->reg[R_SPL], val);
 		return;
 	}
 	sp = (z8->reg[R_SPH] << 8) | z8->reg[R_SPL];
