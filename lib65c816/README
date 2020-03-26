@@ -1,0 +1,41 @@
+Configuring and Installing lib65816
+===================================
+
+This library uses a very simplified build procedure.  While most software built
+with the GNU toolchain uses the traditional sequence of "configure; make; make
+install", the GNU autotools are difficult to use and maintain; I could never
+get anything to work in it.  I tried, with largely excellent results, to use
+SCons.  The problem with it is it is both slow and it doesn't clean up all the
+generated files it produces.  CMake was tried next, but its behavior is
+inconsistent between installations.  All of my CMakelists.txt worked under my
+Slackware OS, but not my GoboLinux system, despite being compiled from the same
+sources.  The only solution is to create a customized configuration system.  I
+really wish I didn't have to.
+
+STEP 1: META-CONFIGURATION
+
+  I only wrote just enough code to make the library build under a Linux system.
+  All configurable items should be found in the file config.mk.  Edit that file
+  and double-check all settings are appropriate for your platform.
+
+  If you intend on following through to step 3, make sure the PREFIX setting is
+  appropriate for your platform as well.
+
+STEP 2: CONFIGURATION AND BUILDING
+
+  One of the advantages of writing my own auto-detection code is that I can use
+  the makefile itself to drive it.  Hence, there is no need for a separate
+  "configure" step.  Simply type "make".  It will autoconfigure during the
+  build process.
+
+STEP 3: INSTALLATION
+
+  If the PREFIX is set appropriately, and you have the appropriate user
+  credentials, you should be able to type "make install" to install the
+  compiled software to the appropriate locations on your computer.
+
+If you have any problems, feel free to contact me.
+
+Samuel A. Falvo II
+<kc5tja at arrl.net>
+
