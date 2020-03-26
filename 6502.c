@@ -832,38 +832,22 @@ static void rra(void)
 
 static void (*addrtable[256]) (void) = {
 /*        |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  A  |  B  |  C  |  D  |  E  |  F  |     */
-													/* 0 */ imp, indx, imp, indx, zp, zp, zp, zp, imp, imm, acc, imm, abso, abso, abso, abso,
-													/* 0 */
-														/* 1 */ rel, indy, imp, indy, zpx, zpx, zpx, zpx, imp, absy, imp, absy, absx, absx, absx, absx,
-														/* 1 */
-													/* 2 */ abso, indx, imp, indx, zp, zp, zp, zp, imp, imm, acc, imm, abso, abso, abso, abso,
-													/* 2 */
-														/* 3 */ rel, indy, imp, indy, zpx, zpx, zpx, zpx, imp, absy, imp, absy, absx, absx, absx, absx,
-														/* 3 */
-													/* 4 */ imp, indx, imp, indx, zp, zp, zp, zp, imp, imm, acc, imm, abso, abso, abso, abso,
-													/* 4 */
-														/* 5 */ rel, indy, imp, indy, zpx, zpx, zpx, zpx, imp, absy, imp, absy, absx, absx, absx, absx,
-														/* 5 */
-													/* 6 */ imp, indx, imp, indx, zp, zp, zp, zp, imp, imm, acc, imm, ind, abso, abso, abso,
-													/* 6 */
-														/* 7 */ rel, indy, imp, indy, zpx, zpx, zpx, zpx, imp, absy, imp, absy, absx, absx, absx, absx,
-														/* 7 */
-													/* 8 */ imm, indx, imm, indx, zp, zp, zp, zp, imp, imm, imp, imm, abso, abso, abso, abso,
-													/* 8 */
-														/* 9 */ rel, indy, imp, indy, zpx, zpx, zpy, zpy, imp, absy, imp, absy, absx, absx, absy, absy,
-														/* 9 */
-													/* A */ imm, indx, imm, indx, zp, zp, zp, zp, imp, imm, imp, imm, abso, abso, abso, abso,
-													/* A */
-														/* B */ rel, indy, imp, indy, zpx, zpx, zpy, zpy, imp, absy, imp, absy, absx, absx, absy, absy,
-														/* B */
-													/* C */ imm, indx, imm, indx, zp, zp, zp, zp, imp, imm, imp, imm, abso, abso, abso, abso,
-													/* C */
-														/* D */ rel, indy, imp, indy, zpx, zpx, zpx, zpx, imp, absy, imp, absy, absx, absx, absx, absx,
-														/* D */
-													/* E */ imm, indx, imm, indx, zp, zp, zp, zp, imp, imm, imp, imm, abso, abso, abso, abso,
-													/* E */
-														/* F */ rel, indy, imp, indy, zpx, zpx, zpx, zpx, imp, absy, imp, absy, absx, absx, absx, absx
-														/* F */
+/* 0 */    imp,  indx, imp,  indx, zp,   zp,   zp,   zp,   imp,  imm,  acc,  imm,  abso, abso, abso, abso, /* 0 */
+/* 1 */    rel,  indy, imp,  indy, zpx,  zpx,  zpx,  zpx,  imp,  absy, imp,  absy, absx, absx, absx, absx,/* 1 */
+/* 2 */    abso, indx, imp,  indx, zp,   zp,   zp,   zp,   imp,  imm,  acc,  imm,  abso, abso, abso, abso,/* 2 */
+/* 3 */    rel,  indy, imp,  indy, zpx,  zpx,  zpx,  zpx,  imp,  absy, imp,  absy, absx, absx, absx, absx,/* 3 */
+/* 4 */    imp,  indx, imp,  indx, zp,   zp,   zp,   zp,   imp,  imm,  acc,  imm,  abso, abso, abso, abso,/* 4 */
+/* 5 */    rel,  indy, imp,  indy, zpx,  zpx,  zpx,  zpx,  imp,  absy, imp,  absy, absx, absx, absx, absx,/* 5 */
+/* 6 */    imp,  indx, imp,  indx, zp,   zp,   zp,   zp,   imp,  imm,  acc,  imm,  ind,  abso, abso, abso,/* 6 */
+/* 7 */    rel,  indy, imp,  indy, zpx,  zpx,  zpx,  zpx,  imp,  absy, imp,  absy, absx, absx, absx, absx,/* 7 */
+/* 8 */    imm,  indx, imm,  indx, zp,   zp,   zp,   zp,   imp,  imm,  imp,  imm,  abso, abso, abso, abso, /* 8 */
+/* 9 */    rel,  indy, imp,  indy, zpx,  zpx,  zpy,  zpy,  imp,  absy, imp,  absy, absx, absx, absy, absy, /* 9 */
+/* A */    imm,  indx, imm,  indx, zp,   zp,   zp,   zp,   imp,  imm,  imp,  imm,  abso, abso, abso, abso, /* A */
+/* B */    rel,  indy, imp,  indy, zpx,  zpx,  zpy,  zpy,  imp,  absy, imp,  absy, absx, absx, absy, absy, /* B */
+/* C */    imm,  indx, imm,  indx, zp,   zp,   zp,   zp,   imp,  imm,  imp,  imm,  abso, abso, abso, abso, /* C */
+/* D */    rel,  indy, imp,  indy, zpx,  zpx,  zpx,  zpx,  imp,  absy, imp,  absy, absx, absx, absx, absx, /* D */
+/* E */    imm,  indx, imm,  indx, zp,   zp,   zp,   zp,   imp,  imm,  imp,  imm,  abso, abso, abso, abso, /* E */
+/* F */    rel,  indy, imp,  indy, zpx,  zpx,  zpx, zpx,   imp,  absy, imp,  absy, absx, absx, absx, absx /* F */
 };
 
 static void (*optable[256]) (void) = {
