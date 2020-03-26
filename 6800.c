@@ -48,10 +48,11 @@
  *	6800 and 6803 exact emulation for undocumented
  *
  *	68HC11 TODO:
- *	Are there any non trapping undefined opcodes ?
  *	Add the rest of the 68HC11 interrupt source/vectors
  *	68HC11 I/O model
+ *	Special mode and vectors
  *	Test with something like Buffalo ?
+ *	interrupt enable 1 clock delay on CLI and TAP
  *	
  */
 
@@ -1377,7 +1378,7 @@ static int m6800_execute_one(struct m6800 *cpu)
     clocks += tmp8;
     /* Not valid on this processor */
     if (tmp8 == 0) {
-        /* Q: does the HC11 push the prefix or post prefix address ? */
+        /* The HC11 pushes the prefix address */
         if (cpu->type == CPU_6303 || cpu->type == CPU_68HC11) {
             /* TRAP pushes the faulting address */
             fprintf(stderr, "illegal instruction %02X at %04X\n",
@@ -2873,9 +2874,60 @@ int m6800_execute(struct m6800 *cpu)
 }
 
 /*
+ *	Model a 68HC11 E clock
+ *
+ *	See Figure 10-1 in the M68HC11 RM
+ */
+
+#ifdef WORK_IN_PROGRESS
+
+static int prescaler(struct prescaler *p)
+{
+    if (p->count++ == p->limit) {
+        p->count = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static void m68hc11_e_clock(struct m6800 *cpu)
+{
+    if (!prescaler(&cpu->io.pr_tcnt))
+        return;
+    /* Free running counter */
+    cpu->io.tcnt++;
+    if (cpu->io.tcnt == 0)
+        cpu->io.tflg2 |= TF2_TOI;
+    /* Comparators. Set the relevant flags, we will compute their effects
+       later on */
+    if (cpu->io.tcnt == cp->io.toc1)
+        cpu->io.tflg1 |= TF1_OC1F;
+    if (cpu->io.tcnt == cp->io.toc2)
+        cpu->io.tflg1 |= TF1_OC2F;
+    if (cpu->io.tcnt == cp->io.toc3)
+        cpu->io.tflg1 |= TF1_OC3F;
+    if (cpu->io.tcnt == cp->io.toc4)
+        cpu->io.tflg1 |= TF1_OC4F;
+    if (cpu->io.tcnt == cp->io.toc5)
+        cpu->io.tflg1 |= TF1_OC5F;
+    /* We don't model input counts on IC1-IC3 but if we did it would go
+       here */
+    /* Now model the rti/cop/etc timers */
+    if (prescaler(&cpu->io.e13)) {
+        if (prescaler(&cpu->io.rti)) {
+            cpu->io.tflg2 |= TF2_RTIF;
+        }
+    }
+    /* TODO: COP */
+}
+
+#endif    
+
+/*
  *	Execute a machine cycle and return how many clocks
  *	we took doing it.
  */
+ 
 int m68hc11_execute(struct m6800 *cpu)
 {
     int cycles;
@@ -3157,6 +3209,323 @@ void m6800_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             break;
     }
 }
+
+#ifdef WORK_IN_PROGRESS
+
+uint8_t m6hc11_read_io(struct m6800 *cpu, uint8_t addr)
+{
+    uint8_t val;
+    switch(addr) {
+        case 0x00:	/* Port A */
+            val = m6800_port_input(cpu, 1) & ~cpu->paddr;
+            val |= cpu->io.padr & cpu->io.paddr;
+            return val;
+        case 0x01:	/* Port A direction register */
+            return cpu->io.paddr;/*??*/
+        case 0x02:	/* Port I/O control */
+            return cpu->io.pioc;
+        case 0x03:	/* Port C (not modelled yet not in expanded mode) */
+            return 0xFF;	/* TODO */
+        case 0x04:	/* Port B (ditto) */
+            return 0xFF;
+        case 0x05:	/* Port C L (ditto) */
+            return 0xFF;
+        case 0x07:	/* Port C direction */
+            return cpu->io.ddrc;
+        case 0x08:	/* Port D */
+            val = m6800_port_input(cpu, 4) & ~cpu->ddrd;
+            val |= cpu->io.pddr & cpu->io.ddrd;
+            return val;
+        case 0x09:
+            return cpu->io.ddrd;
+        case 0x0A:
+            return m6800_port_input(cpu, 5);
+        case 0x0B:
+            return cpu->io.cforc;
+        case 0x0C:
+            return cpu->io.oc1m;
+        case 0x0D:
+            return cpu->io.oc1d;
+        /* Note: the fact we simulate tcnt by instruction not clock means
+           the LDD behaviour works for now */
+        case 0x0E:
+            return cpu->io.tcnt >> 8;
+        case 0x0F:
+            return cpu->io.tcnt & 0xFF;
+        case 0x10:
+            return cpu->io.tic1 >> 8;
+        case 0x11:
+            return cpu->io.tic1 & 0xFF;
+        case 0x12:
+            return cpu->io.tic2 >> 8;
+        case 0x13:
+            return cpu->io.tic2 & 0xFF:
+        case 0x14:
+            return cpu->io.tic3 >> 8;
+        case 0x15:
+            return cpu->io.tic3 & 0xFF;
+        case 0x16:
+            return cpu->io.toc1 >> 8;
+        case 0x17:
+            return cpu->io.toc1 & 0xFF;
+        case 0x18:
+            return cpu->io.toc2 >> 8;
+        case 0x19:
+            return cpu->io.toc2 & 0xFF;
+        case 0x1A:
+            return cpu->io.toc3 >> 8;
+        case 0x1B:
+            return cpu->io.toc3 & 0xFF;
+        case 0x1C:
+            return cpu->io.toc4 >> 8;
+        case 0x1D:
+            return cpu->io.toc4 & 0xFF;
+        case 0x1E:
+            return cpu->io.toc5 >> 8;
+        case 0x1F:
+            return cpu->io.toc5 & 0xFF;
+        case 0x20:
+            return cpu->io.tctl1;
+        case 0x21:
+            return cpu->io.tctl2;
+        case 0x22:
+            return cpu->io.tmsk1;
+        case 0x23:
+            return cpu->io.tflg1;
+        case 0x24:
+            return cpu->io.tmsk2;
+        case 0x25:
+            return cpu->io.tflg2;
+        case 0x26:
+            return cpu->io.pactl;
+        case 0x27:
+            return cpu->io.pacnt;
+        case 0x28:
+            return cpu->io.spcr;
+        case 0x29:
+            return cpu->io.spsr;
+        case 0x2A:	/* SPI data is loaded by the transmit event response */
+            return cpu->io.spdr;
+        case 0x2B:
+            return cpu->io.baud;
+        case 0x2C:
+            return cpu->io.sccr1;
+        case 0x2D:
+            return cpu->io.sccr2;
+        case 0x2E:
+            /* Save this for SCDR handling */
+            cpu->io.last_scsr_read = cpu->io.scsr;
+            return cpu->io.scsr;
+        case 0x2F:
+            /* Clear only the flags set by the last scsr read. TDRE and TC
+               are cleared by a write instead */
+            cpu->io.scsr &= ~(cpu->io.scsr & ~(SCSR_TDRE|SCSR_TC));
+            m68hc11_sci_ints(cpu);
+            return cpu->io.scdr_r;
+        case 0x30:
+            return cpu->io.adctl;
+        case 0x31:
+            return cpu->io.adrr1;
+        case 0x32:
+            return cpu->io.adrr2;
+        case 0x33:
+            return cpu->io.adrr3;
+        case 0x34:
+            return cpu->io.adrr4;
+        case 0x39:
+            return cpu->io.option;
+        case 0x3C:
+            return cpu->io.hprio;
+        case 0x3D:
+            return cpu->io.init;
+        case 0x3E:
+            return cpu->io.test1;
+        case 0x3F:
+            return cpu->io.config;
+        /* TODO: K series MMU */
+        /* FIXME: log this */
+            return 0xFF;	/* Reserved */
+    }
+}
+
+void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
+{
+    switch(addr) {
+        case 0x00:
+            cpu->io.padr = val;
+            m6800_port_output(cpu, 1);
+            break;
+        case 0x01:
+            cpu->io.paddr = val;
+            m6800_port_direction(cpu, 1);
+            break;
+        case 0x02:
+            cpu->io.pioc = val;
+            /* TODO: side effects */
+            break;
+        case 0x03:	/* Port C is not useful in expanded mode */
+            break;
+        case 0x04:	/* Port B is not useful in expnded mode */
+            break;
+        case 0x05:	/* Port C latch ditto */
+            break;
+        case 0x07:
+            cpu->io.ddrc = val;
+            break;
+        case 0x08:
+            cpu->io.pddr = val & 0x3F;
+            m6800_port_output(cpu, 4);
+            break;
+        case 0x09:
+            cpu->io.ddrd = val & 0x3F;
+            m6800_port_direction(cpu, 4);
+            break;
+        case 0x0A:
+            cpu->io.pedr = val;
+            /* TODO */
+            break;
+        case 0x0B:
+            cpu->io.cforc = val & 0xF8;
+            break;
+        case 0x0C:
+            cpu->io.oc1m = val;
+            break;
+        case 0x0D:
+            cpu->io.oc1d = val;
+            break;
+        case 0x0E:	/* TCNT is read only */
+        case 0x0F:
+            break;
+        case 0x10:	/* Input capture is read only */
+        case 0x11:
+        case 0x12:
+        case 0x13:
+        case 0x14:
+        case 0x15:
+            break;
+        case 0x16:	/* Timer output compare */
+            cpu->io.toc1 &= 0xFF:
+            cpu->io.toc1 |= val;
+            break;
+        case 0x17:
+            cpu->io.toc1 &= 0xFF00;
+            cpu->io.toc1 |= val;
+            break;
+        case 0x18:
+            cpu->io.toc2 &= 0xFF:
+            cpu->io.toc2 |= val << 8;
+            break;
+        case 0x19:
+            cpu->io.toc2 &= 0xFF00;
+            cpu->io.toc2 |= val;
+            break;
+        case 0x1A:
+            cpu->io.toc3 &= 0xFF:
+            cpu->io.toc3 |= val << 8;
+            break;
+        case 0x1B:
+            cpu->io.toc3 &= 0xFF00;
+            cpu->io.toc3 |= val;
+            break;
+        case 0x1C:
+            cpu->io.toc4 &= 0xFF:
+            cpu->io.toc4 |= val << 8;
+            break;
+        case 0x1D:
+            cpu->io.toc4 &= 0xFF00;
+            cpu->io.toc4 |= val;
+            break;
+        case 0x1E:
+            cpu->io.toc5 &= 0xFF:
+            cpu->io.toc5 |= val << 8;
+            break;
+        case 0x1F:
+            cpu->io.toc5 &= 0xFF00;
+            cpu->io.toc5 |= val;
+            break;
+        case 0x20:	/* tctl1/2 */
+            cpu->io.tctl1 = val;
+            break;
+            /* TODO */
+        case 0x21:
+            cpu->io.tctl2 = val;
+            break;
+        case 0x22:
+            cpu->io.tmsk1 = val;
+            break;
+        case 0x23:
+            cpu->io.tflg1 = val;
+            break;
+        case 0x24:
+            cpu->io.tmsk2 = val;
+            break;
+        case 0x25:
+            cpu->io.tflg2 = val;
+            break;
+        case 0x26:
+            cpu->io.pactl = val;
+            break;
+        case 0x27:
+            cpu->io.pacnt = val;
+            break;
+        case 0x28:
+            cpu->io.spcr = val;
+            break;
+        case 0x29:
+            break;
+        case 0x2A:
+            cpu->io.spdr = m6800_spi_begin(val);
+            break;
+        case 0x2B:	/* Baud rate */
+            cpu->io.baud = val;
+            m6800_sci_baud(cpu, val);
+            break;
+        case 0x2C:
+            cpu->io.sccr1 = val;
+            break;
+        case 0x2D:
+            cpu->io.sccr2 = val;
+            break;
+        case 0x2E:
+            break;
+        case 0x2F:
+            cpu->io.scdr_w = val;
+            break;
+        case 0x30:
+            cpu->io.adctl &= 0x80;
+            cpu->io.adctl |= val & 0x3F;
+            break;
+        case 0x31:
+            cpu->io.adrr1 = val;
+            break;
+        case 0x32:
+            cpu->io.adrr2 = val;
+            break;
+        case 0x33:
+            cpu->io.adrr3 = val;
+            break;
+        case 0x34:
+            cpu->io.adrr4 = val;
+            break;
+        case 0x39:
+            cpu->io.hprio = val;
+            break;
+        case 0x3C:
+            cpu->io.option = val;
+            break;
+        case 0x3D:
+            cpu->io.init = val;
+            break;
+        case 0x3E:
+            cpu->io.test1 = val;
+            break;
+        case 0x3F:
+            cpu->io.config = val;
+            break;
+    }
+}
+
+#endif
 
 /* We only support mode 2 and mode 3 on the other parts for now */
 
