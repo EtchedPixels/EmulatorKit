@@ -1,7 +1,8 @@
 
-CFLAGS = -Wall -pedantic
+CFLAGS = -Wall -pedantic -g3
 
-all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini rc2014-80c188 rc2014-8085 \
+all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
+	rc2014-68008 rc2014-80c188 rc2014-8085 \
 	rbcv2 searle linc80 makedisk mbc2 smallz80 sbc2g z80mc simple80
 
 rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o
@@ -30,15 +31,22 @@ rc2014-1802: rc2014-1802.o 1802.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 rc2014-6303: rc2014-6303.o 6800.o ide.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-6303.o ide.o ppide.o rtc_bitbang.o w5100.o 6800.o -o rc2014-6303
 
-rc2014-6502: rc2014-6502.o 6502.o 6502dis.o
+rc2014-6502: rc2014-6502.o 6502.o 6502dis.o ide.o w5100.o
 	cc -g3 rc2014-6502.o ide.o w5100.o 6502.o 6502dis.o -o rc2014-6502
 
-rc2014-65c816-mini: rc2014-65c816-mini.o 6502.o 6502dis.o
+rc2014-65c816-mini: rc2014-65c816-mini.o ide.o w5100.o
 	cc -g3 rc2014-65c816-mini.o ide.o w5100.o lib65c816/src/lib65816.a -o rc2014-65c816-mini
 
 rc2014-65c816-mini.o: rc2014-65c816-mini.c
 	(cd lib65c816; make)
 	$(CC) $(CFLAGS) -Ilib65c816 -c rc2014-65c816-mini.c
+
+rc2014-68008: rc2014-68008.o ide.o w5100.o m68k/lib68k.a
+	cc -g3 rc2014-68008.o ide.o w5100.o m68k/lib68k.a -o rc2014-68008
+
+rc2014-68008.o: rc2014-68008.c
+	(cd m68k; make)
+	$(CC) $(CFLAGS) -Im68k -c rc2014-68008.c
 
 rc2014-8085: rc2014-8085.o intel_8085_emulator.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-8085.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o intel_8085_emulator.o -o rc2014-8085
@@ -74,4 +82,5 @@ clean:
 	(cd libz80; make clean)
 	(cd 80x86; make clean)
 	(cd lib65c816; make clean)
+	(cd m68k; make clean)
 	rm -f *.o *~ rc2014 rbcv2
