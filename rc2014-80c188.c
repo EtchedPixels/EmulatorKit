@@ -567,7 +567,7 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, ramrom, 512 * 1024) < 512 * 1024) {
+	if (read(fd, ramrom + 512 * 1024, 512 * 1024) < 512 * 1024) {
 		fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
 		exit(EXIT_FAILURE);
 	}
