@@ -32,11 +32,13 @@ rc2014-6303: rc2014-6303.o 6800.o ide.o w5100.o ppide.o rtc_bitbang.o
 rc2014-6502: rc2014-6502.o 6502.o 6502dis.o ide.o w5100.o
 	cc -g3 rc2014-6502.o ide.o w5100.o 6502.o 6502dis.o -o rc2014-6502
 
-rc2014-65c816-mini: rc2014-65c816-mini.o ide.o w5100.o
+rc2014-65c816-mini: rc2014-65c816-mini.o ide.o w5100.o lib65c816/src/lib65816.a
 	cc -g3 rc2014-65c816-mini.o ide.o w5100.o lib65c816/src/lib65816.a -o rc2014-65c816-mini
 
-rc2014-65c816-mini.o: rc2014-65c816-mini.c
-	$(MAKE) --directory lib65c816 && \
+lib65c816/src/lib65816.a:
+	$(MAKE) --directory lib65c816
+
+rc2014-65c816-mini.o: rc2014-65c816-mini.c lib65c816/src/lib65816.a
 	$(CC) $(CFLAGS) -Ilib65c816 -c rc2014-65c816-mini.c
 
 rc2014-68008: rc2014-68008.o ide.o w5100.o m68k/lib68k.a
