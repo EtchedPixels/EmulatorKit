@@ -503,6 +503,8 @@ void cp1802_outport(uint8_t addr, uint8_t val)
 		rtc_write(rtcdev, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		uart_write(&uart, addr & 0x0F, val);
+	else if (addr == 0x80)
+		printf("[%02X]\n", val);
 	else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
