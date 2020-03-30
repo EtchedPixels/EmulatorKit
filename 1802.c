@@ -125,10 +125,11 @@ static void execute_op(struct cp1802 *cpu)
         case 0:		/* RET */
         case 1:
             /* DIS */
-            tmp = cp1802_read(cpu, cpu->r[cpu->x]);
+            /* Beware: the 1802 datasheet implies the new X is incremented
+               but this is not in fact the case */
+            tmp = cp1802_read(cpu, cpu->r[cpu->x]++);
             cpu->x = tmp >> 4;
             cpu->p = tmp & 0x0F;
-            cpu->r[cpu->x]++;	/* Check it applies after the change */
             cpu->ie = !reg;
             break;
         case 2:		/* LDXA */
