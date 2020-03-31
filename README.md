@@ -351,3 +351,41 @@ Options:
 - -i		Turn on interrupt emulation
 - -f		Fast (run flat out)
 - -a		Set load address of image (default 0)
+
+# RC2014 1802
+
+This is an emulation of a fully loaded 1802 system with up to 512K RAM /
+512K ROM and IDE disk adapters.
+
+## To get actual hardware see
+
+https://hackaday.io/project/170666-1802-cpu-for-rc2014
+
+## For ROM images see
+
+https://github.com/EtchedPixels/RC2014-ROM
+
+## Usage
+
+Options:
+- -1		enable 16550A UART at 0xC0-0xC7
+- -a		enable 6850 ACIA with narrow decode (80-87)
+- -b		512K ROM/512K RAM board
+- -B		Etched Pixels MMU + 512K/512K linear memory board
+- -d n		Turn on debug flags
+- -e n		Execute ROM bank n (0-7) (not used with -b or -B)
+- -f		Fast mode (run flat out)
+- -i path	Enable IDE and use this file
+- -I path	Enable PPIDE and use this file
+- -r path	Load the ROM image from this path
+- -R		Enable the DS1302 RTC
+- -w		WizNET 5100 at 0x28-0x2B (works but buggy)
+
+To build a disk image
+
+./makedisk 1 my.cf
+
+dd if=cf-image of=my.cf bs=512 seek=2 conv=notrunc
+
+In other words the IDE disk format has a 1K header that holds
+meta-data and the virtual identify block.
