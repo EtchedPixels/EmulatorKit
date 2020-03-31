@@ -4,14 +4,14 @@
  *	1802 at 6.144MHz (FIXME - sensible speed!)
  *	Motorola 6850 at 0xA0-0xA7
  *	IDE at 0x10-0x17 no high or control access (mirrored at 0x90-97)
+ *	PPIDE at 0x20
  *	Simple memory 32K ROM / 32K RAM
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
+ *	Etched Pixels MMU at 0xFF
  *	RTC at 0x0C
  *	16550A at 0xC0
  *	WizNET ethernet
- *
- *	Alternate MMU option using highmmu on 8085/MMU card
  *
  *	TODO:
  *	Possibly emulate the graphics option
@@ -59,11 +59,8 @@ static uint16_t mcycles = 10;	/* Machine cycles per sequence. The 1802
 
 static uint8_t live_irq;
 
-#define IRQ_SIOA	1
-#define IRQ_SIOB	2
-#define IRQ_CTC		3
-#define IRQ_ACIA	4
-#define IRQ_16550A	5
+#define IRQ_ACIA	1
+#define IRQ_16550A	2
 
 static nic_w5100_t *wiz;
 
@@ -73,14 +70,12 @@ static volatile int done;
 #define TRACE_IO	2
 #define TRACE_ROM	4
 #define TRACE_UNK	8
-#define TRACE_PPIDE	16
-#define TRACE_512	32
+#define TRACE_LED	16
+#define TRACE_PPIDE	32
 #define TRACE_RTC	64
 #define TRACE_ACIA	128
-#define TRACE_CTC	256
-#define TRACE_CPU	512
-#define TRACE_IRQ	1024
-#define TRACE_UART	2048
+#define TRACE_UART	256
+#define TRACE_512	512
 
 static int trace = 0;
 
@@ -503,9 +498,10 @@ void cp1802_outport(uint8_t addr, uint8_t val)
 		rtc_write(rtcdev, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		uart_write(&uart, addr & 0x0F, val);
-	else if (addr == 0x80)
-		printf("[%02X]\n", val);
-	else if (addr == 0xFD) {
+	else if (addr == 0x80) {
+		if (trace & TRACE_LED)
+			printf("[%02X]\n", val);
+	} else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
@@ -619,7 +615,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-1] [-A] [-b] [-f] [-R] [-r rompath] [-e rombank] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-1802: [-1] [-A] [-b] [-B] [-e bank] [-f] [-i cfidepath] [-I ppidepath]\n             [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
