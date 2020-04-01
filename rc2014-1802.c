@@ -615,13 +615,14 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-1802: [-1] [-A] [-b] [-B] [-e bank] [-f] [-i cfidepath] [-I ppidepath]\n             [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-1802: [-1] [-A] [-b] [-B] [-e bank] [-f] [-i cfidepath] [-I ppidepath]\n             [-R] [-r rompath] [-t type] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[])
 {
 	static struct timespec tc;
+	int type = 1802;
 	int opt;
 	int fd;
 	int rom = 1;
@@ -630,7 +631,7 @@ int main(int argc, char *argv[])
 	char *idepath;
 	int acia_input;
 
-	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:Rt:w")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -674,6 +675,9 @@ int main(int argc, char *argv[])
 		case 'R':
 			rtc = 1;
 			break;
+		case 't':
+			type = atoi(optarg);
+			break;
 		case 'w':
 			wiznet = 1;
 			break;
@@ -684,6 +688,10 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+	if (type != 1802 && type != 1804 && type != 1805 && type != 1806) {
+		fprintf(stderr, "rc2014: unknown CPU type. Please select from 1802, 1804, 1805, 1806.\n");
+		exit(1);
+	}
 	if (acia_uart == 0 && uart_16550a == 0) {
 		fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
 		acia_uart = 1;
@@ -799,7 +807,7 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	cp1802_init(&cpu, 1802);
+	cp1802_init(&cpu, type);
 
 //	if (trace & TRACE_CPU)
 //		cp1802_set_debug();
