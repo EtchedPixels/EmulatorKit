@@ -799,7 +799,8 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	cp1802_reset(&cpu);
+	cp1802_init(&cpu, 1802);
+
 //	if (trace & TRACE_CPU)
 //		cp1802_set_debug();
 
