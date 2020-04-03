@@ -2,6 +2,23 @@
  *	Z86C91 CPU emulator
  *
  *	This is a work in progress and not yet usable
+ *
+ *	Instructions to complete
+ *	LDC	}
+ *	LDCI	}	Because the old and new manual contradict on the
+ *	LDE	}	encoding and the examples contradict wiht both
+ *	LDEI	}
+ *	WDH/L	-	does it make sense to emulate a part with these ?
+ *	STOP	}
+ *	HALT	}	need to add the extra CPU states
+ *	DA		figure out how it behaves
+ *
+ *	Other work to do
+ *	Timer chaining
+ *
+ *	Not supported
+ *	External clocks
+ *	IRQ priority logic
  */
 
 #include <stdint.h>

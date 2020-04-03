@@ -2,7 +2,7 @@
 CFLAGS = -Wall -pedantic -g3
 
 all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
-	rc2014-68008 rc2014-80c188 rc2014-8085 \
+	rc2014-68008 rc2014-80c188 rc2014-8085 rc2014-z8 \
 	rbcv2 searle linc80 makedisk mbc2 smallz80 sbc2g z80mc simple80
 
 rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o
@@ -54,6 +54,9 @@ rc2014-8085: rc2014-8085.o intel_8085_emulator.o ide.o acia.o w5100.o ppide.o rt
 rc2014-80c188: rc2014-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	(cd 80x86; make)
 	cc -g3 rc2014-80c188.o ide.o ppide.o rtc_bitbang.o w5100.o 80x86/*.o -o rc2014-80c188
+
+rc2014-z8: rc2014-z8.o z8.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
+	cc -g3 rc2014-z8.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z8.o -o rc2014-z8
 
 smallz80: smallz80.o ide.o
 	(cd libz80; make)
