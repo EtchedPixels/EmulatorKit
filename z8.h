@@ -11,6 +11,9 @@ struct z8
     uint8_t t0, t1;	/* Timers */
     /* Instruction timing */
     unsigned long cycles;
+    int done_ei;	/* Has done an EI (weirdness with IRR register) */
+    int ei_state;	/* Interrupt control */
+    int trace;
 };
 
 
@@ -52,9 +55,12 @@ extern void z8_execute(struct z8 *z8);
 extern void z8_raise_irq(struct z8 *z8, int irq);
 extern void z8_clear_irq(struct z8 *z8, int irq);
 extern void z8_rx_char(struct z8 *z8, uint8_t ch);
+extern void z8_set_trace(struct z8 *z8, int onoff);
+extern void z8_tx_done(struct z8 *z8);
 
 /* Provided by user */
 extern uint8_t z8_read_code(struct z8 *z8, uint16_t addr);
+extern uint8_t z8_read_code_debug(struct z8 *z8, uint16_t addr);
 extern void z8_write_code(struct z8 *z8, uint16_t addr, uint8_t val);
 extern uint8_t z8_read_data(struct z8 *z8, uint16_t addr);
 extern void z8_write_data(struct z8 *z8, uint16_t addr, uint8_t val);
