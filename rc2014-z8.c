@@ -1,7 +1,7 @@
 /*
  *	Platform features
  *
- *	Z8 at 6.144MHz (FIXME - sensible speed!)
+ *	Z8 at 7.3728MHz
  *	Internal serial
  *	IDE at 0x10-0x17 no high or control access (mirrored at 0x90-97)
  *	PPIDE at 0x20
@@ -52,8 +52,7 @@ static int int_tx;
 struct ppide *ppide;
 struct rtc *rtcdev;
 
-static uint16_t mcycles = 64;	/* Machine cycles per sequence. The z8
-				   is pretty slow */
+static uint16_t mcycles = 368;	/* Clocks per 50us */
 
 /* Who is pulling on the interrupt line */
 
@@ -146,10 +145,10 @@ static void int_event(void)
 	
 void recalc_interrupts(void)
 {
-	if (live_irq)	/* FIXME: which IRQ */
-		z8_raise_irq(cpu, 5);
+	if (live_irq)
+		z8_raise_irq(cpu, 0);
 	else
-		z8_clear_irq(cpu, 5);
+		z8_clear_irq(cpu, 0);
 }
 
 static void int_set(int src)
