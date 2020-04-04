@@ -15,6 +15,7 @@
  *
  *	Other work to do
  *	Timer chaining
+ *	Interrupt set/clearing caused by register I/O
  *
  *	Not supported
  *	External clocks
@@ -152,7 +153,9 @@ static void z8_decode_ldcei(struct z8 *z8, uint8_t opcode, uint16_t pc, char *bu
 	uint8_t v = z8_read_code_debug(z8, pc++);
 	char c = (opcode & 0x40) ? 'C' : 'E';
 
+	/* 0x01 is the I bit */
 	if (opcode & 0x01) {
+		/* 0x10 indicates Irr,Ir format */
 		if (opcode & 0x10)
 			sprintf(buf, "LD%cI @RR%d,@R%d",
 				c, v & 0x0F, v >> 4);
@@ -160,6 +163,7 @@ static void z8_decode_ldcei(struct z8 *z8, uint8_t opcode, uint16_t pc, char *bu
 			sprintf(buf, "LD%cI @R%d, @RR%d",
 				c, v >> 4, v & 0x0F);
 	} else {
+		/* 0x10 indicates the Irr,r format */
 		if (opcode & 0x10)
 			sprintf(buf, "LD%c @RR%d,R%d",
 				c, v & 0x0F, v >> 4);
@@ -393,6 +397,9 @@ static uint8_t getreg_internal(struct z8 *z8, uint8_t reg)
 		return z8->t0;
 	case R_T1:
 		return z8->t1;
+	case R_SIO:
+		z8->reg[R_IRR] &= ~0x08;
+		return z8->reg[R_IRR];
 	default:
 		return z8->reg[reg];
 	}
@@ -427,8 +434,10 @@ static void setreg_internal(struct z8 *z8, uint8_t reg, uint8_t val)
 		if (z8->done_ei == 0)
 			break;
 	case R_SIO:
-		if (z8->reg[R_P3M] & 0x40)
+		if (z8->reg[R_P3M] & 0x40) {
 			z8_tx(z8, val);
+			z8->reg[R_IRR] &= ~0x10;
+		}
 	default:
 	z8->reg[reg] = val;
 	}
@@ -477,6 +486,17 @@ static uint16_t getIrr(struct z8 *z8, uint8_t reg)
 {
 	reg = getwreg(z8, reg);
 	return (getreg(z8, reg) << 8) | getreg(z8, reg + 1);
+}
+
+/* The instruction set may look like there is no 'rr' form, but in fact
+   the @ in LDC/LDE is kind of bogus as it's saying "from memory" not
+   a register indirection first. */
+static uint16_t getrr(struct z8 *z8, uint8_t reg)
+{
+	uint16_t r = getwreg(z8, reg);
+	r <<= 8;
+	r |= getwreg(z8, reg + 1);
+	return r;
 }
 
 static uint16_t getIRR(struct z8 *z8, uint8_t reg)
@@ -1117,42 +1137,46 @@ static void z8_execute_one(struct z8 *z8)
 		case 0x0D:
 		case 0x0F:
 			switch (opcode) {
-			case 0x82:	/* LDE */
+			case 0x82:	/* LDE r,Irr */
 				r = z8_read_code(z8, z8->pc++);
 				setwreg(z8, r >> 4,
-				    z8_read_data(z8, getIrr(z8, r & 0xF)));
+				    z8_read_data(z8, getrr(z8, r & 0xF)));
 				z8->cycles += 12;
 				break;
-			case 0x83:	/* LDEI */
+			case 0x83:	/* LDEI Ir,Irr*/
 				r = z8_read_code(z8, z8->pc++);
-				setreg(z8, getreg(z8, r >> 4),
-					z8_read_data(z8, getIrr(z8, r & 0x0F)));
-				setwreg(z8, r >> 4, getwreg(z8, r >> 4) + 1);
-				z8_inc16(z8, makereg(z8, r & 0x0F));
+				setreg(z8, getiwreg(z8, r >> 4),
+					z8_read_data(z8, getrr(z8, r & 0x0F)));
+				setiwreg(z8, r >> 4, getiwreg(z8, r >> 4) + 1);
+				z8_inc16(z8, getwreg(z8, r & 0x0F));
 				z8->cycles += 18;
 				break;
-			case 0x92:	/* LDE */
+			case 0x92:	/* LDE Irr,r */
 				r = z8_read_code(z8, z8->pc++);
-				z8_write_data(z8, getIrr(z8, r & 0x0F),
+				z8_write_data(z8, getrr(z8, r & 0x0F),
 					      getwreg(z8, r >> 4));
 				z8->cycles += 12;
 				break;
-			case 0x93:	/* LDEI */
+			case 0x93:	/* LDEI Irr,Ir*/
 				r = z8_read_code(z8, z8->pc++);
-				setreg(z8, getreg(z8, r >> 4),
-					z8_read_code(z8, getIrr(z8, r & 0x0F)));
-				setwreg(z8, r >> 4, getwreg(z8, r >> 4) + 1);
+				z8_write_data(z8, getrr(z8, r & 0x0F), 
+					getiwreg(z8, r >> 4));
+				setiwreg(z8, r >> 4, getiwreg(z8, r >> 4) + 1);
 				z8_inc16(z8, makereg(z8, r & 0x0F));
 				z8->cycles += 18;
 				break;
-			case 0xC2:	/* LDC */
+			case 0xC2:	/* LDC r,Irr*/
 				r = z8_read_code(z8, z8->pc++);
 				setwreg(z8, r >> 4, 
-					z8_read_code(z8, getIrr(z8, r & 0xF)));
+					z8_read_code(z8, getrr(z8, r & 0xF)));
 				z8->cycles += 12;
 				break;
 			case 0xC3:	/* LDCI */
-				/* TODO */
+				r = z8_read_code(z8, z8->pc++);
+				setreg(z8, getiwreg(z8, r >> 4),
+					z8_read_data(z8, getrr(z8, r & 0x0F)));
+				setiwreg(z8, r >> 4, getiwreg(z8, r >> 4) + 1);
+				z8_inc16(z8, getwreg(z8, r & 0x0F));
 				z8->cycles += 18;
 				break;
 			case 0xC7:	/* LD r1,x.R2 */
@@ -1164,13 +1188,17 @@ static void z8_execute_one(struct z8 *z8)
 								z8->pc++)));
 				z8->cycles += 10;
 				break;
-			case 0xD2:	/* LDC */
+			case 0xD2:	/* LDC Irr,r */
 				r = z8_read_code(z8, z8->pc++);
-				z8_write_code(z8, getIrr(z8, r & 0x0F),
+				z8_write_code(z8, getrr(z8, r & 0x0F),
 					      getwreg(z8, r >> 4));
 				break;
 			case 0xD3:	/* LDCI */
-				/* TODO */
+				r = z8_read_code(z8, z8->pc++);
+				z8_write_data(z8, getrr(z8, r & 0x0F), 
+					getiwreg(z8, r >> 4));
+				setiwreg(z8, r >> 4, getiwreg(z8, r >> 4) + 1);
+				z8_inc16(z8, makereg(z8, r & 0x0F));
 				z8->cycles += 18;
 				break;
 			case 0xD4:	/* CALL IRR1 */
