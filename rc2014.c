@@ -8,7 +8,7 @@
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
  *	RTC at 0xC0
- *	16550A at 0xC8
+ *	16550A at 0xA0
  *
  *	Known bugs
  *	Not convinced we have all the INT clear cases right for SIO error
@@ -476,13 +476,15 @@ struct uart16x50 {
 #define TEMT	2
 #define MODEM	8
     uint8_t irqline;
+    uint8_t input;
 };
 
 static struct uart16x50 uart[1];
 
-static void uart_init(struct uart16x50 *uptr)
+static void uart_init(struct uart16x50 *uptr, int in)
 {
     uptr->dlab = 0;
+    uptr->input = in;
 }
 
 static void uart_check_irq(struct uart16x50 *uptr)
@@ -536,10 +538,8 @@ static void uart_event(struct uart16x50 *uptr)
     uint8_t r = check_chario();
     uint8_t old = uptr->lsr;
     uint8_t dhigh;
-#if 0
-    if (r & 1)
+    if (uptr->input && (r & 1))
         uptr->lsr |= 0x01;	/* RX not empty */
-#endif
     if (r & 2)
         uptr->lsr |= 0x60;	/* TX empty */
     dhigh = (old ^ uptr->lsr);
@@ -1852,7 +1852,7 @@ static uint8_t io_read_2014(uint16_t addr)
 	   an official CTC board at another address  */
 	if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		return ctc_read(addr & 3);
-	if (addr >= 0xC8 && addr <= 0xD0 && has_16x50)
+	if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		return uart_read(&uart[0], addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -1902,7 +1902,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		rtc_write(rtc, val);
 	else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		ctc_write(addr & 3, val);
-	else if (addr >= 0xC8 && addr <= 0xCF && has_16x50)
+	else if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		uart_write(&uart[0], addr & 7, val);
 	else if (switchrom && addr == 0x38)
 		toggle_rom();
@@ -2247,7 +2247,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "Aabcd:e:fi:I:m:pr:sRS:uw8C:")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fi:I:m:pr:sRS:uw8C:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2304,7 +2304,9 @@ int main(int argc, char *argv[])
 			have_ctc = 1;
 			break;
 		case 'u':
+		case '1':
 			has_16x50 = 1;
+			indev = INDEV_16C550A;
 			break;
 		case 'm':
 			/* Default Z80 board */
@@ -2394,7 +2396,7 @@ int main(int argc, char *argv[])
 	if (cpuboard == CPUBOARD_Z80SBC64) {
 		cpld_serial = 1;
 		indev = INDEV_CPLD;
-	} else if (has_acia == 0 && sio2 == 0) {
+	} else if (has_acia == 0 && sio2 == 0 && has_16x50 == 0 ) {
 		if (cpuboard != 3) {
 			fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
 			has_acia = 1;
@@ -2508,7 +2510,6 @@ int main(int argc, char *argv[])
 			ppide_attach(ppide, 0, ide_fd);
 		if (trace & TRACE_PPIDE)
 			ppide_trace(ppide, 1);
-		ide = 0;
 	}
 	/* SD mapping */
 	if (cpuboard == CPUBOARD_MICRO80) {
@@ -2539,7 +2540,7 @@ int main(int argc, char *argv[])
 	if (have_pio)
 		pio_reset();
 	if (has_16x50)
-		uart_init(&uart[0]);
+		uart_init(&uart[0], indev == INDEV_16C550A ? 1: 0);
 
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
@@ -2572,6 +2573,8 @@ int main(int argc, char *argv[])
 		sio2_input = 1;
 		break;
 	case INDEV_CPLD:
+		break;
+	case INDEV_16C550A:
 		break;
 	default:
 		fprintf(stderr, "Invalid input device %d.\n", indev);
