@@ -1,5 +1,5 @@
 
-CFLAGS = -Wall -pedantic -g3
+CFLAGS = -Wall -pedantic -g3 -Werror
 
 all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 	rc2014-68008 rc2014-80c188 rc2014-8085 rc2014-z8 \

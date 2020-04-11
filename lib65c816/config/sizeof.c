@@ -13,9 +13,9 @@ int main(int argc, char *argv[])
 	  "#define DEBUG        1\n"
 	  "#endif\n"
 
-	, sizeof(long)
-	, sizeof(int)
-	, sizeof(short)
+	, (int)sizeof(long)
+	, (int)sizeof(int)
+	, (int)sizeof(short)
 	);
 
 	return 0;

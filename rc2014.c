@@ -223,7 +223,7 @@ static void mem_write114(uint16_t addr, uint8_t val)
    2: sets the lower bank to the 64K-96K range
    3: sets the lower bank to the 96K-128K range
    where the upper memory is always bank 1.
-   
+
    Power on is 3, which is why the bootstrap lives in 3. */
 
 static uint8_t mem_read64(uint16_t addr)
@@ -1671,7 +1671,7 @@ static void toggle_rom(void)
 /*
  *	Emulate the Z80SBC64 CPLD
  */
- 
+
 static uint8_t sbc64_cpld_status;
 static uint8_t sbc64_cpld_char;
 
@@ -2154,14 +2154,16 @@ static void poll_irq_event(void)
 			acia_check_irq(acia);
 		uart_check_irq(&uart[0]);
 		if (!live_irq) {
-			!sio2_check_im2(sio) && !sio2_check_im2(sio + 1) &&
-			!ctc_check_im2();
+			if (!sio2_check_im2(sio))
+        if (!sio2_check_im2(sio + 1))
+			    ctc_check_im2();
 		}
 	} else {
 		if (acia)
 			acia_check_irq(acia);
 		uart_check_irq(&uart[0]);
-		!sio2_check_im2(sio) && !sio2_check_im2(sio + 1);
+		if (!sio2_check_im2(sio))
+      sio2_check_im2(sio + 1);
 		ctc_check_im2();
 	}
 }
@@ -2435,10 +2437,10 @@ int main(int argc, char *argv[])
 	   you to load bank 3 with the CPLD loader (so you can play with it
 	   and loading Zmon, or with Zmon loaded, or indeed anything else in
 	   the reserved space notably SCMonitor).
-	   
+
 	   Quitting saves the memory state. If you screw it all up then use
 	   the loader bin file instead to get going again.
-	   
+
 	   Mark states read only with chmod and it won't save back */
 
 	if (cpuboard == CPUBOARD_Z80SBC64) {
@@ -2564,7 +2566,7 @@ int main(int argc, char *argv[])
 		copro->tstates = (tstate_steps + 5) / 10;
 		z80copro_trace(copro, (trace >> 17) & 3);
 	}
-		
+
 	switch(indev) {
 	case INDEV_ACIA:
 		acia_set_input(acia, 1);

@@ -192,7 +192,7 @@ static void uart_recalc_iir(struct uart16x50 *uptr)
     if (uptr->irqline)
         return;
     uptr->irqline = uptr->irq;
-#ifdef UART_IRQ    
+#ifdef UART_IRQ
     Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
 #endif
 }
@@ -448,6 +448,7 @@ uint8_t do_rtc_read(uint8_t addr)
     case 15:
         return 4;
     }
+    #pragma GCC diagnostic ignored "-Wreturn-type"
 }
 
 uint8_t rtc_read(uint8_t addr)
@@ -509,7 +510,7 @@ static uint8_t gide_read(uint16_t addr)
         gide_latch = ide_read16(ide0, ide_data);
         gide_lstate = 1;
         return gide_latch;
-            
+
     }
     if (trace & TRACE_IDE)
         fprintf(stderr, "IDE read %d = %02X\n", addr, r);
@@ -532,7 +533,7 @@ static void gide_write(uint16_t addr, uint8_t val)
             gide_latch = val;
         } else {
             ide_write16(ide0, ide_data, gide_latch | (val << 8));
-            gide_lstate = 0; 
+            gide_lstate = 0;
         }
     }
 }
