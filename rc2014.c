@@ -223,7 +223,7 @@ static void mem_write114(uint16_t addr, uint8_t val)
    2: sets the lower bank to the 64K-96K range
    3: sets the lower bank to the 96K-128K range
    where the upper memory is always bank 1.
-   
+
    Power on is 3, which is why the bootstrap lives in 3. */
 
 static uint8_t mem_read64(uint16_t addr)
@@ -704,11 +704,11 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
     return 0xFF;
 }
 
-
+#define SIO_QUEUE_SIZE 60
 struct z80_sio_chan {
 	uint8_t wr[8];
 	uint8_t rr[3];
-	uint8_t data[3];
+	uint8_t data[SIO_QUEUE_SIZE];
 	uint8_t dptr;
 	uint8_t irq;
 	uint8_t rxint;
@@ -820,10 +820,10 @@ static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
 		return;
 	}
 	/* Overrun */
-	if (chan->dptr == 2) {
+	if (chan->dptr == SIO_QUEUE_SIZE) {
 		if (trace & TRACE_SIO)
 			fprintf(stderr, "Overrun.\n");
-		chan->data[2] = c;
+		chan->data[SIO_QUEUE_SIZE-1] = c;
 		chan->rr[1] |= 0x20;	/* Overrun flagged */
 		/* What are the rules for overrun delivery FIXME */
 		sio2_raise_int(chan, INT_ERR);
@@ -896,6 +896,7 @@ static void sio_reset(void)
 
 static uint8_t sio2_read(uint16_t addr)
 {
+  int i = 0;
 	struct z80_sio_chan *chan = (addr & 2) ? sio + 1 : sio;
 	if (!(addr & 1)) {
 		/* Control */
@@ -927,8 +928,8 @@ static uint8_t sio2_read(uint16_t addr)
 	} else {
 		/* FIXME: irq handling */
 		uint8_t c = chan->data[0];
-		chan->data[0] = chan->data[1];
-		chan->data[1] = chan->data[2];
+    for (i = 1; i <= chan->dptr; i++)
+      chan->data[i-1] = chan->data[i];
 		if (chan->dptr)
 			chan->dptr--;
 		if (chan->dptr == 0)
@@ -1671,7 +1672,7 @@ static void toggle_rom(void)
 /*
  *	Emulate the Z80SBC64 CPLD
  */
- 
+
 static uint8_t sbc64_cpld_status;
 static uint8_t sbc64_cpld_char;
 
@@ -2435,10 +2436,10 @@ int main(int argc, char *argv[])
 	   you to load bank 3 with the CPLD loader (so you can play with it
 	   and loading Zmon, or with Zmon loaded, or indeed anything else in
 	   the reserved space notably SCMonitor).
-	   
+
 	   Quitting saves the memory state. If you screw it all up then use
 	   the loader bin file instead to get going again.
-	   
+
 	   Mark states read only with chmod and it won't save back */
 
 	if (cpuboard == CPUBOARD_Z80SBC64) {
@@ -2564,7 +2565,7 @@ int main(int argc, char *argv[])
 		copro->tstates = (tstate_steps + 5) / 10;
 		z80copro_trace(copro, (trace >> 17) & 3);
 	}
-		
+
 	switch(indev) {
 	case INDEV_ACIA:
 		acia_set_input(acia, 1);
