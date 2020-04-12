@@ -127,18 +127,6 @@ void recalc_interrupts(void)
 		m6800_clear_interrupt(&cpu, IRQ_IRQ1);
 }
 
-static void int_set(int src)
-{
-	live_irq |= (1 << src);
-	recalc_interrupts();
-}
-
-static void int_clear(int src)
-{
-	live_irq &= ~(1 << src);
-	recalc_interrupts();
-}
-
 /* Serial glue: a bit different as the serial port is on chip and emulated
    by the CPU emulator */
 
@@ -180,7 +168,7 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 
    Give the host time and don't emulate time setting except for
    the 24/12 hour setting.
-   
+
  */
 
 uint8_t m6800_inport(uint8_t addr)
@@ -303,7 +291,7 @@ void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 		higha |= (reg & 0x10) ? 2 : 0;
 		higha |= (reg & 0x4) ? 4 : 0;
 		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
-		
+
 		if (trace & TRACE_MEM) {
 			fprintf(stderr, "W %04X[%02X] = %02X\n",
 				(unsigned int)addr,

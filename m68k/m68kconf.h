@@ -24,6 +24,11 @@
 #ifndef M68KCONF__HEADER
 #define M68KCONF__HEADER
 
+extern void cpu_set_fc(int);
+extern int cpu_irq_ack(int);
+extern void cpu_pulse_reset(void);
+extern void cpu_instr_callback(void);
+
 
 /* Configuration switches.
  * Use OPT_SPECIFY_HANDLER for configuration options that allow callbacks.

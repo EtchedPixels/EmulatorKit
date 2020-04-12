@@ -610,7 +610,7 @@ static int ctc_check_im2(void)
 		}
 	}
 	return 0;
-}		
+}
 
 /* Model the chains between the CTC devices */
 static void ctc_receive_pulse(int i);
@@ -1036,7 +1036,7 @@ static uint8_t pio_read(uint8_t addr)
 	/* Output lines */
 	val = pio->data[pio_port];
 	rx = pio_data_read(pio, pio_port);
-	
+
 	switch(pio->mode[pio_port]) {
 	case 0:
 		/* Write only */
@@ -1077,7 +1077,7 @@ static void pio_reset(void)
 	pio->irq[0] = 0;
 	pio->irq[1] = 0;
 }
-	
+
 static void memory_control(uint8_t val)
 {
 	uint8_t oldint = intdis;
@@ -1173,8 +1173,9 @@ static void reti_event(void)
 	live_irq = 0;
 
 	/* See who delivers next */
-	!intdis && !sio2_check_im2(sio) && !sio2_check_im2(sio + 1)
-		&& !ctc_check_im2();
+	if (!intdis && !sio2_check_im2(sio))
+		if (!sio2_check_im2(sio + 1))
+			ctc_check_im2();
 
 	/* If nothing is pending we end up here and we continue with live_irq
 	   clear. A call to recalc_interrupts will then trigger the interrupt
