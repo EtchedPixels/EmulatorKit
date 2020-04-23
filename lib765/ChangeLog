@@ -1,0 +1,93 @@
+2019-02-27 Alan Cox
+
+	* Forked the lib765 code for V85 and ripped out all of the GNU
+	  autocrap so it's easy to build wherever we need it.
+
+2010-06-28 John Elliott
+
+	* Updated the configure scripts to more recent autotools.
+
+2009-01-12 John Elliott
+
+	* lib765-0.4.2 released.
+
+	* Increased the size of fdc_exec_buf. Since multisector reads have
+	 been added, it needs to hold a whole track.
+
+2007-06-11 John Elliott
+
+	* lib765-0.4.1 released.
+
+	* Removed spurious reference to LIBDSK_EXPOSES_DIRTY.
+
+2007-04-15 John Elliott
+
+	* lib765-0.4.0 released.
+
+	* Add basic support for multisector reads (no multisector writes yet).
+	 This should allow Speedlock protection to work.
+
+2006-03-29 John Elliott
+
+	* Don't segfault if fdc_get_st3() is called on a nonexistent drive 
+	 (Mike Wynne)
+
+2005-02-19 Philip Kendall
+
+	* Added fd_dirty() function and backend implementations.
+
+2005-01-26 John Elliott
+
+	* Version 0.3.3 released.
+
+	* Fixed a silly transposition bug that was causing MFM sectors to be
+	 written as FM, and vice versa. It wouldn't matter except that 
+	 libdsk-1.1.2 and newer actually check FM/MFM in .DSK images.
+
+2003-06-18 John Elliott
+
+	* Version 0.3.1.1 released.
+
+	* Configure script can now specify path to LibDsk (Philip Kendall)
+
+2003-06-09 John Elliott
+
+	* Version 0.3.1 released.
+
+	* The default error function had the wrong prototype (Philip Kendall)
+
+2002-11-18 John Elliott
+
+	* Version 0.3.0 released.
+
+	* For MacOS X compatibility, make fdc_dprintf() an explicitly 
+	 registered callback rather than an undefined symbol (Fredrick Meunier)
+
+2002-04-11 John Elliott
+
+	* Version 0.2.0 released.
+
+	* Sync with LibDsk 0.9.0.
+
+	* Add support for WRITE DELETED DATA / READ DELETED DATA.
+
+	* Add API support for FM encoding and multitrack operation, though
+	 no driver (except LibDsk -> Linux floppy) supports these.
+
+2002-04-06 John Elliott
+	
+	* Version 0.1.1 released.
+
+	* Bugfixes for silly bugs in version 0.1.0 (Darren Salt, Philip Kendall)
+
+	* Version 0.1.0 released.
+
+	* Rewritten to conceal internal data structures from calling 
+	 program, so that future versions can change without breaking 
+	 binary compatibility. 
+
+
+2002-02-26 John Elliott
+
+	* Initial release.
+

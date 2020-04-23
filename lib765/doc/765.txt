@@ -1,0 +1,433 @@
+765 FDC - 0.4.0                                     John Elliott, 15 April 2007
+===============================================================================
+
+  "765" is an emulation of the uPD765a (AKA Intel 8272) Floppy Disc Controller
+[FDC] as used in Amstrad computers such as the PCW, CPC and Spectrum +3. At 
+present it is not a "full" 765; features not used in the PCW BIOS (such as: 
+DMA; multisector writes; multitrack mode) are either left unimplemented 
+or incomplete.
+
+  "765" is released under the GNU Library GPL. 
+
+What's new
+==========
+  Version 0.4.0 includes a simple implementation of multisector reading, 
+which is sufficient to support at least one Speedlock-protected Spectrum +3
+disc.
+
+  For earlier versions, see ChangeLog.
+
+How to use 765
+==============
+
+  765 can either be used standalone or on top of LibDsk 
+<http://www.seasip.demon.co.uk/Unix/LibDsk/> version 0.9.0 or later. I 
+recommend you use it in conjunction with LibDsk as it thus gains the ability
+to access floppy drives and disc image files in formats other than CPCEMU
+.DSK format.
+
+  765 provides the disc controller emulation for my PCW emulator JOYCE
+<http://www.seasip.demon.co.uk/Unix/Joyce/>. If you have questions not 
+answered in this document, they may be answered in the JOYCE source code.
+
+Construction and destruction
+============================
+
+  To create a floppy controller object, use fdc_new():
+
+FDC_PTR fdc_new(void);
+
+  and to destroy it, use fdc_destroy():
+
+void    fdc_destroy(FDC_PTR *p);
+
+  There are four kinds of drive, though they are all represented by the same
+pointer type (FDRV_PTR). The functions used to create the drives are:
+
+* fd_new()     - The base class. This represents a drive that isn't there 
+                 (for example, the second drive on a single-drive computer).
+* fd_newdsk()  - A drive which is implemented using CPCEMU-format disc
+	  	 image files (.DSK).
+* fd_newldsk() - A drive which is implemented using the LIBDSK disc-
+	 	 access library. This class is only present if you configured
+		 with the --with-libdsk option. 
+* fd_newnc9(FDRV_PTR)  - LibDsk contains some special code for the strange 
+		 behaviour of the floppy controller on a PcW9256. On this 
+		 controller, drives 2 and 3 always return the status of 
+		 drive 1, but with "ready" set to true even if the drive 
+		 isn't ready. This drive type is provided to emulate
+		 that behaviour; the parameter (which can be NULL) is the
+		 drive whose status this drive will return.
+
+Destroying drive objects
+========================
+
+  To destroy an object, use
+
+void     fd_destroy(FDRV_PTR *fd);
+
+  Note that this takes the address of the pointer; on return, the value of the
+pointer will be set to NULL.
+
+Drive emulations
+================
+
+All drive classes have a type. This can be read/written using the fd_gettype() 
+and fd_settype() functions. It can have one of the following values:
+
+#define FD_30     ( 1)
+		This drive behaves like a 3.0" drive.
+#define FD_35     ( 2)
+		This drive behaves like a 3.5" drive.
+#define FD_525    ( 3)
+		This drive behaves like a 5.25" drive.
+
+The not-connected drives have a type which should not be changed; it is one of 
+
+#define FD_NONE   ( 0)
+		This is emulating a drive that isn't there.
+#define FD_NC9256 (-1)
+		The PcW9256 special case.
+
+Changing the type of a drive changes a few aspects of the emulation. For 
+example, a 3.5" drive does not give the "track 0" signal when its motor is off,
+while a 3.0" drive does.
+
+Drive errors
+============
+
+You will only need to handle these if you are implementing a drive class,
+but they are:
+#define FD_E_OK	       (0) 	/* OK */
+#define FD_E_SEEKFAIL (-1)	/* Seek fail */
+#define FD_E_NOADDR   (-2)	/* Missing address mark */
+#define FD_E_NODATA   (-3) 	/* No data */
+#define FD_E_DATAERR  (-4)	/* CRC Data error */
+#define FD_E_NOSECTOR (-5)	/* Sector not found */
+#define FD_E_NOTRDY   (-6)	/* Drive not ready */
+#define FD_E_READONLY (-7)	/* Read only */
+
+Drive Properties
+================
+
+  The properties listed below are present for all drive types. 
+
+  The first three properties should be set as soon as it's been created 
+(by fd_newdsk(), fd_newldsk(), etc.)
+
+void fd_settype    (FDRV_PTR fd, int type);
+int  fd_gettype    (FDRV_PTR fd);
+			See "Drive Emulations" above for valid values.
+
+void fd_setheads   (FDRV_PTR fd, int heads);
+int  fd_getheads   (FDRV_PTR fd);
+			Number of heads the drive has, 1 or 2.
+
+void fd_setcyls    (FDRV_PTR fd, int cyls);
+int  fd_getcyls    (FDRV_PTR fd);
+			Number of cylinders (tracks) the drive has.
+			Nominally 40 or 80, but usually a drive can
+			go a little further, eg to 42 or 82.
+
+
+void fd_setreadonly(FDRV_PTR fd, int ro);
+int  fd_getreadonly(FDRV_PTR fd);
+			Have the drive or its disc been set to read-only?
+
+The following properties cannot be directly changed, only read:
+
+int fd_getmotor    (FDRV_PTR fd);
+			Zero if the drive's motor is off, otherwise nonzero. 
+			To change this, use fdc_set_motor().
+int fd_getcurcyl   (FDRV_PTR fd);
+			The current cylinder that the drive head is 
+			over. Note that if the drive is double-
+			stepping, this is the "real" cylinder - 
+		   	so it could = 24 and be reading cylinder 12 
+                       	of a 40-track DSK file. To change this 
+			send a SEEK command to the floppy controller.
+
+The derived drive classes have additional properties:
+
+DSK (created by fd_newdsk())
+----------------------------
+
+char *   fdd_getfilename(FDRV_PTR fd);
+void     fdd_setfilename(FDRV_PTR fd, const char *s);
+
+		Get or set the filename of the .DSK file representing the
+		disc in this drive. Setting the filename does an implicit 
+		fd_eject() to remove any previous disc. The .DSK file must
+		exist.
+
+LIBDSK (created by fd_newldsk())
+--------------------------------
+
+char *   fdl_getfilename(FDRV_PTR fd);
+void     fdl_setfilename(FDRV_PTR fd, const char *s);
+
+		Get or set the filename of the disc image file representing the
+		disc in this drive. Setting the filename does an implicit 
+		fd_eject() to remove any previous disc. The file must exist.
+
+const char *   fdl_gettype(FDRV_PTR fd);
+void           fdl_settype(FDRV_PTR fd, const char *s);
+
+		Get or set the LibDsk drive type of this drive (see LibDsk 
+		documentation). Can be NULL to auto-detect file format.
+
+9256 (created by fd_newnc9())
+-----------------------------
+
+FDRV_PTR fd9_getproxy(FDRV_PTR self);
+void     fd9_setproxy(FDRV_PTR self, FDRV_PTR PROXY);
+
+	Get or set the drive that this drive will mimic 
+	(ie, the PcW9256 B: drive).
+
+Controller properties
+---------------------
+
+void fdc_setisr(FDC_PTR self, FDC_ISR isr);
+FDC_ISR fdc_getisr(FDC_PTR self);
+
+	Set or get the interrupt handler. This is called when the FDC wants
+	to raise or lower its interrupt line. If you don't want FDC interrupts
+	set this to NULL.
+ 
+FDRV_PTR fdc_getdrive(FDC_PTR self, int drive);
+void fdc_setdrive(FDC_PTR self, int drive, FDRV_PTR ptr);
+	Set or get the four drives this controller addresses. You must set 
+	all four. If the FDC's select lines are incompletely decoded (as is
+	the case on the PCW8256) then set two pointers to the same drive.
+
+Debugging support 
+=================
+
+typedef void (*lib765_error_function_t)(int debuglevel, char *fmt, va_list ap);
+
+void lib765_register_error_function(lib765_error_function_t ef);
+
+  You should define a function conforming to the prototype above in your
+own program. Once you have registered the error function the FDC will call
+it to print debugging messages. By default error messages will be printed
+to stderr.
+  "debuglevel" is the priority of the message, with 0 being normal (only 
+reporting errors such as failing to open a file) and 7 being maximum (every
+command sent or received is dumped as hex).
+
+FDC actions
+===========
+
+void fdc_write_data(FDC_PTR self, fdc_byte value);
+
+	Write a byte to the FDC's data register. If this is the last byte of a
+	command, that command will be executed.
+
+fdc_byte fdc_read_data (FDC_PTR self);
+
+	Read the FDC's data register.
+
+fdc_byte fdc_read_ctrl (FDC_PTR self);
+
+	Read the FDC's main control register.
+
+void fdc_set_terminal_count(FDC_PTR self, fdc_byte value);
+
+	Raise / lower the FDC's terminal count line. "value" is 0 to lower
+	it, other values to raise it. 
+
+void fdc_set_motor(FDC_PTR self, fdc_byte running);
+
+	Set the status of drive motors. "running" is a bitwise flag; 
+	bit 0 corresponds to drive 0, bit 1 to drive 1 and so on.
+
+void fdc_tick(FDC_PTR self);
+
+	If you are going to be listening for FDC interrupts, you must call
+	this function once every emulated instruction or at some similarly 
+	high rate. It checks for pending interrupts and can call 
+	(self->fdc_isr)().
+
+void fdc_write_dor(FDC_PTR self, int value);
+
+	The IBM PC application of the uPD765A uses a Digital Output Register
+	to override drive selection, control the motors, select DMA mode and
+	perform controller resets. Lib765 can emulate this functionality; 
+	calls to fdc_write_dor() with 0 <= value <= 255 will make the DOR 
+	override the selected drive and control the motors. Pass value = -1
+	to disable the DOR and use the normal drive selection and motor 
+	control systems. 
+
+fdc_byte fdc_read_dir(FDC_PTR self);
+
+	Read from the Digital Input Register. This is used on the IBM PC to
+	support the "disc changed" signal. It will return either 00h or 80h.
+
+void fdc_write_drr(FDC_PTR self, fdc_byte value);
+
+	Write to the Data Rate Register. This is used to switch between 720k,
+	1.4M and 2.8M formats.
+
+Disc drive actions
+==================
+
+  Most of these functions are for the FDC to talk to disc drives, and you 
+shouldn't need to call them. However they can be used if (for example) you 
+want to bypass the emulated FDC and read sectors into memory under program 
+control.
+
+fd_err_t fdd_new_dsk(FDRV_PTR fd);
+
+	This is not called by the FDC. It is used to create a new .DSK file -
+	functionality which does not exist in the rest of the library. To
+	do the same thing with a LibDsk drive, use the LibDsk functions
+	dsk_creat() and dsk_close().
+
+fd_err_t fd_seek_cylinder(FDRV_PTR fd, int cylinder);
+	
+	Seek to a given cylinder.
+
+fd_err_t fd_read_id(FDRV_PTR fd, int head, int sector, fdc_byte *buf);
+
+	Read a sector header. The "sector" parameter should be incremented
+	each time you call this; this simulates the rotation of the disc 
+	and ensures you get a different sector number each time.
+	On return, if successful, "buf" will contain the 4-byte sector
+	header:
+		DB cylinder
+		DB head
+		DB sector
+		DB sectorsize
+
+fd_err_t fd_read_sector(FDRV_PTR fd, int xcylinder,
+                int xhead, int head, int sector, fdc_byte *buf, int len,
+		int *deleted, int skip_deleted, int mfm, int multitrack);
+
+	Read a sector. xcylinder and xhead are values expected from the sector 
+	header on disc, while "head" and "sector" are the actual place to look. 
+ 	Data will be returned to "buf", maximum "len" bytes. 
+	On entry, *deleted is 1 to read deleted data, 0 for normal.
+	On exit,  *deleted is 1 if the read command (deleted/nondeleted) did
+	not match the type of data on the disc.
+	skip_deleted is 1 to skip deleted sectors, 0 to read them. 
+	mfm is the recording mode - 0 for FM, 1 for MFM.
+	multitrack is 1 for multi-track operation, 0 for single-track. 
+	No real attempt has been made to implement multi-track operation
+	since no Amstrad BIOS uses it.
+
+fd_err_t fd_write_sector(FDRV_PTR fd, int xcylinder,
+                int xhead, int head, int sector, fdc_byte *buf, int len
+		int deleted, int skip_deleted, int fm, int multitrack);
+
+	Parameters are the same as for fd_read_sector, except that deleted
+ 	is an input parameter saying whether to write deleted or non-
+	deleted data.
+
+fd_err_t  fd_read_track   (struct floppy_drive *fd, int xcylinder,
+                int xhead, int head, fdc_byte *buf, int *len);
+
+	Read a track. Parameters are the same as for fd_read_sector(), 
+	execept that "sector" is omitted.
+
+fd_err_t  fd_format_track (struct floppy_drive *fd, int head, 
+		int sectors, fdc_byte *track, fdc_byte filler);
+	
+	Format a track. "sectors" is the count of sectors. "track" holds
+	4 * "sectors" bytes; these are the sector headers to write. See 
+	fd_read_id for the layout of these.
+
+fdc_byte fd_drive_status(FDRV_PTR fd);
+	
+	Get the drive status. The following bits should be set in the 
+	returned byte:
+		bit 7: Drive fault
+		bit 6: Drive is read-only
+		bit 5: Drive is ready
+		bit 4: Head is over track 0
+		bit 3: Drive is double-sided
+		bits 2-0: Zeroes
+
+fdc_byte fd_isready(FDRV_PTR fd);
+
+	 Return 1 if the drive is ready, 0 if it is not.
+
+int fd_dirty(FDRV_PTR fd);
+
+       Returns FD_D_CLEAN if the disc in the drive has not been
+       modified since it was inserted, FD_D_DIRTY if it has been
+       modified or FD_D_UNAVAILABLE if this information could not be
+       determined.
+
+void fd_eject(FDRV_PTR fd);
+
+	Eject the disc from the drive. You must eject all discs when
+	shutting down as 
+
+Example of use
+==============
+
+  To use 765, you will need to:
+
+1. Allocate one or more controllers. For example:
+
+	FDC_PTR the_fdc = fdc_new();
+
+2. Allocate floppy drives:
+
+	FDRV_PTR drive_a = fd_newldsk();	/* Full drive */
+	FDRV_PTR drive_b = fd_new();		/* Dummy drive */
+
+3. Initialise the drives you set up:
+
+	fd_settype (drive_a, FD_35);
+	fd_setheads(drive_a, 2);
+	fd_setcyls (drive_a, 80);
+	fdl_setfilename(drive_a, "boot.dsk");
+
+4. Initialise the FDC:
+
+	fdc_reset(the_fdc);
+	fdc_setisr(the_fdc, NULL);	/* Not interrupt-driven */
+
+5. Give the FDC its four drives:
+
+	fdc_setdrive(the_fdc, 0, drive_a);
+	fdc_setdrive(the_fdc, 1, drive_b);
+	fdc_setdrive(the_fdc, 2, drive_b);
+	fdc_setdrive(the_fdc, 3, drive_b);
+
+  (these must be done after any call to fdc_reset()).
+
+6. And then let it take commands from your emulator:
+
+	void out(word port, byte value)
+	{
+		switch(port)
+		{
+			case 0x1000:	fdc_write_data(the_fdc, value);
+					break;
+			case 0x1002:	fdc_set_motor(the_fdc, value & 0x0F);
+					break;
+		}
+	}
+
+	byte in(word port)
+	{
+		switch(port)
+		{
+			case 0x1000:	return fdc_read_data(the_fdc);
+					break;
+			case 0x1001:	return fdc_read_ctrl(the_fdc);
+					break;
+		}
+
+	}
+
+7. When you've finished, tidy up:
+
+	fdc_destroy(&the_fdc);
+	fd_destroy(&drive_a);
+	fd_destroy(&drive_b);
+
+
