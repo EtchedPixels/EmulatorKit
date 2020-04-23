@@ -8,8 +8,11 @@ all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 libz80/libz80.o:
 	$(MAKE) --directory libz80
 
-rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o libz80/libz80.o
-	cc -g3 rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o libz80/libz80.o -o rc2014
+lib765/lib/lib765.a:
+	$(MAKE) --directory lib765/lib
+
+rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a
+	cc -g3 rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a -o rc2014
 
 rbcv2:	rbcv2.o ide.o w5100.o libz80/libz80.o
 	cc -g3 rbcv2.o ide.o w5100.o libz80/libz80.o -o rbcv2
@@ -82,6 +85,7 @@ makedisk: makedisk.o ide.o
 
 clean:
 	$(MAKE) --directory libz80 clean && \
+	$(MAKE) --directory lib765/lib clean && \
 	$(MAKE) --directory 80x86 clean && \
 	$(MAKE) --directory lib65c816 clean && \
 	$(MAKE) --directory m68k clean && \
@@ -102,6 +106,9 @@ $(DEPDIR): ; @mkdir -p $@
 DEPFILES := $(SRCS:%.c=$(DEPDIR)/%.d)
 $(DEPFILES):
 
+lib765/lib/lib765.a: lib765/lib/765drive.c lib765/lib/765dsk.c \
+		     lib765/lib/765fdc.c lib765/lib/765i.h \
+		     lib765/lib/765ldsk.c lib765/lib/error.c
 libz80/libz80.o: libz80/z80.c libz80/z80.h lib65816/config.h
 cpu.c: lib65816/config.h
 

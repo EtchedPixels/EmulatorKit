@@ -38,6 +38,7 @@
 #include <errno.h>
 #include "system.h"
 #include "libz80/z80.h"
+#include "lib765/include/765.h"
 
 #include "acia.h"
 #include "ide.h"
@@ -76,8 +77,11 @@ static uint8_t cpld_serial = 0;
 static uint8_t has_im2;
 static uint8_t has_16x50;
 static uint8_t has_copro;
+static uint8_t has_tms = 1;
 static struct ppide *ppide;
 static struct z80copro *copro;
+static FDC_PTR fdc;
+static FDRV_PTR drive_a, drive_b;
 
 static uint16_t tstate_steps = 369;	/* RC2014 speed */
 
@@ -94,25 +98,27 @@ static nic_w5100_t *wiz;
 
 static volatile int done;
 
-#define TRACE_MEM	1
-#define TRACE_IO	2
-#define TRACE_ROM	4
-#define TRACE_UNK	8
-#define TRACE_SIO	16
-#define TRACE_512	32
-#define TRACE_RTC	64
-#define TRACE_ACIA	128
-#define TRACE_CTC	256
-#define TRACE_CPLD	512
-#define TRACE_IRQ	1024
-#define TRACE_UART	2048
-#define TRACE_Z84C15	4096
-#define TRACE_IDE	8192
-#define TRACE_SPI	16384
-#define TRACE_SD	32768
-#define TRACE_PPIDE	65536
-#define TRACE_COPRO	131072
-#define TRACE_COPRO_IO	262144
+#define TRACE_MEM	0x000001
+#define TRACE_IO	0x000002
+#define TRACE_ROM	0x000004
+#define TRACE_UNK	0x000008
+#define TRACE_SIO	0x000010
+#define TRACE_512	0x000020
+#define TRACE_RTC	0x000040
+#define TRACE_ACIA	0x000080
+#define TRACE_CTC	0x000100
+#define TRACE_CPLD	0x000200
+#define TRACE_IRQ	0x000400
+#define TRACE_UART	0x000800
+#define TRACE_Z84C15	0x001000
+#define TRACE_IDE	0x002000
+#define TRACE_SPI	0x004000
+#define TRACE_SD	0x008000
+#define TRACE_PPIDE	0x010000
+#define TRACE_COPRO	0x020000
+#define TRACE_COPRO_IO	0x040000
+#define TRACE_TMS9918A  0x080000
+#define TRACE_FDC	0x100000
 
 static int trace = 0;
 
@@ -167,7 +173,7 @@ static uint8_t mem_read108(uint16_t addr)
 	else
 		aphys = addr + 65536;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[aphys]);
+		fprintf(stderr, "R %05X = %02X\n", aphys, ramrom[aphys]);
 	return ramrom[aphys];
 }
 
@@ -184,6 +190,8 @@ static void mem_write108(uint16_t addr, uint8_t val)
 		aphys = addr + 131072;
 	else
 		aphys = addr + 65536;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W: aphys %05X\n", aphys);
 	ramrom[aphys] = val;
 }
 
@@ -1819,6 +1827,124 @@ static void z84c15_write(uint8_t port, uint8_t val)
 	}
 }
 
+/* No emulation yet but it's useful to trace */
+
+static void tms9918a_write(uint8_t addr, uint8_t val)
+{
+	if (trace & TRACE_TMS9918A)
+		fprintf(stderr, "TMSW%c %02X\n", 'C' + addr, val);
+}
+
+static uint8_t tms9918a_read(uint8_t addr)
+{
+	uint8_t val = 0x78;
+	if (trace & TRACE_TMS9918A)
+		fprintf(stderr, "TMSR%c %02X\n", 'C' + addr, val);
+	return val;
+}
+
+static void fdc_log(int debuglevel, char *fmt, va_list ap)
+{
+	if ((trace & TRACE_FDC) || debuglevel == 0)
+		vfprintf(stderr, "fdc: ", ap);
+}
+
+static void fdc_write(uint8_t addr, uint8_t val)
+{
+	switch(addr) {
+	case 1:	/* Data */
+		fprintf(stderr, "FDC Data: %02X\n", val);
+		fdc_write_data(fdc, val);
+		break;
+	case 2:	/* DOR */
+		fprintf(stderr, "FDC DOR %02X [", val);
+		if (val & 0x80)
+			fprintf(stderr, "SPECIAL ");
+		else
+			fprintf(stderr, "AT/EISA ");
+		if (val & 0x20)
+			fprintf(stderr, "MOEN2 ");
+		if (val & 0x10)
+			fprintf(stderr, "MOEN1 ");
+		if (val & 0x08)
+			fprintf(stderr, "DMA ");
+		if (!(val & 0x04))
+			fprintf(stderr, "SRST ");
+		if (!(val & 0x02))
+			fprintf(stderr, "DSEN ");
+		if (val & 0x01)
+			fprintf(stderr, "DSEL1");
+		else
+			fprintf(stderr, "DSEL0");
+		fprintf(stderr, "]\n");
+		fdc_write_dor(fdc, val);
+#if 0		
+		if ((val & 0x21) == 0x21)
+			fdc_set_motor(fdc, 2);
+		else if ((val & 0x11) == 0x10)
+			fdc_set_motor(fdc, 1);
+		else
+			fdc_set_motor(fdc, 0);
+#endif			
+		break;
+	case 3:	/* DCR */
+		fprintf(stderr, "FDC DCR %02X [", val);
+		if (!(val & 4))
+			fprintf(stderr, "WCOMP");
+		switch(val & 3) {
+		case 0:
+			fprintf(stderr, "500K MFM RPM");
+			break;
+		case 1:
+			fprintf(stderr, "250K MFM");
+			break;
+		case 2:
+			fprintf(stderr, "250K MFM RPM");
+			break;
+		case 3:
+			fprintf(stderr, "INVALID");
+		}
+		fprintf(stderr, "]\n");
+		fdc_write_drr(fdc, val & 3);	/* TODO: review */
+		break;
+	case 4:	/* TC */
+		fdc_set_terminal_count(fdc, 0);
+		fdc_set_terminal_count(fdc, 1);
+		fprintf(stderr, "FDC TC\n");
+		break;
+	case 5:	/* RESET */
+		fprintf(stderr, "FDC RESET\n");
+		break;
+	default:
+		fprintf(stderr, "FDC bogus %02X->%02X\n", addr, val);
+	}
+}
+
+static uint8_t fdc_read(uint8_t addr)
+{
+	uint8_t val = 0x78;
+	switch(addr) {
+	case 0:	/* Status*/
+		fprintf(stderr, "FDC Read Status: ");
+		val = fdc_read_ctrl(fdc);
+		break;
+	case 1:	/* Data */
+		fprintf(stderr, "FDC Read Data: ");
+		val = fdc_read_data(fdc);
+		break;
+	case 4:	/* TC */
+		fprintf(stderr, "FDC TC: ");
+		break;
+	case 5:	/* RESET */
+		fprintf(stderr, "FDC RESET: ");
+		break;
+	default:
+		fprintf(stderr, "FDC bogus read %02X: ", addr);
+	}
+	fprintf(stderr, "%02X\n", val);
+	return val;
+}
+
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -1829,6 +1955,8 @@ static uint8_t io_read_2014(uint16_t addr)
 		return 0xCC;
 	}
 	addr &= 0xFF;
+	if (addr >= 0x48 && addr < 0x50) 
+		return fdc_read(addr & 7);
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		return acia_read(acia, addr & 1);
 	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
@@ -1852,11 +1980,13 @@ static uint8_t io_read_2014(uint16_t addr)
 	   an official CTC board at another address  */
 	if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		return ctc_read(addr & 3);
+	if ((addr == 0x98 || addr == 0x99) && has_tms) 
+		return tms9918a_read(addr & 1);
 	if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		return uart_read(&uart[0], addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
-	return 0xFF;
+	return 0xFF;	/* 78 is what my actual board floats at */
 }
 
 static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
@@ -1873,7 +2003,9 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		return;
 	}
 	addr &= 0xFF;
-	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
+	if (addr >= 0x48 && addr < 0x50)
+		fdc_write(addr & 7, val);
+	else if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
 		acia_write(acia, addr & 1, val);
@@ -1902,6 +2034,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		rtc_write(rtc, val);
 	else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		ctc_write(addr & 3, val);
+	else if ((addr == 0x98 || addr == 0x99) && has_tms)
+		tms9918a_write(addr & 1, val);
 	else if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		uart_write(&uart[0], addr & 7, val);
 	else if (switchrom && addr == 0x38)
@@ -2239,6 +2373,7 @@ int main(int argc, char *argv[])
 	int save = 0;
 	int has_acia = 0;
 	int indev;
+	char *patha = NULL, *pathb = NULL;
 
 #define INDEV_ACIA	1
 #define INDEV_SIO	2
@@ -2249,7 +2384,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fi:I:m:pr:sRS:uw8C:")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:uw8C:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2387,6 +2522,16 @@ int main(int argc, char *argv[])
 		case 'C':
 			has_copro = 1;
 			copro_rom = optarg;
+			break;
+		case 'F':
+			if (pathb) {
+				fprintf(stderr, "rc2014: too many floppy disks specified.\n");
+				exit(1);
+			}
+			if (patha)
+				pathb = optarg;
+			else
+				patha = optarg;
 			break;
 		default:
 			usage();
@@ -2549,6 +2694,34 @@ int main(int argc, char *argv[])
 		nic_w5100_reset(wiz);
 	}
 
+	fdc = fdc_new();
+
+	lib765_register_error_function(fdc_log);
+
+	if (patha) {
+		drive_a = fd_newdsk();
+		fd_settype(drive_a, FD_35);
+		fd_setheads(drive_a, 2);
+		fd_setcyls(drive_a, 80);
+		fdd_setfilename(drive_a, patha);
+	} else
+		drive_a = fd_new();
+
+	if (pathb) {
+		drive_b = fd_newdsk();
+		fd_settype(drive_a, FD_35);
+		fd_setheads(drive_a, 2);
+		fd_setcyls(drive_a, 80);
+		fdd_setfilename(drive_a, pathb);
+	} else
+		drive_b = fd_new();
+
+	fdc_reset(fdc);
+	fdc_setisr(fdc, NULL);
+
+	fdc_setdrive(fdc, 0, drive_a);
+	fdc_setdrive(fdc, 1, drive_b);
+
 	if (has_copro) {
 		int eprom_fd;
 		copro = z80copro_create();
@@ -2684,5 +2857,10 @@ int main(int argc, char *argv[])
 		}
 		close(fd);
 	}
+	fd_eject(drive_a);
+	fd_eject(drive_b);
+	fdc_destroy(&fdc);
+	fd_destroy(&drive_a);
+	fd_destroy(&drive_b);
 	exit(0);
 }
