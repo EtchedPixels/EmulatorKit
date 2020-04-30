@@ -318,7 +318,7 @@ void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 	} else {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W: %04X = %02X\n", addr, val);
-		if (addr >= 32768 && !bank512)
+		if (addr < 32768 && !bank512)
 			ramrom[addr] = val;
 		else if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
@@ -345,7 +345,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-6303: [-b] [-f] [-R] [-r rompath] [-e rombank] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-6303: [-b] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -355,18 +355,14 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	int rom = 1;
-	int rombank = 0;
 	char *rompath = "rc2014-6303.rom";
 	char *idepath;
 	unsigned int cycles = 0;
 
-	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:fi:I:r:Rw")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
-			break;
-		case 'e':
-			rombank = atoi(optarg);
 			break;
 		case 'b':
 			bank512 = 1;
@@ -416,15 +412,7 @@ int main(int argc, char *argv[])
 			perror(rompath);
 			exit(EXIT_FAILURE);
 		}
-		bankreg[0] = 0;
-		bankreg[1] = 1;
-		bankreg[2] = 32;
-		bankreg[3] = 33;
-		if (lseek(fd, 8192 * rombank, SEEK_SET) < 0) {
-			perror("lseek");
-			exit(1);
-		}
-		if (read(fd, ramrom, 65536) < 2048) {
+		if (read(fd, ramrom + 32768, 32768) != 32768) {
 			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
