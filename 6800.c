@@ -1218,15 +1218,18 @@ static void m6800_shift8(struct m6800 *cpu, uint8_t r, int c)
    However the behaviour is documented */
 static uint16_t m6800_maths16_noh(struct m6800 *cpu, uint16_t a, uint16_t b, uint16_t r)
 {
-    cpu->p &= ~(P_C|P_Z|P_N);
+    cpu->p &= ~(P_C|P_Z|P_N|P_V);
     if (r == 0)
         cpu->p |= P_Z;
     if (r & 0x8000)
         cpu->p |= P_N;
-    if ((a & b & 0x8000) && !(r & 0x8000))
-        cpu->p |= P_V;
-    if (!((a | b) & 0x8000) && (r & 0x8000))
-        cpu->p |= P_V;
+    if (a & 0x8000) {
+        if (!((b | r) & 0x8000))
+            cpu->p |= P_V;
+    } else {
+        if (b & r & 0x8000)
+            cpu->p |= P_V;
+    }
     if (~a & b & 0x8000)
         cpu->p |= P_C;
     if (b & r & 0x8000)
@@ -1700,7 +1703,7 @@ static int m6800_execute_one(struct m6800 *cpu)
             tmp8 = 0;
         if (cpu->p & P_Z)
             tmp8 = 0;
-        m6800_bra(cpu, data8, tmp8);
+        m6800_bra(cpu, data8, !tmp8);
         return clocks;
     case 0x2F:	/* BLE */
         tmp8 = cpu->p & (P_N|P_V);
@@ -1708,7 +1711,7 @@ static int m6800_execute_one(struct m6800 *cpu)
             tmp8 = 0;
         if (cpu->p & P_Z)
             tmp8 = 0;
-        m6800_bra(cpu, data8, !tmp8);
+        m6800_bra(cpu, data8, tmp8);
         return clocks;
     /* 3x is stack stuff mostly */
     case 0x1830:/* TSY */
@@ -2117,7 +2120,6 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_maths8_noh(cpu, cpu->a, data8, cpu->a - data8 - CARRY);
         return clocks;
     case 0x83:	/* SUBD immed16 */
-        /* FIXME: flags */
         tmp16 = m6800_maths16_noh(cpu, REG_D, data16, REG_D - data16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
@@ -2761,8 +2763,8 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic16(cpu, cpu->x);
         return clocks;
     case 0xFF:	/* STX extened */
-        m6800_do_write(cpu, data16, cpu->a);
-        m6800_do_write(cpu, data16 + 1, cpu->b);
+        m6800_do_write(cpu, data16, cpu->x >> 8 );
+        m6800_do_write(cpu, data16 + 1, cpu->x);
         m6800_logic16(cpu, cpu->x);
         return clocks;
     default:
