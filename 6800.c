@@ -1155,10 +1155,13 @@ static uint8_t m6800_maths8(struct m6800 *cpu, uint8_t a, uint8_t b, uint8_t r)
         cpu->p |= P_N;
     if (r == 0)
         cpu->p |= P_Z;
-    if ((a & b & 0x80) && !(r & 0x80))
-        cpu->p |= P_V;
-    if (!((a | b) & 0x80) && (r & 0x80))
-        cpu->p |= P_V;
+    if (a & 0x80) {
+        if (!((b | r) & 0x80))
+            cpu->p |= P_V;
+    } else {
+        if (b & r & 0x80)
+            cpu->p |= P_V;
+    }
     if (~a & b & 0x80)
         cpu->p |= P_C;
     if (b & r & 0x80)
@@ -1180,10 +1183,13 @@ static uint8_t m6800_maths8_noh(struct m6800 *cpu, uint8_t a, uint8_t b, uint8_t
         cpu->p |= P_N;
     if (r == 0)
         cpu->p |= P_Z;
-    if ((a & b & 0x80) && !(r & 0x80))
-        cpu->p |= P_V;
-    if (!((a | b) & 0x80) && (r & 0x80))
-        cpu->p |= P_V;
+    if (a & 0x80) {
+        if (!((b | r) & 0x80))
+            cpu->p |= P_V;
+    } else {
+        if (b & r & 0x80)
+            cpu->p |= P_V;
+    }
     if (~a & b & 0x80)
         cpu->p |= P_C;
     if (b & r & 0x80)
@@ -1702,7 +1708,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         if(tmp8 == (P_N|P_V))
             tmp8 = 0;
         if (cpu->p & P_Z)
-            tmp8 = 0;
+            tmp8 = 1;
         m6800_bra(cpu, data8, !tmp8);
         return clocks;
     case 0x2F:	/* BLE */
@@ -1710,7 +1716,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         if(tmp8 == (P_N|P_V))
             tmp8 = 0;
         if (cpu->p & P_Z)
-            tmp8 = 0;
+            tmp8 = 1;
         m6800_bra(cpu, data8, tmp8);
         return clocks;
     /* 3x is stack stuff mostly */
