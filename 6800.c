@@ -1147,7 +1147,7 @@ static void m6800_flags_nz(struct m6800 *cpu, uint8_t r)
         cpu->p |= P_N;
 }
 
-/* 8bit maths operation */
+/* 8bit maths operation: ABA ADC ADD */
 static uint8_t m6800_maths8(struct m6800 *cpu, uint8_t a, uint8_t b, uint8_t r)
 {
     cpu->p &= ~(P_H|P_N|P_Z|P_V|P_C);
@@ -1155,18 +1155,20 @@ static uint8_t m6800_maths8(struct m6800 *cpu, uint8_t a, uint8_t b, uint8_t r)
         cpu->p |= P_N;
     if (r == 0)
         cpu->p |= P_Z;
-    if (a & 0x80) {
-        if (!((b | r) & 0x80))
+    /* V for addition is (!r & x & m) | (r & !x & !m) */
+    if (r & 0x80) {
+        if (!((a | b) & 0x80))
             cpu->p |= P_V;
     } else {
-        if (b & r & 0x80)
+        if (a & b & 0x80)
             cpu->p |= P_V;
     }
-    if (~a & b & 0x80)
+    /* C for addition is (a & b) | (a & !r) | (b & !r) */
+    if (a & b & 0x80)
         cpu->p |= P_C;
-    if (b & r & 0x80)
+    if (a & ~r & 0x80)
         cpu->p |= P_C;
-    if (~a & r & 0x80)
+    if (b & ~r & 0x80)
         cpu->p |= P_C;
     /* And half carry for DAA */
     if ((a & b & 0x08) || ((b & ~r) & 0x08) || ((a & ~r) & 0x08))
@@ -1222,6 +1224,29 @@ static void m6800_shift8(struct m6800 *cpu, uint8_t r, int c)
 
 /* 16bit maths like this does affect N and V but not necessarily usefully.
    However the behaviour is documented */
+static uint16_t m6800_maths16_add(struct m6800 *cpu, uint16_t a, uint16_t b, uint16_t r)
+{
+    cpu->p &= ~(P_C|P_Z|P_N|P_V);
+    if (r == 0)
+        cpu->p |= P_Z;
+    if (r & 0x8000)
+        cpu->p |= P_N;
+    if (a & 0x8000) {
+        if (!((b | r) & 0x8000))
+            cpu->p |= P_V;
+    } else {
+        if (b & r & 0x8000)
+            cpu->p |= P_V;
+    }
+    if (a & b & 0x8000)
+        cpu->p |= P_C;
+    if (a & ~r & 0x8000)
+        cpu->p |= P_C;
+    if (b & ~r & 0x8000)
+        cpu->p |= P_C;
+    return r;
+}
+
 static uint16_t m6800_maths16_noh(struct m6800 *cpu, uint16_t a, uint16_t b, uint16_t r)
 {
     cpu->p &= ~(P_C|P_Z|P_N|P_V);
@@ -2463,7 +2488,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_maths8_noh(cpu, cpu->b, data8, cpu->b - data8 - CARRY);
         return clocks;
     case 0xC3:	/* ADDD immed16 : weird case where the arg is 16bit */
-        tmp16 = m6800_maths16_noh(cpu, REG_D, data16, REG_D + data16);
+        tmp16 = m6800_maths16_add(cpu, REG_D, data16, REG_D + data16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return clocks;
@@ -2527,7 +2552,7 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0xD3:	/* ADDD dir */
         tmp16 = m6800_do_read(cpu, data8) << 8;
         tmp16 |= m6800_do_read(cpu, data8 + 1);
-        tmp16 = m6800_maths16_noh(cpu, REG_D, tmp16, REG_D + tmp16);
+        tmp16 = m6800_maths16_add(cpu, REG_D, tmp16, REG_D + tmp16);
         cpu->a = tmp16 >> 8;
         cpu->b = tmp16;
         return clocks;
