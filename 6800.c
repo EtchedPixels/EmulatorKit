@@ -2245,12 +2245,12 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x189C:/* CPY */
         tmp16 = m6800_do_read(cpu, data8) << 8;
         tmp16 |= m6800_do_read(cpu, data8 + 1);
-        m6800_cpx(cpu, cpu->y, data16, cpu->y - data16);
+        m6800_cpx(cpu, cpu->y, tmp16, cpu->y - tmp16);
         return clocks;
     case 0x9C:	/* CPX */
         tmp16 = m6800_do_read(cpu, data8) << 8;
         tmp16 |= m6800_do_read(cpu, data8 + 1);
-        m6800_cpx(cpu, cpu->x, data16, cpu->x - data16);
+        m6800_cpx(cpu, cpu->x, tmp16, cpu->x - tmp16);
         return clocks;
     case 0x9D:	/* JSR */
         m6800_push16(cpu, cpu->pc);
