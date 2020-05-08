@@ -1373,8 +1373,12 @@ static int m6800_execute_one(struct m6800 *cpu)
         case 0xC0:	/* Immediate 8/16bit */
             /* FIXME: 8D is weird, CD undefined - how does CD really work ? */
             if (opcode != 0x8D && ((opcode & 0x0F) >= 0x0C || (opcode & 0x0F) == 3)) {
-                data16 = m6800_do_read(cpu, cpu->pc++) << 8; 
-                data16 |= m6800_do_read(cpu, cpu->pc++);
+                /* The apparent store immediates (and 68HC11 XGDX) break the
+                   decode rule */
+                if (opcode != 0x8F && opcode != 0xCF) {
+                    data16 = m6800_do_read(cpu, cpu->pc++) << 8; 
+                    data16 |= m6800_do_read(cpu, cpu->pc++);
+                }
                 break;
             }
         case 0x20:	/* Branches */
@@ -1556,6 +1560,10 @@ static int m6800_execute_one(struct m6800 *cpu)
             cpu->pc++;
         return clocks;
     case 0x14:  /* BSET direct */
+        if (cpu->type == CPU_6800) {
+            cpu->a &= cpu->b;
+            return clocks;
+        }
         data8 = m6800_do_read(cpu, cpu->pc++);
         m6800_do_write(cpu, data8, m6800_do_read(cpu, data8) |
                                     m6800_do_read(cpu, cpu->pc++));
@@ -2166,7 +2174,9 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->a = data8;
         m6800_logic8(cpu, cpu->a);
         return clocks;
-    /* No 0x87 store immediate */
+    case 0x87:	/* Undocumented: STAA immed */
+        m6800_do_write(cpu, cpu->pc++, cpu->a);
+        return clocks;
     case 0x88:	/* EORA */
         cpu->a ^= data8;
         m6800_logic8(cpu, cpu->a);
@@ -2206,10 +2216,17 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->b = tmp16;
         return clocks;
     case 0x8F:		/* XGDX (68HC11 version) */
-        tmp16 = cpu->x;
-        cpu->x = (cpu->a << 8) | cpu->b;
-        cpu->a = tmp16 >> 8;
-        cpu->b = tmp16;
+        if (cpu->type != CPU_68HC11) {
+            /* On 6800 it's STS immed - undocumented */
+            cpu->pc++;
+            m6800_do_write(cpu, cpu->pc++, cpu->s >> 8);
+            m6800_do_write(cpu, cpu->pc++, cpu->s);
+        } else {
+            tmp16 = cpu->x;
+            cpu->x = (cpu->a << 8) | cpu->b;
+            cpu->a = tmp16 >> 8;
+            cpu->b = tmp16;
+        }
         return clocks;
     /* Same again for direct */
     case 0x90:	/* SUBA dir */
@@ -2503,7 +2520,9 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->b = data8;
         m6800_logic8(cpu, cpu->b);
         return clocks;
-    /* No 0xC7 store immediate */
+    case 0xC7:	/* Undocumented: STAB immed */
+        m6800_do_write(cpu, cpu->pc++, cpu->a);
+        return clocks;
     case 0xC8:	/* EORB */
         cpu->b ^= data8;
         m6800_logic8(cpu, cpu->b);
@@ -2533,8 +2552,15 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic16(cpu, cpu->x);
         return clocks;
     case 0xCF:  /* 68HC11 stop */
-        if (!(cpu->p & P_S))
-            cpu->wait = 2;
+        if (cpu->type == CPU_68HC11) {
+            if (!(cpu->p & P_S))
+                cpu->wait = 2;
+            return clocks;
+        }
+        /* Non 6800 this is the bizarre undocumented STX pc+2 */
+        cpu->pc++;
+        m6800_do_write(cpu, cpu->pc++, cpu->x >> 8);
+        m6800_do_write(cpu, cpu->pc++, cpu->x);
         return clocks;
     /* Same again for direct */
     case 0xD0:	/* SUBB dir */
