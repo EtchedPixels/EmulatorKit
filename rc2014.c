@@ -63,6 +63,7 @@ static uint8_t switchrom = 1;
 #define CPUBOARD_EASYZ80	4
 #define CPUBOARD_SC121		5
 #define CPUBOARD_MICRO80	6
+#define CPUBOARD_ZRCC		7
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -250,11 +251,142 @@ static void mem_write64(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04x = %02X\n", addr, val);
-	if (addr >= 0x8000)
-		ramrom[addr] = val;
+	if (addr >= 0x8000)	/* Top 32K is common */
+		ramrom[addr + 65536] = val;
 	else
 		ramrom[bankreg[0] * 0x8000 + addr] = val;
 }
+
+/* ZRCC is a close relative of SBC64, but instead of a magic loader has
+   a 64byte built in boot rom */
+
+static uint8_t zrcc_irom[64] = {
+	0x3C,
+	0x3C,
+	0x3C,
+	0x3C,
+
+	0x21,
+	0x00,
+	0xB0,
+
+	0xDB,
+	0xF8,
+
+	0xE6,
+	0x01,
+
+	0x20,
+	0x24,
+
+	0xDB,
+	0x17,
+
+	0xE6,
+	0x80,
+
+	0x20,
+	0xF4,
+
+	0x47,
+
+	0xD3,
+	0x15,
+
+	0xD3,
+	0x14,
+
+	0x3C,
+
+	0xD3,
+	0x13,
+
+	0x0E,
+	0x10,
+
+	0xD3,
+	0x12,
+
+	0x3E,
+	0x20,
+
+	0xD3,
+	0x17,
+
+	0xDB,
+	0x17,
+
+	0xE6,
+	0x08,
+
+	0x28,
+	0xFA,
+
+	0xED,
+	0xB2,
+
+	0xC3,
+	0x00,
+	0xB0,
+
+	0x3C,
+	0x3C,
+	0x3C,
+
+	0xDB,
+	0xF9,
+
+	0xDB,
+	0xF8,
+
+	0xE6,
+	0x01,
+
+	0x28,
+	0xFA,
+
+	0xDB,
+	0xF9,
+
+	0x77,
+
+	0x2C,
+
+	0x20,
+	0xF4,
+	0xE9
+};
+
+static uint8_t mem_readzrcc(uint16_t addr)
+{
+	uint8_t r;
+	if (addr < 0x40 && bankreg[1] == 0)
+		r = zrcc_irom[addr];
+	else if (addr >= 0x8000)
+		r = ramrom[addr + 65536];	/* Top 32K is common */
+	else
+		r = ramrom[bankreg[0] * 0x8000 + addr];
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04x = %02X\n", addr, r);
+	return r;
+}
+
+static void mem_writezrcc(uint16_t addr, uint8_t val)
+{
+	if (addr <= 0x40 && bankreg[1]) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "W %04X = %02X [ROM]\n", addr, val);
+		return;
+	}
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W %04x = %02X\n", addr, val);
+	if (addr >= 0x8000)
+		ramrom[addr + 65536] = val;
+	else
+		ramrom[bankreg[0] * 0x8000 + addr] = val;
+}
+
+
 
 struct z84c15 {
 	uint8_t scrp;
@@ -360,6 +492,9 @@ uint8_t mem_read(int unused, uint16_t addr)
 	case CPUBOARD_MICRO80:
 		r = mem_read_micro80(addr);
 		break;
+	case CPUBOARD_ZRCC:
+		r = mem_readzrcc(addr);
+		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
 		exit(1);
@@ -404,6 +539,9 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_MICRO80:
 		mem_write_micro80(addr, val);
+		break;
+	case CPUBOARD_ZRCC:
+		mem_writezrcc(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -1677,7 +1815,8 @@ static void toggle_rom(void)
 }
 
 /*
- *	Emulate the Z80SBC64 CPLD
+ *	Emulate the Z80SBC64 and ZRCC CPLDs. These are close relatives
+ *	but ZRCC has an additional ROM control bits
  */
 
 static uint8_t sbc64_cpld_status;
@@ -1754,6 +1893,9 @@ static void sbc64_cpld_uart_tx(uint8_t val)
 
 static void sbc64_cpld_bankreg(uint8_t val)
 {
+	if (cpuboard == CPUBOARD_ZRCC)
+		bankreg[1] |=  val & 0x10;
+	/* Bit 2 is the LED */
 	val &= 3;
 	if (bankreg[0] != val) {
 		if (trace & TRACE_CPLD)
@@ -2246,6 +2388,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		io_write_2(addr, val);
 		break;
 	case CPUBOARD_Z80SBC64:
+	case CPUBOARD_ZRCC:
 		io_write_3(addr, val);
 		break;
 	case CPUBOARD_EASYZ80:
@@ -2270,6 +2413,7 @@ uint8_t io_read(int unused, uint16_t addr)
 	case CPUBOARD_SC121:
 		return io_read_2(addr);
 	case CPUBOARD_Z80SBC64:
+	case CPUBOARD_ZRCC:
 		return io_read_3(addr);
 	case CPUBOARD_EASYZ80:
 		return io_read_4(addr);
@@ -2501,6 +2645,13 @@ int main(int argc, char *argv[])
 				rom = 1;
 				switchrom = 0;
 				tstate_steps = 800;	/* 16MHz */
+			} else if (strcmp(optarg, "zrcc") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				cpuboard = CPUBOARD_ZRCC;
+				bankreg[0] = 3;
+				/* 22MHz CPU */
+				tstate_steps = 369 * 3;
 			} else {
 				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
 						stderr);
@@ -2540,7 +2691,7 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	if (cpuboard == CPUBOARD_Z80SBC64) {
+	if (cpuboard == CPUBOARD_Z80SBC64 || cpuboard == CPUBOARD_ZRCC) {
 		cpld_serial = 1;
 		indev = INDEV_CPLD;
 	} else if (has_acia == 0 && sio2 == 0 && has_16x50 == 0 ) {
@@ -2555,7 +2706,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (rom && cpuboard != CPUBOARD_Z80SBC64) {
+	if (rom && cpuboard != CPUBOARD_Z80SBC64 && cpuboard != CPUBOARD_ZRCC) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
@@ -2575,6 +2726,8 @@ int main(int argc, char *argv[])
 		}
 		close(fd);
 	}
+	/* ZRCC has a 64byte wired in CPLD ROM so we don't use the ROM
+	   option in the same way */
 
 	/* SBC64 has battery backed RAM and what really happens is that you
 	   use the CPLD to load a loader and then to load ZMON which in turn
