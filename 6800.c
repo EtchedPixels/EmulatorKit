@@ -1303,14 +1303,17 @@ static void m6800_cpx(struct m6800 *cpu, uint16_t a, uint16_t b, uint16_t r)
 {
     if (cpu->type == CPU_6800) {
         cpu->p &= ~(P_Z|P_N|P_V);
-        if (r & 0x8000)
-            cpu->p |= P_N;
         if (r == 0)
             cpu->p |= P_Z;
-        if ((a & b & 0x8000) && !(r & 0x8000))
-            cpu->p |= P_V;
-        if (!((a | b) & 0x8000) && (r & 0x8000))
-            cpu->p |= P_V;
+        if (r & 0x8000)
+            cpu->p |= P_N;
+        if (a & 0x8000) {
+            if (!((b | r) & 0x8000))
+                cpu->p |= P_V;
+        } else {
+            if (b & r & 0x8000)
+                cpu->p |= P_V;
+        }
     } else
         m6800_maths16_noh(cpu, a, b, r);
 }
@@ -1540,10 +1543,10 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->p |= P_I;
         return clocks;
     case 0x10:	/* SBA */
-        cpu->a = m6800_maths8(cpu, cpu->a, cpu->b, cpu->a - cpu->b);
+        cpu->a = m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a - cpu->b);
         return clocks;
     case 0x11:	/* CBA */
-        m6800_maths8(cpu, cpu->a, cpu->b, cpu->a - cpu->b);
+        m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a - cpu->b);
         return clocks;
     case 0x12:	/* BRSET direct */
         data8 = m6800_do_read(cpu, m6800_do_read(cpu, cpu->pc++));
@@ -1758,7 +1761,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* No flags */
         return clocks;		/* 4 on 6800 ? */
     case 0x30:	/* TSX */
-        cpu->x = cpu->s;
+        cpu->x = cpu->s + 1;
         /* No flags */
         return clocks;		/* 4 on 6800 ? */
     case 0x31:	/* INS */
@@ -1782,7 +1785,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* No flags */
         return clocks;		/* 4 on 6800 ? */
     case 0x35:	/* TXS */
-        cpu->s = cpu->x;
+        cpu->s = cpu->x - 1;
         /* No flags */
         return clocks;		/* 4 on 6800 ? */
     case 0x36:	/* PSHA */
@@ -1896,7 +1899,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_shift8(cpu, cpu->a, tmp8);
         return clocks;
     case 0x4A: 	/* DECA */
-        /* Weird as the don't affect C */
+        /* Weird as they don't affect C */
         cpu->a--;
         m6800_logic8(cpu, cpu->a);
         if (cpu->a == 0x7F)	/* DEC from 0x80) */
@@ -1963,13 +1966,13 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* Weird as the don't affect C */
         cpu->b--;
         m6800_logic8(cpu, cpu->b);
-        if (cpu->b == 0x7F)	/* DEC from 0x80) */
+        if (cpu->b == 0x7F)	/* DEC from 0x80 */
             cpu->p |= P_V;
         return clocks;
     case 0x5C:	/* INCB */
         cpu->b++;
         m6800_logic8(cpu, cpu->b);
-        if (cpu->b == 0x80)	/* INC from 0x7F) */
+        if (cpu->b == 0x80)	/* INC from 0x7F */
             cpu->p |= P_V;
         return clocks;
     case 0x5D:	/* TSTB */
@@ -1989,6 +1992,7 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x1860:/* NEG ,Y */
     case 0x60:	/* NEG ,X */
     case 0x70:	/* NEG addr */
+        /* FIXME: check flags on NEG */
         tmp8 = m6800_do_read(cpu, data16);
         m6800_do_write(cpu, data16, m6800_maths8_noh(cpu, 0, tmp8, -tmp8));
         return clocks;
