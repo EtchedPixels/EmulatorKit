@@ -6,7 +6,7 @@ lib765.a: $(OBJS)
 	ar rc lib765.a $^
 
 clean:
-	rm $(OBJS) *~ lib765.a
+	rm -f $(OBJS) *~ lib765.a
 
 765drive.o: 765drive.c 765i.h ../include/config.h ../include/765.h
 765dsk.o: 765dsk.c 765i.h ../include/config.h ../include/765.h
