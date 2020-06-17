@@ -130,8 +130,9 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 
 struct wd17xx {
 	int fd[4];
-	int tracks;
-	int spt;
+	int tracks[4];
+	int spt[4];
+	int sides[4];
 	int drive;
 	uint8_t buf[256];
 	int pos;
@@ -140,7 +141,7 @@ struct wd17xx {
 	uint8_t track;
 	uint8_t sector;
 	uint8_t status;
-	int fakebusy;
+	uint8_t side;
 };
 
 #define NOTREADY 	0x80
@@ -154,7 +155,7 @@ struct wd17xx {
 
 void wd_diskseek(struct wd17xx *fdc)
 {
-	off_t pos = fdc->track * fdc->spt;
+	off_t pos = fdc->track * fdc->spt[fdc->drive];
 	if (fdc->track)
 		pos += fdc->sector - 1;
 	else {
@@ -163,6 +164,10 @@ void wd_diskseek(struct wd17xx *fdc)
 		if (fdc->sector > 1)
 			pos--;
 	}
+	/* Flex thinks in terms of double sector counts and knows nothing
+	   about sides much like CP/M */
+	if (fdc->sides[fdc->drive] == 2 && fdc->side)
+		pos += fdc->spt[fdc->drive] / 2;
 	pos *= 256;
 	fflush(stdout);
 	if (lseek(fdc->fd[fdc->drive], pos, SEEK_SET) < 0) {
@@ -233,7 +238,6 @@ void wd_command(struct wd17xx *fdc, uint8_t v)
 	case 0x0B:
 		fdc->track = 0;
 		fdc->status &= ~(BUSY | DRQ);
-		fdc->fakebusy = 1;
 		break;
 	case 0x18:
 	case 0x1B:
@@ -247,12 +251,10 @@ void wd_command(struct wd17xx *fdc, uint8_t v)
 		if (read(fdc->fd[fdc->drive], fdc->buf, 256) != 256)
 			fprintf(stderr, "wd: I/O error.\n");
 		fdc->status |= BUSY | DRQ;
-		fdc->fakebusy = 1;
 		fdc->pos = 0;
 		break;
 	case 0xAC:
 		fdc->status |= BUSY | DRQ;
-		fdc->fakebusy = 1;
 		fdc->pos = 0;
 		fdc->wr = 1;
 		break;
@@ -264,11 +266,7 @@ void wd_command(struct wd17xx *fdc, uint8_t v)
 
 uint8_t wd_status(struct wd17xx *fdc)
 {
-	if (0 && fdc->fakebusy) {
-		fdc->fakebusy--;
-		return fdc->status & ~BUSY;
-	} else
-		return fdc->status;
+	return fdc->status;
 }
 
 struct wd17xx *wd_init(void)
@@ -280,8 +278,6 @@ struct wd17xx *wd_init(void)
 	fdc->fd[2] = -1;
 	fdc->fd[3] = -1;
 	/* 35 track double sided */
-	fdc->spt = 20;
-	fdc->tracks = 35;
 	return fdc;
 }
 
@@ -313,8 +309,14 @@ int wd_attach(struct wd17xx *fdc, int dev, const char *path)
 	}
 	if (buf[ESEC] >= 8 && buf[ESEC] <= 200 && buf[ETRK] >= 35
 	    && buf[ETRK] <= 80) {
-		fdc->spt = buf[ESEC];
-		fdc->tracks = buf[ETRK] + 1;
+		fdc->spt[dev] = buf[ESEC];
+		fdc->tracks[dev] = buf[ETRK] + 1;
+		if (fdc->spt[dev] > 18)
+			fdc->sides[dev] = 2;
+		else
+			fdc->sides[dev] = 1;
+		printf("[Mounted volume %d: %d tracks, %d sectors per track %d sides].\n",
+			dev, fdc->tracks[dev], fdc->spt[dev], fdc->sides[dev]);
 	}
 	return fdc->fd[dev];
 }
@@ -331,6 +333,7 @@ uint8_t dc4_devstat(struct wd17xx *fdc)
 void dc4_devsel(struct wd17xx *fdc, uint8_t val)
 {
 	fdc->drive = val & 3;
+	fdc->side = !!(val & 0x40);
 	if (fdc->fd[fdc->drive])
 		fdc->status = BUSY | DRQ;
 	else
