@@ -13,7 +13,7 @@
 
 (ADC|SBC|ADD|SUB) A,\((IX|IY)\+d\)
 	ctx->tstates += 5;
-	char displacement = read8(ctx, ctx->PC++);
+	signed char displacement = read8(ctx, ctx->PC++);
 	BR.A = doArithmetic(ctx, read8(ctx, WR.%2 + displacement), F1_%1, F2_%1);
 	
 (ADC|SBC|ADD|SUB) A,n
@@ -37,7 +37,7 @@ ADD (IX|IY),(SP|BC|DE|IX|IY)
 
 (AND|XOR|OR) \((IX|IY)\+d\)
 	ctx->tstates += 5;
-	do%1(ctx, read8(ctx, WR.%2 + (char) read8(ctx, ctx->PC++)));
+	do%1(ctx, read8(ctx, WR.%2 + (signed char) read8(ctx, ctx->PC++)));
 
 (AND|XOR|OR) (A|B|C|D|E|H|L|IXh|IXl|IYh|IYl)
 	do%1(ctx, BR.%2);
@@ -58,7 +58,7 @@ BIT ([0-7]),\(HL\)
 
 BIT ([0-7]),\((IX|IY)\+d\)
 	ctx->tstates += 2;
-	ushort address = WR.%2 + (char) read8(ctx, ctx->PC++);
+	ushort address = WR.%2 + (signed char) read8(ctx, ctx->PC++);
 	doBIT_indexed(ctx, %1, address);
 
 (SET|RES) ([0-7]),(A|B|C|D|E|H|L)
@@ -70,7 +70,7 @@ BIT ([0-7]),\((IX|IY)\+d\)
 
 (SET|RES) ([0-7]),\((IX|IY)\+d\)
 	ctx->tstates += 2;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	write8(ctx, WR.%3 + off, doSetRes(ctx, SR_%1, %2, read8(ctx, WR.%3 + off)));
 	
 	
@@ -124,7 +124,7 @@ RET
 	
 DJNZ \(PC\+e\)
 	ctx->tstates += 1;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	BR.B--;
 	if (BR.B)
 	{
@@ -202,7 +202,7 @@ CP \(HL\)
 
 CP \((IX|IY)\+d\)
 	ctx->tstates += 5;
-	char displacement = read8(ctx, ctx->PC++);
+	signed char displacement = read8(ctx, ctx->PC++);
 	byte val = read8(ctx, WR.%1 + displacement);
 	doArithmetic(ctx, val, 0, 1);	
 	adjustFlags(ctx, val);
@@ -271,7 +271,7 @@ CPI
 
 (INC|DEC) \((IX|IY)\+d\)
 	ctx->tstates += 6;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	byte value = read8(ctx, WR.%2 + off);
 	write8(ctx, WR.%2 + off, doIncDec(ctx, value, ID_%1));
 	
@@ -364,11 +364,11 @@ LD \(HL\),n
 	
 LD \((IX|IY)\+d\),(A|B|C|D|E|H|L)
 	ctx->tstates += 5;
-	write8(ctx, WR.%1 + (char) read8(ctx, ctx->PC++), BR.%2);
+	write8(ctx, WR.%1 + (signed char) read8(ctx, ctx->PC++), BR.%2);
 	
 LD \((IX|IY)\+d\),n
 	ctx->tstates += 2;
-	char offset = read8(ctx, ctx->PC++);
+	signed char offset = read8(ctx, ctx->PC++);
 	byte n = read8(ctx, ctx->PC++);
 	write8(ctx, WR.%1 + offset, n);
 	
@@ -392,7 +392,7 @@ LD (A|B|C|D|E|H|L),\(HL\)
 
 LD (A|B|C|D|E|H|L),\((IX|IY)\+d\)
 	ctx->tstates += 5;
-	BR.%1 = read8(ctx, WR.%2 + (char) read8(ctx, ctx->PC++));
+	BR.%1 = read8(ctx, WR.%2 + (signed char) read8(ctx, ctx->PC++));
 
 LD (A|B|C|D|E|H|L),\(nn\)
 	BR.%1 = read8(ctx, read16(ctx, ctx->PC));
@@ -403,25 +403,25 @@ LD (A|B|C|D|E|H|L|IXh|IXl|IYh|IYl),(A|B|C|D|E|H|L|IXh|IXl|IYh|IYl)
 
 LD (A|B|C|D|E|H|L),(SL|SR)A \((IX|IY)\+d\)
 	ctx->tstates += 2;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	BR.%1 = do%2(ctx, read8(ctx, WR.%3 + off), 1);
 	write8(ctx, WR.%3 + off, BR.%1);	
 	
 LD (A|B|C|D|E|H|L),(SL|SR)L \((IX|IY)\+d\)
 	ctx->tstates += 2;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	BR.%1 = do%2(ctx, read8(ctx, WR.%3 + off), 0);
 	write8(ctx, WR.%3 + off, BR.%1);	
 	  
 LD (A|B|C|D|E|H|L),(RL|RLC|RR|RRC) \((IX|IY)\+d\)
 	ctx->tstates += 2;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	BR.%1 = do%2(ctx, 1, read8(ctx, WR.%3 + off));
 	write8(ctx, WR.%3 + off, BR.%1);
 
 LD (A|B|C|D|E|H|L),(SET|RES) ([0-7]),\((IX|IY)\+d\)
 	ctx->tstates += 2;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	BR.%1 = doSetRes(ctx, SR_%2, %3, read8(ctx, WR.%4 + off));
 	write8(ctx, WR.%4 + off, BR.%1);	
 
@@ -573,7 +573,7 @@ PUSH (AF|BC|DE|HL|IX|IY)
 
 (RLC|RRC|RL|RR) \((IX|IY)\+d\)
 	ctx->tstates += 2;
-	char off = read8(ctx, ctx->PC++);
+	signed char off = read8(ctx, ctx->PC++);
 	write8(ctx, WR.%2 + off, do%1(ctx, 1, read8(ctx, WR.%2 + off)));
 
 (RL|RR|RLC|RRC)A
@@ -610,7 +610,7 @@ RRD
 
 (SL|SR)(L|A) \((IX|IY)\+d\)
 	ctx->tstates += 2;
-	char off = read8(ctx, ctx->PC++);	
+	signed char off = read8(ctx, ctx->PC++);
 	write8(ctx, WR.%3 + off, do%1(ctx, read8(ctx, WR.%3 + off), IA_%2));
 
 (SL|SR)(L|A) (A|B|C|D|E|H|L|IXh|IXl|IYh|IYl)

@@ -112,14 +112,14 @@ struct Z80OpcodeEntry
 	int operand_type;
 	char* format;	
 	
-	struct Z80OpcodeTable* table;
+	const struct Z80OpcodeTable* table;
 };
 
 
 struct Z80OpcodeTable
 {
 	int opcode_offset;
-	struct Z80OpcodeEntry entries[256];
+	const struct Z80OpcodeEntry entries[256];
 };
 
 
@@ -661,8 +661,8 @@ static void doDAA(Z80Context * ctx) {
 
 static void do_execute(Z80Context* ctx)
 {
-	struct Z80OpcodeTable* current = &opcodes_main;
-	struct Z80OpcodeEntry* entries = current->entries;
+	const struct Z80OpcodeTable* current = &opcodes_main;
+	const struct Z80OpcodeEntry* entries = current->entries;
 	Z80OpcodeFunc func;
 	
 	byte opcode;
@@ -786,8 +786,8 @@ unsigned Z80ExecuteTStates(Z80Context* ctx, unsigned tstates)
 void Z80Debug (Z80Context* ctx, char* dump, char* decode)
 {
 	char tmp[20];	
-	struct Z80OpcodeTable* current = &opcodes_main;
-	struct Z80OpcodeEntry* entries = current->entries;
+	const struct Z80OpcodeTable* current = &opcodes_main;
+	const struct Z80OpcodeEntry* entries = current->entries;
 	char* fmt;
 	byte opcode;
 	ushort parm;

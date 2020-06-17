@@ -52,7 +52,7 @@ typedef union
 		ushort AF, BC, DE, HL, IX, IY, SP;
 	} wr;
 	
-	/** Byte registers. Note that SP can't be accesed partially. */
+	/** Byte registers. Note that SP can't be accessed partially. */
 	struct
 	{
 		byte F, A, C, B, E, D, L, H, IXl, IXh, IYl, IYh;

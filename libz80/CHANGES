@@ -64,7 +64,7 @@ RRD computes correct value and sets flags appropriately
 RLD computes correct value and sets flags appropriately
 SRA preserves bit 7
 Fix RLC m, RRC m, RL m, RR m.  They were doing a "rotate immediate," in effect.
-DEC ss and INC ss increment the proper regster, and preserve flags.
+DEC ss and INC ss increment the proper register, and preserve flags.
 ADD IX,rr and ADD IY,rr set the flags propelry
 SBC HL,pp sets the flags properly
 ADC HL,pp and ADD HL,pp set the flags properly

@@ -480,7 +480,7 @@ struct Z80OpcodeTable* createTableTree(FILE* opcodes, FILE* table)
 	mainTable = calloc(1, sizeof(struct Z80OpcodeTable));
 	mainTable->name = strdup("");
 	
-	fprintf(table, "static struct Z80OpcodeTable opcodes_main;\n");
+	fprintf(table, "static const struct Z80OpcodeTable opcodes_main;\n");
 	
 	rewind(opcodes);
 
@@ -531,7 +531,7 @@ struct Z80OpcodeTable* createTableTree(FILE* opcodes, FILE* table)
 				current->entries[code].table = calloc(1, sizeof(struct Z80OpcodeTable));
 				current = current->entries[code].table;
 				current->name = strdup(tmp);				
-				fprintf(table, "static struct Z80OpcodeTable opcodes_%s;\n", current->name);
+				fprintf(table, "static const struct Z80OpcodeTable opcodes_%s;\n", current->name);
 				
 				printf("%s ", tmp);
 			}
@@ -627,7 +627,7 @@ void outputTable(struct Z80OpcodeTable* table, FILE* file)
 	
 	printf("Outputting table %s...", table->name);
 	
-	fprintf(file, "static struct Z80OpcodeTable opcodes_%s = { %d, {\n", table->name, table->opcode_offset);
+	fprintf(file, "static const struct Z80OpcodeTable opcodes_%s = { %d, {\n", table->name, table->opcode_offset);
 	
 	for (i = 0, opc = table->entries; i < 256; i++, opc++)
 	{

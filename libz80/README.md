@@ -1,6 +1,12 @@
 libz80 - Z80 emulation library 
 ===============================
 
+The original one appears to be dead - at least nobody responded to the
+emulatuon bug so this is a fork that actually gets 16bit math flags correct
+in the corner cases where the standard version leaves Z incorrectly clear.
+
+
+
 *© Gabriel Gambetta (gabriel.gambetta@gmail.com) 2000 - 2014*
 
 *Version 2.1.1*
