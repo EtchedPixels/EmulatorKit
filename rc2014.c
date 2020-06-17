@@ -2180,7 +2180,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		tms9918a_write(addr & 1, val);
 	else if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		uart_write(&uart[0], addr & 7, val);
-	else if (switchrom && addr == 0x38)
+	/* The switchable/pageable ROM is not very well decoded */
+	else if (switchrom && (addr & 0x7F) >= 0x38 && (addr & 0x7F) <= 0x3F)
 		toggle_rom();
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
