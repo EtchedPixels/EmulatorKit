@@ -400,7 +400,6 @@ int main(int argc, char *argv[])
 {
 	static struct timespec tc;
 	int opt;
-	int diskset;
 	int fd;
 	int l;
 	int fast;
