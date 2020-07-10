@@ -1757,7 +1757,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     /* 3x is stack stuff mostly */
     case 0x1830:/* TSY */
-        cpu->y = cpu->s;
+        cpu->y = cpu->s + 1;
         /* No flags */
         return clocks;		/* 4 on 6800 ? */
     case 0x30:	/* TSX */
@@ -1781,7 +1781,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* No flags */
         return clocks;
     case 0x1835:/* TYS */
-        cpu->s = cpu->y;
+        cpu->s = cpu->y - 1;
         /* No flags */
         return clocks;		/* 4 on 6800 ? */
     case 0x35:	/* TXS */
