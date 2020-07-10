@@ -15,11 +15,6 @@
  *
  *	Add support for using real CF card
  *
- *	For the Easy-Z80 still need to update the CTC model
- *	TRG0/1 CTC0 and CTC1 are fed from UART_CLK (1.8432MHz)
- *	TRG2 is fed from CTC_CLK
- *	TO2 feeds TRG3
- *
  *	The SC121 just an initial sketch for playing with IM2 and the
  *	relevant peripherals. I'll align it properly with the real thing as more
  *	info appears.
@@ -64,6 +59,7 @@ static uint8_t switchrom = 1;
 #define CPUBOARD_SC121		5
 #define CPUBOARD_MICRO80	6
 #define CPUBOARD_ZRCC		7
+#define CPUBOARD_TINYZ80	8
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -495,6 +491,9 @@ uint8_t mem_read(int unused, uint16_t addr)
 	case CPUBOARD_ZRCC:
 		r = mem_readzrcc(addr);
 		break;
+	case CPUBOARD_TINYZ80:
+		r = mem_read0(addr);
+		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
 		exit(1);
@@ -542,6 +541,9 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_ZRCC:
 		mem_writezrcc(addr, val);
+		break;
+	case CPUBOARD_TINYZ80:
+		mem_write0(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -2249,6 +2251,68 @@ static void io_write_4(uint16_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
+static uint8_t io_read_5(uint16_t addr)
+{
+	if (trace & TRACE_IO)
+		fprintf(stderr, "read %02x\n", addr);
+	addr &= 0xFF;
+	if (addr >= 0x18 && addr <= 0x1B)
+		return sio2_read((addr & 3) ^ 1);
+	if ((addr >= 0x90 && addr <= 0x97) && ide)
+		return my_ide_read(addr & 7);
+	if (addr >= 0x28 && addr <= 0x2C && wiznet)
+		return nic_w5100_read(wiz, addr & 3);
+	if (addr == 0xC0 && rtc)
+		return rtc_read(rtc);
+	if (addr >= 0x10 && addr <= 0x13)
+		return ctc_read(addr & 3);
+	if (addr >= 0xEE && addr <= 0xF1)
+		return z84c15_read(addr);
+	if (addr >= 0x1C && addr <= 0x1F)
+		return pio_read(addr & 3);
+	if (trace & TRACE_UNK)
+		fprintf(stderr, "Unknown read from port %04X\n", addr);
+	return 0xFF;
+}
+
+static void io_write_5(uint16_t addr, uint8_t val)
+{
+	if (trace & TRACE_IO)
+		fprintf(stderr, "write %02x <- %02x\n", addr, val);
+	addr &= 0xFF;
+	if (addr >= 0x18 && addr <= 0x1B)
+		sio2_write((addr & 3) ^ 1, val);
+	else if ((addr >= 0x90 && addr <= 0x97) && ide)
+		my_ide_write(addr & 7, val);
+	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
+		nic_w5100_write(wiz, addr & 3, val);
+	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
+	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
+		bankreg[addr & 3] = val & 0x3F;
+		if (trace & TRACE_512)
+			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+	} else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
+		if (trace & TRACE_512)
+			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
+		bankenable = val & 1;
+	} else if (addr == 0xC0 && rtc)
+		rtc_write(rtc, val);
+	else if (addr >= 0x10 && addr <= 0x13)
+		ctc_write(addr & 3, val);
+	else if (addr >= 0x1C && addr <= 0x1F)
+		pio_write(addr & 3, val);
+	else if ((addr >= 0xEE && addr <= 0xF1) || addr == 0xF4)
+		z84c15_write(addr, val);
+	else if (addr == 0xFC) {
+		putchar(val);
+		fflush(stdout);
+	} else if (addr == 0xFD) {
+		printf("trace set to %d\n", val);
+		trace = val;
+	} else if (trace & TRACE_UNK)
+		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+}
+
 static void io_write_1(uint16_t addr, uint8_t val)
 {
 	if ((addr & 0xFF) == 0x38) {
@@ -2398,6 +2462,9 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case CPUBOARD_MICRO80:
 		io_write_micro80(addr, val);
 		break;
+	case CPUBOARD_TINYZ80:
+		io_write_5(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2420,6 +2487,8 @@ uint8_t io_read(int unused, uint16_t addr)
 		return io_read_4(addr);
 	case CPUBOARD_MICRO80:
 		return io_read_micro80(addr);
+	case CPUBOARD_TINYZ80:
+		return io_read_5(addr);
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2653,6 +2722,17 @@ int main(int argc, char *argv[])
 				bankreg[0] = 3;
 				/* 22MHz CPU */
 				tstate_steps = 369 * 3;
+			} else if (strcmp(optarg, "tinyz80") == 0) {
+				bank512 = 1;
+				cpuboard = CPUBOARD_TINYZ80;
+				switchrom = 0;
+				rom = 0;
+				has_acia = 0;
+				have_ctc = 1;
+				sio2 = 1;
+				sio2_input = 1;
+				has_im2 = 1;
+				tstate_steps = 500;
 			} else {
 				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
 						stderr);
@@ -2767,7 +2847,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (cpuboard == CPUBOARD_MICRO80)
+	if (cpuboard == CPUBOARD_MICRO80 || cpuboard == CPUBOARD_TINYZ80)
 		z84c15_init();
 
 	if (bank512) {
@@ -2969,7 +3049,7 @@ int main(int argc, char *argv[])
 				else	/* Micro80 it's not off the CPU clock */
 					ctc_tick(184);
 			}
-			if (cpuboard == CPUBOARD_EASYZ80) {
+			if (cpuboard == CPUBOARD_EASYZ80 || cpuboard == CPUBOARD_TINYZ80) {
 				/* Feed the uart clock into the CTC */
 				int c;
 				/* 10Mhz so calculate for 500 tstates.
