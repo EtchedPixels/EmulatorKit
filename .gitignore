@@ -1,6 +1,8 @@
 *.o
 .DS_Store
 *.swp
+*.BIN
+my.cf
 
 lib765/lib/lib765.a
 *.dSYM

@@ -64,9 +64,8 @@ z80mb64)
 
 To build a disk image
 
-./makedisk 1 my.cf
-
-dd if=cf-image of=my.cf bs=512 seek=2 conv=notrunc
+    #  ./makedisk 1 my.cf
+    #  dd if=cf-image of=my.cf bs=512 seek=2 conv=notrunc
 
 In other words the IDE disk format has a 1K header that holds
 meta-data and the virtual identify block.
@@ -84,6 +83,18 @@ the system will save the full memory image back to the ROM file (unless
 marked read only), so you can do the full bootstrap. Alternatively you can
 start from the SCM monitor or similar. These boards default to the bitbang
 serial interface, unless an SIO or ACIA is specified.
+
+As an example, to get going on this, follow these steps:
+
+
+    #  make rc2014
+    #  ./rc2014 -p -i my.cf -s -r ../24886009.BIN  -e 2
+
+This will start up for CP/M on a RC2014, using the "my.cf" disk image setup above.
+It will start you up in the Small Computer Monitor.  To start up CPM, type:
+
+    *  cpm
+
 
 # RBC (ex N8VEM) Mark 2 Emulator
 
