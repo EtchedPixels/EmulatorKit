@@ -95,7 +95,7 @@ clean:
 	$(MAKE) --directory m68k clean && \
 	rm -f *.o *~ rc2014 rbcv2
 
-SRCS := $(subst ./,,$(shell find -name '*.c'))
+SRCS := $(subst ./,,$(shell find . -name '*.c'))
 DEPDIR := .deps
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
 

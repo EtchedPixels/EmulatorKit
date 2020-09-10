@@ -311,10 +311,10 @@ void CPU_debug(void) {
         case BLK:
             sprintf( operands, "$%02X, $%02X (@%06X:%02X -> @%06X:%02X)",
                 DB_READ(PC.A+2), DB_READ(PC.A+1),
-                DB_READ(PC.A+2) << 16 + X.W,
-                DB_READ(DB_READ(PC.A+2) << 16 + X.W),
-                DB_READ(PC.A+1) << 16 + Y.W,
-                DB_READ(DB_READ(PC.A+2) << 16 + Y.W)
+                DB_READ(PC.A+2) << (16 + X.W),
+                DB_READ(DB_READ(PC.A+2) << (16 + X.W)),
+                DB_READ(PC.A+1) << (16 + Y.W),
+                DB_READ(DB_READ(PC.A+2) << (16 + Y.W))
             );
             break;
 	}
