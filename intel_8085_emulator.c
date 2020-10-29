@@ -41,6 +41,8 @@
 #define reg16_DE (((uint16_t)reg8[D] << 8) | (uint16_t)reg8[E])
 #define reg16_HL (((uint16_t)reg8[H] << 8) | (uint16_t)reg8[L])
 
+FILE *i8085_log;
+
 uint8_t reg8[9], INTE = 0;
 uint16_t reg_SP, reg_PC;
 uint8_t reg_IM = 0x07;	/* Verified with a Tundra CA80C85B */
