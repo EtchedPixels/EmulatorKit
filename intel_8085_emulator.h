@@ -38,6 +38,6 @@ extern void i8085_reset();
 
 extern int i8085_exec(int cycles);
 
-FILE *i8085_log;
+extern FILE *i8085_log;
 
 #endif
