@@ -2,7 +2,7 @@
 CFLAGS = -Wall -pedantic -g3 -Werror
 
 all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
-	rc2014-68008 rc2014-80c188 rc2014-8085 rc2014-z8 \
+	rc2014-6800 rc2014-68008 rc2014-80c188 rc2014-8085 rc2014-z8 \
 	rbcv2 searle linc80 makedisk mbc2 smallz80 sbc2g z80mc simple80 \
 	flexbox
 
@@ -47,6 +47,12 @@ lib65816/config.h: lib65c816/src/lib65816.a
 rc2014-65c816-mini.o: rc2014-65c816-mini.c lib65816/config.h
 	$(CC) $(CFLAGS) -Ilib65c816 -c rc2014-65c816-mini.c
 
+rc2014-6800: rc2014-6800.o 6800.o ide.o acia.o
+	cc -g3 rc2014-6800.o ide.o acia.o 6800.o -o rc2014-6800
+
+rc2014-6809: rc2014-6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o
+	cc -g3 rc2014-6809.o ide.o ppide.o w5100.o rtc_bitbang.o e6809.o -o rc2014-6809
+
 rc2014-68008: rc2014-68008.o ide.o w5100.o m68k/lib68k.a
 	cc -g3 rc2014-68008.o ide.o w5100.o m68k/lib68k.a -o rc2014-68008
 
@@ -62,6 +68,9 @@ rc2014-8085: rc2014-8085.o intel_8085_emulator.o ide.o acia.o w5100.o ppide.o rt
 rc2014-80c188: rc2014-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \
 	cc -g3 rc2014-80c188.o ide.o ppide.o rtc_bitbang.o w5100.o 80x86/*.o -o rc2014-80c188
+
+rc2014-z280: rc2014-z280.o ide.o libz280/libz80.o
+	cc -g3 rc2014-z280.o ide.o libz280/libz80.o -o rc2014-z280
 
 rc2014-z8: rc2014-z8.o z8.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-z8.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z8.o -o rc2014-z8
@@ -113,7 +122,8 @@ $(DEPFILES):
 lib765/lib/lib765.a: lib765/lib/765drive.c lib765/lib/765dsk.c \
 		     lib765/lib/765fdc.c lib765/lib/765i.h \
 		     lib765/lib/765ldsk.c lib765/lib/error.c
-libz80/libz80.o: libz80/z80.c libz80/z80.h lib65816/config.h
+libz80/libz80.o: libz80/z80.c libz80/z80.h
+libz280/libz80.o: libz280/z80.c libz280/z80.h
 cpu.c: lib65816/config.h
 
 include $(wildcard $(DEPFILES))
