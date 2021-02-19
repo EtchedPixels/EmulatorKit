@@ -1464,7 +1464,7 @@ static uint8_t sd_process_command(void)
 		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
 			16777216 * sd_cmd[1];
 		if (trace & TRACE_SD)
-			fprintf(stderr, "Read LBA %llx\n", sd_lba);
+			fprintf(stderr, "Read LBA %lx\n", (long)sd_lba);
 		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 || read(sd_fd, sd_out + 2, 512) != 512) {
 			if (trace & TRACE_SD)
 				fprintf(stderr, "Read LBA failed.\n");
@@ -1476,7 +1476,7 @@ static uint8_t sd_process_command(void)
 	case 0x40+24:		/* Write */
 		/* Will send us FE data FF FF */
 		if (trace & TRACE_SD)
-			fprintf(stderr, "Write LBA %llx\n", sd_lba);
+			fprintf(stderr, "Write LBA %lx\n", (long)sd_lba);
 		sd_inlen = 514;	/* Data FF FF */
 		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
 			16777216 * sd_cmd[1];
