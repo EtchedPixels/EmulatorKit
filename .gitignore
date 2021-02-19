@@ -1,5 +1,12 @@
 *.o
+.DS_Store
+*.swp
+*.BIN
+my.cf
 
+lib765/lib/lib765.a
+*.dSYM
+flexbox
 lib65c816/config/sizeof
 lib65c816/lib65816/config.h
 lib65c816/src/lib65816.a
