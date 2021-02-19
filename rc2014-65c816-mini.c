@@ -46,8 +46,6 @@ static uint16_t tstate_steps = 200;
 
 static nic_w5100_t *wiz;
 
-/* static volatile int done; */
-
 #define TRACE_MEM	1
 #define TRACE_IO	2
 #define TRACE_IRQ	4
