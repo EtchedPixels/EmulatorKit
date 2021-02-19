@@ -67,6 +67,8 @@ uint8_t intprotect;
 #define test_V() (reg8[FLAGS] & 0x02)
 #define test_C() (reg8[FLAGS] & 0x01)
 
+FILE *i8085_log;
+
 static uint8_t intpend;
 static uint8_t halted;
 
