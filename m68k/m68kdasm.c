@@ -307,7 +307,7 @@ static char* make_signed_hex_str_16(uint val)
 
 static char* make_signed_hex_str_32(uint val)
 {
-	static char str[20];
+	static char str[11];
 
 	val &= 0xffffffff;
 
