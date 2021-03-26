@@ -327,11 +327,11 @@ static char* get_imm_str_s(uint size)
 {
 	static char str[15];
 	if(size == 0)
-		sprintf(str, "#%s", make_signed_hex_str_8(read_imm_8()));
+		snprintf(str, 15, "#%s", make_signed_hex_str_8(read_imm_8()));
 	else if(size == 1)
-		sprintf(str, "#%s", make_signed_hex_str_16(read_imm_16()));
+		snprintf(str, 15, "#%s", make_signed_hex_str_16(read_imm_16()));
 	else
-		sprintf(str, "#%s", make_signed_hex_str_32(read_imm_32()));
+		snprintf(str, 15, "#%s", make_signed_hex_str_32(read_imm_32()));
 	return str;
 }
 
@@ -339,11 +339,11 @@ static char* get_imm_str_u(uint size)
 {
 	static char str[15];
 	if(size == 0)
-		sprintf(str, "#$%x", read_imm_8() & 0xff);
+		snprintf(str, 15, "#$%x", read_imm_8() & 0xff);
 	else if(size == 1)
-		sprintf(str, "#$%x", read_imm_16() & 0xffff);
+		snprintf(str, 15, "#$%x", read_imm_16() & 0xffff);
 	else
-		sprintf(str, "#$%x", read_imm_32() & 0xffffffff);
+		snprintf(str, 15, "#$%x", read_imm_32() & 0xffffffff);
 	return str;
 }
 
