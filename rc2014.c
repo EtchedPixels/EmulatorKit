@@ -75,6 +75,8 @@ static uint8_t has_im2;
 static uint8_t has_16x50;
 static uint8_t has_copro;
 static uint8_t has_tms = 1;
+static uint8_t is_z512;
+static uint8_t z512_control = 0;
 static struct ppide *ppide;
 static struct z80copro *copro;
 static FDC_PTR fdc;
@@ -2089,6 +2091,41 @@ static uint8_t fdc_read(uint8_t addr)
 	return val;
 }
 
+
+static uint32_t z512_wdog;
+
+static uint8_t z512_read(uint8_t addr)
+{
+	return z512_control;
+}
+
+static void z512_write(uint8_t addr, uint8_t val)
+{
+	uint8_t old = z512_control;
+	z512_control = val;
+	if ((old & 0x1F) != (val & 0x1f)) {
+		unsigned int b = 7372800;
+		if (val & 0x10)
+			b /= 3;
+		if (val & 0x08)
+			b >>= 8;
+		if (val & 0x04)
+			b >>= 4;
+		if (val & 0x02)
+			b >>= 2;
+		if (val & 0x01)
+			b >>= 1;
+		if (trace & TRACE_SIO)
+			fprintf(stderr, "Z512 SIO serial clock: %d\n", b);
+	}
+}
+
+static void z512_write_wd(uint8_t addr, uint8_t val)
+{
+	/* 1.6 seconds */
+	z512_wdog = 1600;
+}
+
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -2128,6 +2165,8 @@ static uint8_t io_read_2014(uint16_t addr)
 		return tms9918a_read(addr & 1);
 	if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		return uart_read(&uart[0], addr & 7);
+	if (addr == 0x6D && is_z512)
+		return z512_read(addr);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;	/* 78 is what my actual board floats at */
@@ -2182,6 +2221,10 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		tms9918a_write(addr & 1, val);
 	else if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		uart_write(&uart[0], addr & 7, val);
+	else if (addr == 0x6D && is_z512)
+		z512_write(addr, val);
+	else if (addr == 0x6F && is_z512)
+		z512_write_wd(addr, val);
 	/* The switchable/pageable ROM is not very well decoded */
 	else if (switchrom && (addr & 0x7F) >= 0x38 && (addr & 0x7F) <= 0x3F)
 		toggle_rom();
@@ -2598,7 +2641,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:uw8C:")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:uw8C:z")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2764,6 +2807,9 @@ int main(int argc, char *argv[])
 				pathb = optarg;
 			else
 				patha = optarg;
+			break;
+		case 'z':
+			is_z512 = 1;
 			break;
 		default:
 			usage();
@@ -3062,6 +3108,15 @@ int main(int argc, char *argv[])
 					ctc_receive_pulse(1);
 				}
 			}
+		}
+
+		if (is_z512 && (z512_control & 0x20)) {
+			if (z512_wdog <= 5) {
+				fprintf(stderr, "Watchdog reset.\n");
+				done = 1;
+				break;
+			}
+			z512_wdog -= 5;
 		}
 		/* TODO: coprocessor int to main if we implement it */
 
