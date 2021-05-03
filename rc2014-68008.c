@@ -9,6 +9,7 @@
  *
  *	Motorola 68B50
  *	IDE at 0x10-0x17 no high or control access
+ *	PPIDE at 0x20
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
  *	Flat 1MB address space with the low 512K as ROM
  *	RTC at 0x0C
@@ -29,6 +30,7 @@
 #include <errno.h>
 #include <m68k.h>
 #include "ide.h"
+#include "ppide.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* ROM low RAM high */
@@ -46,6 +48,8 @@ static uint16_t tstate_steps = 200;
 
 static nic_w5100_t *wiz;
 
+static struct ppide *ppide;
+
 #define TRACE_MEM	1
 #define TRACE_IO	2
 #define TRACE_IRQ	4
@@ -54,6 +58,7 @@ static nic_w5100_t *wiz;
 #define TRACE_CPU	32
 #define TRACE_ACIA	64
 #define TRACE_UART	128
+#define TRACE_PPIDE	256
 
 static int trace = 0;
 static int irq_mask;
@@ -686,6 +691,8 @@ uint8_t mmio_read_68000(uint16_t addr)
 		return acia_read(addr & 1);
 	if ((addr >= 0x10 && addr <= 0x17) && ide)
 		return my_ide_read(addr & 7);
+	if ((addr >= 0x20 && addr <= 0x27) && ppide)
+		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0x0C && rtc)
@@ -707,6 +714,8 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 		acia_write(addr & 1, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide)
 		my_ide_write(addr & 7, val);
+	else if ((addr >= 0x20 && addr <= 0x27) && ppide)
+		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	else if (addr == 0x0C && rtc)
@@ -863,10 +872,11 @@ int main(int argc, char *argv[])
 {
 	int opt;
 	int fd;
+	int ppi = 0;
 	char *rompath = "rc2014-68000.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "1Aad:fi:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aad:fi:r:p:Rw")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -889,6 +899,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			ide = 1;
+			ppi = 0;
+			idepath = optarg;
+			break;
+		case 'p':
+			ppi = 1;
+			ide = 0;
 			idepath = optarg;
 			break;
 		case 'd':
@@ -938,8 +954,20 @@ int main(int argc, char *argv[])
 				ide = 1;
 				ide_reset_begin(ide0);
 			}
-		} else
-			ide = 0;
+		}
+			else ide = 0;
+	} else if (ppi) {
+		ppide = ppide_create("ppide");
+		int ide_fd = open(idepath, O_RDWR);
+		if (ide_fd == -1) {
+			perror(idepath);
+			ppide = 0;
+		} else {
+			ppide_attach(ppide, 0, ide_fd);
+			ppide_reset(ppide);
+		}
+		if (trace & TRACE_PPIDE)
+			ppide_trace(ppide, 1);
 	}
 
 	if (uart_16550a)
