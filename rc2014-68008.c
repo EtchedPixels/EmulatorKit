@@ -7,13 +7,12 @@
  *	020000-07FFFF	ROM
  *	080000-0FFFFF	RAM
  *
- *	Motorola 68B50
  *	IDE at 0x10-0x17 no high or control access
  *	PPIDE at 0x20
- *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
  *	Flat 1MB address space with the low 512K as ROM
  *	RTC at 0x0C
  *	16550A at 0xC0
+ *	68B50 at 0xA0
  *
  *	TODO: QUART or similar and timer emulation
  */
@@ -66,7 +65,7 @@ static int irq_mask;
 static void add_irq(int n)
 {
 	if (!(irq_mask & (1 << n)) && (trace & TRACE_IRQ))
-		fprintf(stderr, "[IRQ]\n");
+		fprintf(stderr, "[IRQ %02X]\n", irq_mask);
 	irq_mask |= (1 << n);
 	m68k_set_irq(2);
 }
@@ -267,9 +266,9 @@ static void uart_recalc_iir(struct uart16x50 *uptr)
     else if (uptr->irq & TEMT)
         uptr->iir = 0x02;
     else if (uptr->irq & MODEM)
-        uptr->iir = 0x00;
+        uptr->iir = 0x01;
     else {
-        uptr->iir = 0x01;	/* No interrupt */
+        uptr->iir = 0x00;	/* No interrupt */
         uptr->irqline = 0;
         remove_irq(IRQ_16550A);
         return;
@@ -303,17 +302,14 @@ static void uart_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
 static void uart_event(struct uart16x50 *uptr)
 {
     uint8_t r = check_chario();
-    uint8_t old = uptr->lsr;
-    uint8_t dhigh;
     if (r & 1)
         uptr->lsr |= 0x01;	/* RX not empty */
     if (r & 2)
         uptr->lsr |= 0x60;	/* TX empty */
-    dhigh = (old ^ uptr->lsr);
-    dhigh &= uptr->lsr;		/* Changed high bits */
-    if (dhigh & 1)
+
+    if (r & 1)
         uart_interrupt(uptr, RXDA);
-    if (dhigh & 0x2)
+    if (r & 0x2)
         uart_interrupt(uptr, TEMT);
 }
 
