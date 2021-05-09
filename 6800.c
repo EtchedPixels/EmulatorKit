@@ -60,6 +60,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "6800.h"
 
 #define REG_D	((cpu->a << 8) | (cpu->b))
@@ -2865,6 +2866,7 @@ static int m6800_pre_execute(struct m6800 *cpu)
     return 0;
 }
 
+#ifdef WITH_HC11
 static int m68hc11_pre_execute(struct m6800 *cpu)
 {
     /* Interrupts are not latched */
@@ -2891,6 +2893,7 @@ static int m68hc11_pre_execute(struct m6800 *cpu)
     /* TODO add others */
     return 0;
 }
+#endif
 
 void m6800_clear_interrupt(struct m6800 *cpu, int irq)
 {
@@ -2913,96 +2916,13 @@ int m6800_execute(struct m6800 *cpu)
     /* Interrupts ? */
     cycles = m6800_pre_execute(cpu);
     /* A cycle passes but we are waiting */
-    if (cpu->wait)
-        return 1;
-    cycles += m6800_execute_one(cpu);
+    if (!cpu->wait)
+        cycles = 1;
+    else
+        cycles += m6800_execute_one(cpu);
 
-    /* See if we passed the output compare, and as we don't check every
-       cycle deal with wraps */
-    n = cpu->counter + cycles;
-    if (cpu->oc_hold == 0 && cpu->counter >= cpu->ocr && cpu->counter < n) {
-        cpu->tcsr |= TCSR_OCF;	/* OCF */
-        if (cpu->tcsr & TCSR_EOCI)
-            m6800_raise_interrupt(cpu, IRQ_OCF);
-        cpu->tcsr ^= TCSR_OLVL;
-    }
-    cpu->oc_hold = 0;
-    if (n > 0xFFFF) {
-        cpu->tcsr |= TCSR_TOF;	/* TOF */
-        if (cpu->tcsr & TCSR_ETOI)
-            m6800_raise_interrupt(cpu, IRQ_TOF);
-    }
-    cpu->counter = (uint16_t)n;
-    return cycles;
-}
+    /* FIXME: skip the unneeded stuff on 6800/6808 */
 
-/*
- *	Model a 68HC11 E clock
- *
- *	See Figure 10-1 in the M68HC11 RM
- */
-
-#ifdef WORK_IN_PROGRESS
-
-static int prescaler(struct prescaler *p)
-{
-    if (p->count++ == p->limit) {
-        p->count = 0;
-        return 1;
-    }
-    return 0;
-}
-
-static void m68hc11_e_clock(struct m6800 *cpu)
-{
-    if (!prescaler(&cpu->io.pr_tcnt))
-        return;
-    /* Free running counter */
-    cpu->io.tcnt++;
-    if (cpu->io.tcnt == 0)
-        cpu->io.tflg2 |= TF2_TOI;
-    /* Comparators. Set the relevant flags, we will compute their effects
-       later on */
-    if (cpu->io.tcnt == cp->io.toc1)
-        cpu->io.tflg1 |= TF1_OC1F;
-    if (cpu->io.tcnt == cp->io.toc2)
-        cpu->io.tflg1 |= TF1_OC2F;
-    if (cpu->io.tcnt == cp->io.toc3)
-        cpu->io.tflg1 |= TF1_OC3F;
-    if (cpu->io.tcnt == cp->io.toc4)
-        cpu->io.tflg1 |= TF1_OC4F;
-    if (cpu->io.tcnt == cp->io.toc5)
-        cpu->io.tflg1 |= TF1_OC5F;
-    /* We don't model input counts on IC1-IC3 but if we did it would go
-       here */
-    /* Now model the rti/cop/etc timers */
-    if (prescaler(&cpu->io.e13)) {
-        if (prescaler(&cpu->io.rti)) {
-            cpu->io.tflg2 |= TF2_RTIF;
-        }
-    }
-    /* TODO: COP */
-}
-
-#endif    
-
-/*
- *	Execute a machine cycle and return how many clocks
- *	we took doing it.
- */
- 
-int m68hc11_execute(struct m6800 *cpu)
-{
-    int cycles;
-    uint32_t n;
-    /* Interrupts ? */
-    cycles = m68hc11_pre_execute(cpu);
-    /* A cycle passes but we are waiting */
-    if (cpu->wait)
-        return 1;
-    cycles += m6800_execute_one(cpu);
-
-    /* TODO: 68HC11 model here */
     /* See if we passed the output compare, and as we don't check every
        cycle deal with wraps */
     n = cpu->counter + cycles;
@@ -3024,6 +2944,8 @@ int m68hc11_execute(struct m6800 *cpu)
 
 void m6800_reset(struct m6800 *cpu, int mode)
 {
+    memset(cpu, 0, sizeof(*cpu));
+
     cpu->p = P_I;
     cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
     cpu->pc |= m6800_do_read(cpu, 0xFFFF);
@@ -3039,6 +2961,156 @@ void m6800_reset(struct m6800 *cpu, int mode)
     cpu->iram_base = 0x80;	/* We don't yet emulate X/Y1 CPUs */
 }
 
+#ifdef WITH_HC11
+
+/*
+ *	Model a 68HC11 E clock
+ *
+ *	See Figure 10-1 in the M68HC11 RM
+ */
+
+static int prescaler(struct prescaler *p)
+{
+    if (p->count++ == p->limit) {
+        p->count = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static void m68hc11_e_clock(struct m6800 *cpu)
+{
+    if (!prescaler(&cpu->io.pr_tcnt))
+        return;
+    /* Free running counter */
+    cpu->io.tcnt++;
+    if (cpu->io.tcnt == 0)
+        cpu->io.tflg2 |= TF2_TOF;
+    /* Comparators. Set the relevant flags, we will compute their effects
+       later on */
+    if (cpu->io.tcnt == cpu->io.toc1)
+        cpu->io.tflg1 |= TF1_OC1F;
+    if (cpu->io.tcnt == cpu->io.toc2)
+        cpu->io.tflg1 |= TF1_OC2F;
+    if (cpu->io.tcnt == cpu->io.toc3)
+        cpu->io.tflg1 |= TF1_OC3F;
+    if (cpu->io.tcnt == cpu->io.toc4)
+        cpu->io.tflg1 |= TF1_OC4F;
+    if (cpu->io.tcnt == cpu->io.toc5)
+        cpu->io.tflg1 |= TF1_OC5F;
+    /* We don't model input counts on IC1-IC3 but if we did it would go
+       here */
+    /* Now model the rti/cop/etc timers */
+    if (prescaler(&cpu->io.e13)) {
+        if (prescaler(&cpu->io.rti)) {
+            cpu->io.tflg2 |= TF2_RTIF;
+        }
+    }
+    /* TODO: COP */
+}
+
+
+/*
+ *	Execute a machine cycle and return how many clocks
+ *	we took doing it.
+ */
+ 
+int m68hc11_execute(struct m6800 *cpu)
+{
+    int cycles, i;
+
+    /* Interrupts ? */
+    cycles = m68hc11_pre_execute(cpu);
+    /* A cycle passes but we are waiting */
+    if (cpu->wait)
+        cycles = 1;
+    else
+        cycles += m6800_execute_one(cpu);
+
+    /* Run the timers for these E cycles */
+    for (i = 0; i < cycles; i++)
+        m68hc11_e_clock(cpu);
+        
+    return cycles;
+}
+
+void m68hc11e_reset(struct m6800 *cpu, int type)
+{
+    memset(cpu, 0, sizeof(*cpu));
+
+    cpu->p = P_I;
+    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
+    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
+
+    cpu->io.padr = 0x8F;
+    cpu->io.pioc = 0x03;
+    cpu->io.ddrc = 0x00;
+    cpu->io.pddr = 0xFF;
+    cpu->io.ddrd = 0x00;
+    cpu->io.pedr = 0x00;
+    cpu->io.oc1m = 0x00;
+    cpu->io.oc1d = 0x00;
+    cpu->io.tcnt = 0x00;
+    cpu->io.toc1 = 0xFFFF;
+    cpu->io.toc2 = 0xFFFF;
+    cpu->io.toc3 = 0xFFFF;
+    cpu->io.toc4 = 0xFFFF;
+    cpu->io.toc5 = 0xFFFF;
+    cpu->io.tctl1 = 0x00;
+    cpu->io.tctl2 = 0x00;
+    cpu->io.tmsk1 = 0x00;
+    cpu->io.tmsk2 = 0x00;
+    cpu->io.tflg1 = 0x00;
+    cpu->io.tflg2 = 0x00;
+    cpu->io.pactl = 0x00;
+    cpu->io.pacnt = 0x00;
+    cpu->io.spcr = 0x04;
+    cpu->io.spsr = 0x00;
+    cpu->io.baud = 0x00;
+    cpu->io.sccr1 = 0xC0;
+    cpu->io.sccr2 = 0x00;
+    cpu->io.scsr = 0xC0;
+    cpu->io.adctl = 0x00;
+    cpu->io.bprot = 0x1F;
+    cpu->io.eprog = 0x00;
+    cpu->io.option = 0x10;	/* TODO */
+    cpu->io.coprst = 0x00;
+    cpu->io.pprog = 0x00;	/* TODO */
+    cpu->io.hprio = 0x06;
+    cpu->io.init = 0x01;
+    cpu->io.config = 0x02;	/* FOR NOW */
+
+    cpu->io.pr_tcnt.count = 0;
+    cpu->io.pr_tcnt.limit = 1;	/* FIXME */
+    cpu->io.e13.count = 0;
+    cpu->io.e13.limit = 13;
+    cpu->io.rti.count = 0;
+    cpu->io.rti.limit = 1;	/* FIXME */
+
+    cpu->io.iobase = 0x1000;
+    cpu->io.ioend = 0x103f;
+    cpu->io.irambase = 0;
+    switch(type) {
+    /* Internal EEROM/EPROM/ROM is not yet modelled */
+    case 9:	/* As 1 with 12K of ROM or EPROM */
+    case 1:	/* 68HC11E1, 512 bytes IRAM, 512 bytes EEPROM */
+    case 0:	/* 68HC11E0, 512 bytes IRAM no ROM/EPROM/EEPROM */
+        cpu->io.iramend = cpu->io.iramsize = 512;
+        break;
+    case 20:	/* 768 bytes RAM, 10K EPROM */
+        cpu->io.iramend = cpu->io.iramsize = 768;
+        break;
+    case 2:	/* 256 bytes RAM, 2K EEPROM */
+        cpu->io.iramend = cpu->io.iramsize = 256;
+        break;
+    default:
+        fprintf(stderr, "Invalid 68HC11E variant.\n");
+        exit(1);
+    }    
+    cpu->intio = INTIO_HC11;
+}
+
+#endif
 
 /*
  *	6803 device model
@@ -3273,18 +3345,60 @@ void m6800_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
     }
 }
 
-#ifdef WORK_IN_PROGRESS
+#ifdef WITH_HC11
 
-uint8_t m6hc11_read_io(struct m6800 *cpu, uint8_t addr)
+/* SCI interrupts */ 
+static void m68hc11_sci_ints(struct m6800 *cpu)
+{
+    int irq = 0;
+    if ((cpu->io.sccr2 & SCCR2_TIE) && (cpu->io.scsr & SCSR_TDRE))
+        irq = 1;
+    if ((cpu->io.sccr2 & SCCR2_RIE) && (cpu->io.scsr & SCSR_RDRF))
+        irq = 1;
+    /* We don't yet model TCIE or ILIE */
+    if (irq)
+        m6800_raise_interrupt(cpu, IRQ_SCI);
+    else
+        m6800_clear_interrupt(cpu, IRQ_SCI);
+}
+
+/* We have received a byte of external data */
+void m68hc11_rx_byte(struct m6800 *cpu, uint8_t c)
+{
+    if (cpu->io.sccr2 & SCCR2_RE) {
+        if (cpu->io.scsr & SCSR_RDRF)
+            cpu->io.scsr |= SCSR_OR;
+        else {
+            cpu->io.scsr |= SCSR_RDRF;
+            cpu->io.scdr_r = c;
+            m68hc11_sci_ints(cpu);
+        }
+    }
+}
+
+/* The emulator completed transmitting the pending serial byte */
+void m68hc11_tx_done(struct m6800 *cpu)
+{
+    if (!(cpu->io.scsr & SCSR_TDRE)) {
+        cpu->io.scsr |= SCSR_TDRE;
+        m68hc11_sci_ints(cpu);
+    }
+}
+
+/*
+ *	The 68HC11 has a different and much more sophisticated internal
+ *	I/O feature set. We only model a few bits for now.
+ */
+static uint8_t m68hc11_read_io(struct m6800 *cpu, uint8_t addr)
 {
     uint8_t val;
     switch(addr) {
         case 0x00:	/* Port A */
-            val = m6800_port_input(cpu, 1) & ~cpu->paddr;
-            val |= cpu->io.padr & cpu->io.paddr;
+            val = m6800_port_input(cpu, 1) & ~cpu->io.padr;
+            val |= cpu->io.padr & cpu->io.padr;
             return val;
         case 0x01:	/* Port A direction register */
-            return cpu->io.paddr;/*??*/
+            return cpu->io.padr;/*??*/
         case 0x02:	/* Port I/O control */
             return cpu->io.pioc;
         case 0x03:	/* Port C (not modelled yet not in expanded mode) */
@@ -3296,7 +3410,7 @@ uint8_t m6hc11_read_io(struct m6800 *cpu, uint8_t addr)
         case 0x07:	/* Port C direction */
             return cpu->io.ddrc;
         case 0x08:	/* Port D */
-            val = m6800_port_input(cpu, 4) & ~cpu->ddrd;
+            val = m6800_port_input(cpu, 4) & ~cpu->io.ddrd;
             val |= cpu->io.pddr & cpu->io.ddrd;
             return val;
         case 0x09:
@@ -3322,7 +3436,7 @@ uint8_t m6hc11_read_io(struct m6800 *cpu, uint8_t addr)
         case 0x12:
             return cpu->io.tic2 >> 8;
         case 0x13:
-            return cpu->io.tic2 & 0xFF:
+            return cpu->io.tic2 & 0xFF;
         case 0x14:
             return cpu->io.tic3 >> 8;
         case 0x15:
@@ -3388,13 +3502,13 @@ uint8_t m6hc11_read_io(struct m6800 *cpu, uint8_t addr)
         case 0x30:
             return cpu->io.adctl;
         case 0x31:
-            return cpu->io.adrr1;
+            return cpu->io.adr1;
         case 0x32:
-            return cpu->io.adrr2;
+            return cpu->io.adr2;
         case 0x33:
-            return cpu->io.adrr3;
+            return cpu->io.adr3;
         case 0x34:
-            return cpu->io.adrr4;
+            return cpu->io.adr4;
         case 0x39:
             return cpu->io.option;
         case 0x3C:
@@ -3402,16 +3516,21 @@ uint8_t m6hc11_read_io(struct m6800 *cpu, uint8_t addr)
         case 0x3D:
             return cpu->io.init;
         case 0x3E:
-            return cpu->io.test1;
+            return 0xFF;	/* Test 1 */
         case 0x3F:
             return cpu->io.config;
         /* TODO: K series MMU */
         /* FIXME: log this */
+        default:
             return 0xFF;	/* Reserved */
     }
 }
 
-void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
+/*
+ *	Very basic for now - we need to implement things like the
+ *	locks on registers.
+ */
+static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
 {
     switch(addr) {
         case 0x00:
@@ -3419,8 +3538,8 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             m6800_port_output(cpu, 1);
             break;
         case 0x01:
-            cpu->io.paddr = val;
-            m6800_port_direction(cpu, 1);
+            cpu->io.padr = val;
+            m68hc11_port_direction(cpu, 1);
             break;
         case 0x02:
             cpu->io.pioc = val;
@@ -3441,7 +3560,7 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             break;
         case 0x09:
             cpu->io.ddrd = val & 0x3F;
-            m6800_port_direction(cpu, 4);
+            m68hc11_port_direction(cpu, 4);
             break;
         case 0x0A:
             cpu->io.pedr = val;
@@ -3467,7 +3586,7 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
         case 0x15:
             break;
         case 0x16:	/* Timer output compare */
-            cpu->io.toc1 &= 0xFF:
+            cpu->io.toc1 &= 0xFF;
             cpu->io.toc1 |= val;
             break;
         case 0x17:
@@ -3475,7 +3594,7 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.toc1 |= val;
             break;
         case 0x18:
-            cpu->io.toc2 &= 0xFF:
+            cpu->io.toc2 &= 0xFF;
             cpu->io.toc2 |= val << 8;
             break;
         case 0x19:
@@ -3483,7 +3602,7 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.toc2 |= val;
             break;
         case 0x1A:
-            cpu->io.toc3 &= 0xFF:
+            cpu->io.toc3 &= 0xFF;
             cpu->io.toc3 |= val << 8;
             break;
         case 0x1B:
@@ -3491,7 +3610,7 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.toc3 |= val;
             break;
         case 0x1C:
-            cpu->io.toc4 &= 0xFF:
+            cpu->io.toc4 &= 0xFF;
             cpu->io.toc4 |= val << 8;
             break;
         case 0x1D:
@@ -3499,7 +3618,7 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.toc4 |= val;
             break;
         case 0x1E:
-            cpu->io.toc5 &= 0xFF:
+            cpu->io.toc5 &= 0xFF;
             cpu->io.toc5 |= val << 8;
             break;
         case 0x1F:
@@ -3537,14 +3656,18 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
         case 0x29:
             break;
         case 0x2A:
-            cpu->io.spdr = m6800_spi_begin(val);
+            cpu->io.spdr = m68hc11_spi_begin(cpu, val);
+            /* TODO */
+            /* We should really set a timer to interrupt the right number
+               of clocks later and then move the result in and flag complete */
             break;
         case 0x2B:	/* Baud rate */
             cpu->io.baud = val;
-            m6800_sci_baud(cpu, val);
+            m6800_sci_change(cpu);
             break;
         case 0x2C:
             cpu->io.sccr1 = val;
+            m6800_sci_change(cpu);
             break;
         case 0x2D:
             cpu->io.sccr2 = val;
@@ -3553,22 +3676,25 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             break;
         case 0x2F:
             cpu->io.scdr_w = val;
+            cpu->io.scsr &= ~SCSR_TDRE;
+            if (cpu->io.sccr2 & SCCR2_TE)
+                m6800_tx_byte(cpu, val);
             break;
         case 0x30:
             cpu->io.adctl &= 0x80;
             cpu->io.adctl |= val & 0x3F;
             break;
         case 0x31:
-            cpu->io.adrr1 = val;
+            cpu->io.adr1 = val;
             break;
         case 0x32:
-            cpu->io.adrr2 = val;
+            cpu->io.adr2 = val;
             break;
         case 0x33:
-            cpu->io.adrr3 = val;
+            cpu->io.adr3 = val;
             break;
         case 0x34:
-            cpu->io.adrr4 = val;
+            cpu->io.adr4 = val;
             break;
         case 0x39:
             cpu->io.hprio = val;
@@ -3577,19 +3703,24 @@ void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.option = val;
             break;
         case 0x3D:
+            /* Will need to be smarter as we support more CPU types */
             cpu->io.init = val;
+            cpu->io.iobase = (val & 0x0FU) << 12;
+            cpu->io.ioend = cpu->io.iobase + 0x3F;
+            cpu->io.irambase = (val & 0xF0U) << 8;
+            cpu->io.iramend = cpu->io.irambase + cpu->io.iramsize;
+            printf("IO moves to %04x, IRAM to %04x\n",
+                cpu->io.iobase, cpu->io.irambase);
             break;
         case 0x3E:
-            cpu->io.test1 = val;
+            /* This is actually test1 if we ever care */
             break;
         case 0x3F:
             cpu->io.config = val;
             break;
     }
 }
-
 #endif
-
 /* We only support mode 2 and mode 3 on the other parts for now */
 
 
@@ -3613,6 +3744,14 @@ uint8_t m6800_do_read(struct m6800 *cpu, uint16_t addr)
         if (cpu->mode == 2 && (cpu->ramcr & RAMCR_RAME) && (addr >= cpu->iram_base && addr <= 0xFF))
             return cpu->iram[addr - cpu->iram_base];
         return m6800_read(cpu, addr);
+#ifdef WITH_HC11
+    case INTIO_HC11:
+        if (addr >= cpu->io.iobase && addr <= cpu->io.ioend)
+            return m68hc11_read_io(cpu, addr);
+        if (addr >= cpu->io.irambase && addr <= cpu->io.iramend)
+            return cpu->iram[addr];
+        return m6800_read(cpu, addr);
+#endif        
     }
 }
 
@@ -3637,6 +3776,17 @@ void m6800_do_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
             cpu->iram[addr - cpu->iram_base] = val;
         else
             m6800_write(cpu, addr, val);
+        break;
+#ifdef WITH_HC11        
+    case INTIO_HC11:
+        if (addr >= cpu->io.iobase && addr <= cpu->io.ioend)
+            m68hc11_write_io(cpu, addr, val);
+        else if (addr >= cpu->io.irambase && addr <= cpu->io.iramend)
+            cpu->iram[addr] = val;
+        else
+            m6800_write(cpu, addr, val);
+        break;
+#endif
     }
 }
 
@@ -3658,6 +3808,16 @@ uint8_t m6800_do_debug_read(struct m6800 *cpu, uint16_t addr)
         if (cpu->mode == 2 && (cpu->ramcr & RAMCR_RAME) && (addr >= cpu->iram_base && addr <= 0xFF))
             return cpu->iram[addr - cpu->iram_base];
         return m6800_debug_read(cpu, addr);
+#ifdef WITH_HC11
+    case INTIO_HC11:
+        /* Nothing with side effects */
+        if (addr >= cpu->io.iobase && addr <= cpu->io.ioend)
+            return 0xff;
+        if (addr >= cpu->io.irambase && addr <= cpu->io.iramend)
+            return cpu->iram[addr];
+        return m6800_read(cpu, addr);
+#endif        
     }
 }
+
 

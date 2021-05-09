@@ -1,3 +1,149 @@
+/*
+ *	68HC11 timer and I/O structures
+ */
+
+struct prescaler {
+    uint16_t count;
+    uint16_t limit;
+};
+
+struct  m68hc11 {
+    /* Timer chain */
+    struct prescaler pr_tcnt;
+    struct prescaler e13;
+    struct prescaler rti;
+
+    /* I/O ports */
+    uint16_t iobase;
+    uint16_t ioend;
+    uint16_t irambase;
+    uint16_t iramend;
+    uint16_t iramsize;
+
+    /* We don't model non expanded mode */
+    uint8_t padr;
+    uint8_t paddr;
+    uint8_t pioc;
+    uint8_t ddrc;
+    uint8_t pddr;
+    uint8_t ddrd;
+    uint8_t pedr;
+
+    /* Timer control force */
+    uint8_t cforc;
+
+    /* Output compare */
+    uint8_t oc1m;
+    uint8_t oc1d;
+
+    /* Timer events */
+    uint16_t tcnt;
+    uint16_t tic1;
+    uint16_t tic2;
+    uint16_t tic3;
+
+    uint16_t toc1;
+    uint16_t toc2;
+    uint16_t toc3;
+    uint16_t toc4;
+    uint16_t toc5;
+
+    uint8_t tctl1;
+    uint8_t tctl2;
+    
+    uint8_t tmsk1;
+    uint8_t tflg1;
+#define TF1_OC1F		0x80
+#define TF1_OC2F		0x40
+#define TF1_OC3F		0x20
+#define TF1_OC4F		0x10
+#define TF1_OC5F		0x08
+#define TF1_IC1F		0x04
+#define TF1_IC2F		0x02
+#define TF1_IC3F		0x01
+
+    uint8_t tmsk2;
+    uint8_t tflg2;
+#define TF2_TOF			0x80
+#define TF2_RTIF		0x40
+#define TF2_PAOVF		0x20
+#define TF2_PAIF		0x10
+
+    /* Pulse accumulator */
+    uint8_t pactl;
+    uint8_t pacnt;
+
+    /* SPI */
+    uint8_t spcr;
+    uint8_t spsr;
+    uint8_t spdr;
+
+    /* Serial */
+    uint8_t baud;
+    uint8_t sccr1;
+    uint8_t sccr2;
+#define SCCR2_TIE		0x80
+#define SCCR2_TCIE		0x40
+#define SCCR2_RIE		0x20
+#define SCCR2_ILIE		0x10
+#define SCCR2_TE		0x08
+#define SCCR2_RE		0x04
+#define SCCR2_RWU		0x02
+#define SCCR2_SBK		0x01
+    uint8_t scdr_w;
+    uint8_t scdr_r;
+    uint8_t scsr;
+#define SCSR_TDRE		0x80
+#define SCSR_TC			0x40
+#define SCSR_RDRF		0x20
+#define SCSR_OR			0x08
+    /* Internal implementation help value - not a register */
+    uint8_t last_scsr_read;
+
+    /* A2D convertors */    
+    uint8_t adctl;
+    uint8_t adr1;
+    uint8_t adr2;
+    uint8_t adr3;
+    uint8_t adr4;
+
+    /* System Control */
+    uint8_t bprot;
+    uint8_t eprog;
+    uint8_t option;
+    uint8_t coprst;
+    uint8_t pprog;
+    uint8_t hprio;
+    uint8_t init;
+    uint8_t config;
+};    
+
+#define HC11_VEC_SCI		0xFFD6
+#define HC11_VEC_SPI		0xFFD8
+#define HC11_VEC_PAIE		0xFFDA
+#define HC11_VEC_PAOV		0xFFDC
+#define HC11_VEC_TOI		0xFFDE
+#define HC11_VEC_TIC4O5		0xFFE0
+#define HC11_VEC_TOC4		0xFFE2
+#define HC11_VEC_TOC3		0xFFE4
+#define HC11_VEC_TOC2		0xFFE6
+#define HC11_VEC_TOC1		0xFFE8
+#define HC11_VEC_TIC3		0xFFEA
+#define HC11_VEC_TIC2		0xFFEC
+#define HC11_VEC_TIC1		0xFFEE
+#define HC11_VEC_RTI		0xFFF0
+#define HC11_VEC_IRQ		0xFFF2
+#define HC11_VEC_XIRQ		0xFFF4
+#define HC11_VEC_SWI		0xFFF6
+#define HC11_VEC_ILL		0xFFF8
+#define HC11_VEC_COP		0xFFFA
+#define HC11_VEC_CME		0xFFFC
+#define HC11_VEC_RESET		0xFFFE
+
+/*
+ *	6800 processor state
+ */
+
 struct m6800 {
     uint8_t a;
     uint8_t b;
@@ -19,13 +165,14 @@ struct m6800 {
 #define INTIO_NONE	0
 #define INTIO_6802	1
 #define INTIO_6803	2
+#define INTIO_HC11	3
     uint8_t irq;
     uint8_t mode;
     int debug;
 
     /* I/O and memory */
     uint8_t iram_base;
-    uint8_t iram[192];		/* Can be 192 bytes on late 6303 */
+    uint8_t iram[768];		/* Can be 192 bytes on late 6303, 768 on HC11 */
 
     uint8_t p1ddr;
     uint8_t p2ddr;
@@ -40,6 +187,8 @@ struct m6800 {
     uint8_t tdr;
     uint8_t ramcr;
 
+    struct m68hc11 io;		/* Need to make this a nice union of CPU
+                                   variants eventually */
 };
 
 #define P_C		1
@@ -90,14 +239,23 @@ extern void m6800_tx_byte(struct m6800 *cpu, uint8_t byte);
 extern void m6800_port_output(struct m6800 *cpu, int port);
 extern uint8_t m6800_port_input(struct m6800 *cpu, int port);
 
+extern void m68hc11_port_direction(struct m6800 *cpu, int port);
+extern uint8_t m68hc11_spi_begin(struct m6800 *cpu, uint8_t out);
+
+extern void m6800_tx_done(struct m6800 *cpu);
+extern void m68hc11_tx_done(struct m6800 *cpu);
+
 /* Provided by the 6800 emulator */
 extern void m6800_reset(struct m6800 *cpu, int mode);
+extern void m68hc11e_reset(struct m6800 *cpu, int variant);
 extern int m6800_execute(struct m6800 *cpu);
+extern int m68hc11_execute(struct m6800 *cpu);
 extern void m6800_clear_interrupt(struct m6800 *cpu, int irq);
 extern void m6800_raise_interrupt(struct m6800 *cpu, int irq);
 extern void m6800_rx_byte(struct m6800 *cpu, uint8_t byte);
+extern void m68hc11_rx_byte(struct m6800 *cpu, uint8_t byte);
+
 /* These are more internal but useful for debug/trace */
 extern void m6800_do_write(struct m6800 *cpu, uint16_t addr, uint8_t val);
 extern uint8_t m6800_do_read(struct m6800 *cpu, uint16_t addr);
 extern uint8_t m6800_do_debug_read(struct m6800 *cpu, uint16_t addr);
-extern void m6800_tx_done(struct m6800 *cpu);
