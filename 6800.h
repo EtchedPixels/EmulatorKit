@@ -12,6 +12,12 @@ struct  m68hc11 {
     struct prescaler pr_tcnt;
     struct prescaler e13;
     struct prescaler rti;
+    struct prescaler cop;
+
+    uint16_t lock;
+
+    uint8_t *eerom;
+    uint8_t *rom;
 
     /* I/O ports */
     uint16_t iobase;
@@ -19,6 +25,9 @@ struct  m68hc11 {
     uint16_t irambase;
     uint16_t iramend;
     uint16_t iramsize;
+    uint16_t erombase;
+    uint16_t eromend;
+    uint16_t rombase;
 
     /* We don't model non expanded mode */
     uint8_t padr;
@@ -75,8 +84,16 @@ struct  m68hc11 {
 
     /* SPI */
     uint8_t spcr;
+#define SPCR_SPIE		0x80
+#define SPCR_SPE		0x40
+#define SPCR_MSTR		0x10
+#define SPCR_SPR		0x03
     uint8_t spsr;
-    uint8_t spdr;
+#define SPSR_SPIF		0x80
+    uint8_t spdr_r;
+    uint8_t spdr_w;
+    /* our internal timer: not a real register */
+    uint16_t spi_ticks;
 
     /* Serial */
     uint8_t baud;
@@ -111,11 +128,17 @@ struct  m68hc11 {
     uint8_t bprot;
     uint8_t eprog;
     uint8_t option;
-    uint8_t coprst;
+    uint8_t coprst;		/* We use this to hold the last write */
     uint8_t pprog;
     uint8_t hprio;
     uint8_t init;
     uint8_t config;
+#define CFG_NOSEC	0x08
+#define CFG_NOCOP	0x04
+#define CFG_ROMON	0x02
+#define CFG_EEON	0x01
+
+    uint8_t config_latch;	/* Actual boot latches we really use */
 };    
 
 #define HC11_VEC_SCI		0xFFD6
@@ -229,6 +252,7 @@ struct m6800 {
 #define IRQ_OCF		0x08
 #define IRQ_TOF		0x10
 #define IRQ_SCI		0x20
+#define IRQ_SPI		0x40
 
 extern uint8_t m6800_read(struct m6800 *cpu, uint16_t addr);
 extern uint8_t m6800_debug_read(struct m6800 *cpu, uint16_t addr);
@@ -240,14 +264,15 @@ extern void m6800_port_output(struct m6800 *cpu, int port);
 extern uint8_t m6800_port_input(struct m6800 *cpu, int port);
 
 extern void m68hc11_port_direction(struct m6800 *cpu, int port);
-extern uint8_t m68hc11_spi_begin(struct m6800 *cpu, uint8_t out);
+extern void m68hc11_spi_begin(struct m6800 *cpu, uint8_t out);
+extern uint8_t m68hc11_spi_done(struct m6800 *cpu);
 
 extern void m6800_tx_done(struct m6800 *cpu);
 extern void m68hc11_tx_done(struct m6800 *cpu);
 
 /* Provided by the 6800 emulator */
 extern void m6800_reset(struct m6800 *cpu, int mode);
-extern void m68hc11e_reset(struct m6800 *cpu, int variant);
+extern void m68hc11e_reset(struct m6800 *cpu, int variant, uint8_t cfg, uint8_t *rom, uint8_t *eerom);
 extern int m6800_execute(struct m6800 *cpu);
 extern int m68hc11_execute(struct m6800 *cpu);
 extern void m6800_clear_interrupt(struct m6800 *cpu, int irq);

@@ -49,7 +49,7 @@
  *
  *	68HC11 TODO:
  *	Add the rest of the 68HC11 interrupt source/vectors
- *	68HC11 I/O model
+ *	Expand the very basic 68HC11 I/O model
  *	Special mode and vectors
  *	Test with something like Buffalo ?
  *	interrupt enable 1 clock delay on CLI and TAP
@@ -2890,6 +2890,8 @@ static int m68hc11_pre_execute(struct m6800 *cpu)
         return m6800_vector_masked(cpu, 0xFFDE);
     if (cpu->irq & IRQ_SCI)
         return m6800_vector_masked(cpu, 0xFFD6);
+    if (cpu->irq & IRQ_SPI)
+        return m6800_vector_masked(cpu, 0xFFD8);
     /* TODO add others */
     return 0;
 }
@@ -2971,7 +2973,7 @@ void m6800_reset(struct m6800 *cpu, int mode)
 
 static int prescaler(struct prescaler *p)
 {
-    if (p->count++ == p->limit) {
+    if (p->count++ >= p->limit) {
         p->count = 0;
         return 1;
     }
@@ -2980,6 +2982,39 @@ static int prescaler(struct prescaler *p)
 
 static void m68hc11_e_clock(struct m6800 *cpu)
 {
+    /* Our emulation timer for an SPI transfer. This counts down E clocks
+       between the start and end of an SPI transfer (master emulated only) */
+    if (cpu->io.spi_ticks) {
+        if (!--cpu->io.spi_ticks) {
+            /* An SPI transfer completed: we don't emulate any double
+               buffering */
+            cpu->io.spdr_r = m68hc11_spi_done(cpu);
+            cpu->io.spsr |= SPSR_SPIF;
+            if (cpu->io.spcr & SPCR_SPIE)
+                m6800_raise_interrupt(cpu, IRQ_SPI);
+        }
+    }
+
+    /* 64 cycle lock */
+    if (cpu->io.lock)
+        cpu->io.lock--;
+
+    /* A 2^13 divider feeds into the RTI and COP */
+    if (prescaler(&cpu->io.e13)) {
+        /* 1 2 4 or 8 fom RTR[1:0] */
+        if (prescaler(&cpu->io.rti)) {
+            cpu->io.tflg2 |= TF2_RTIF;
+        }
+        /* Always by 4 then by 1/4/16/64 ccording to CR[1:0] */
+        if (prescaler(&cpu->io.cop)) {
+            if (!(cpu->io.config_latch & CFG_NOCOP)) {
+                /* We took a COP reset */
+                /* TODO */
+            }
+        }
+    }
+
+    /* The tcnt scaler affects all of the ic/oc side */
     if (!prescaler(&cpu->io.pr_tcnt))
         return;
     /* Free running counter */
@@ -3000,13 +3035,6 @@ static void m68hc11_e_clock(struct m6800 *cpu)
         cpu->io.tflg1 |= TF1_OC5F;
     /* We don't model input counts on IC1-IC3 but if we did it would go
        here */
-    /* Now model the rti/cop/etc timers */
-    if (prescaler(&cpu->io.e13)) {
-        if (prescaler(&cpu->io.rti)) {
-            cpu->io.tflg2 |= TF2_RTIF;
-        }
-    }
-    /* TODO: COP */
 }
 
 
@@ -3034,13 +3062,16 @@ int m68hc11_execute(struct m6800 *cpu)
     return cycles;
 }
 
-void m68hc11e_reset(struct m6800 *cpu, int type)
+void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint8_t *eerom)
 {
     memset(cpu, 0, sizeof(*cpu));
 
     cpu->p = P_I;
     cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
     cpu->pc |= m6800_do_read(cpu, 0xFFFF);
+
+    cpu->io.rom = rom;
+    cpu->io.eerom = eerom;
 
     cpu->io.padr = 0x8F;
     cpu->io.pioc = 0x03;
@@ -3078,14 +3109,17 @@ void m68hc11e_reset(struct m6800 *cpu, int type)
     cpu->io.pprog = 0x00;	/* TODO */
     cpu->io.hprio = 0x06;
     cpu->io.init = 0x01;
-    cpu->io.config = 0x02;	/* FOR NOW */
+    cpu->io.config = cfg;
+    cpu->io.config_latch = cfg;
 
     cpu->io.pr_tcnt.count = 0;
-    cpu->io.pr_tcnt.limit = 1;	/* FIXME */
+    cpu->io.pr_tcnt.limit = 1;	/* tmsk2 starts 0 so we start divide by 1 */
     cpu->io.e13.count = 0;
-    cpu->io.e13.limit = 13;
+    cpu->io.e13.limit = 16384;	/* 2^13 divider */
     cpu->io.rti.count = 0;
-    cpu->io.rti.limit = 1;	/* FIXME */
+    cpu->io.rti.limit = 1;	/* pactl starts 0 so we start divide by 1 */
+    cpu->io.cop.count = 0;
+    cpu->io.cop.limit = 4;	/* Default is by 4 */
 
     cpu->io.iobase = 0x1000;
     cpu->io.ioend = 0x103f;
@@ -3093,21 +3127,33 @@ void m68hc11e_reset(struct m6800 *cpu, int type)
     switch(type) {
     /* Internal EEROM/EPROM/ROM is not yet modelled */
     case 9:	/* As 1 with 12K of ROM or EPROM */
+        cpu->io.rombase = 0xD000;
+        break;
     case 1:	/* 68HC11E1, 512 bytes IRAM, 512 bytes EEPROM */
+        cpu->io.erombase = 0xB600;
+        cpu->io.eromend = 0xB7FF;
+        break;
     case 0:	/* 68HC11E0, 512 bytes IRAM no ROM/EPROM/EEPROM */
         cpu->io.iramend = cpu->io.iramsize = 512;
         break;
-    case 20:	/* 768 bytes RAM, 10K EPROM */
+#if 0
+    case 20:	/* 768 bytes RAM, 20K EPROM : not emulated yet */
         cpu->io.iramend = cpu->io.iramsize = 768;
         break;
-    case 2:	/* 256 bytes RAM, 2K EEPROM */
+#endif
+    case 2:	/* 256 bytes RAM, 2K EEPROM  68HC811E2 */
         cpu->io.iramend = cpu->io.iramsize = 256;
+        /* The EEPROM location is configurable */
+        cpu->io.erombase = 0x0800 + ((cfg & 0xF0) << 8);
+        cpu->io.eromend = 0x0FFF + ((cfg & 0xF0) << 8);
         break;
     default:
         fprintf(stderr, "Invalid 68HC11E variant.\n");
         exit(1);
     }    
     cpu->intio = INTIO_HC11;
+
+    cpu->io.lock = 64;		/* Some stuff locks after 64 cycles */
 }
 
 #endif
@@ -3482,7 +3528,8 @@ static uint8_t m68hc11_read_io(struct m6800 *cpu, uint8_t addr)
         case 0x29:
             return cpu->io.spsr;
         case 0x2A:	/* SPI data is loaded by the transmit event response */
-            return cpu->io.spdr;
+            cpu->io.spsr &= ~SPSR_SPIF;
+            return cpu->io.spdr_r;
         case 0x2B:
             return cpu->io.baud;
         case 0x2C:
@@ -3509,6 +3556,10 @@ static uint8_t m68hc11_read_io(struct m6800 *cpu, uint8_t addr)
             return cpu->io.adr3;
         case 0x34:
             return cpu->io.adr4;
+        case 0x35:
+            return cpu->io.bprot;
+        case 0x36:
+            return cpu->io.eprog;
         case 0x39:
             return cpu->io.option;
         case 0x3C:
@@ -3532,6 +3583,7 @@ static uint8_t m68hc11_read_io(struct m6800 *cpu, uint8_t addr)
  */
 static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
 {
+    static const unsigned int cop_limit[4] = { 1, 4, 16, 64 };
     switch(addr) {
         case 0x00:
             cpu->io.padr = val;
@@ -3640,12 +3692,29 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             break;
         case 0x24:
             cpu->io.tmsk2 = val;
+            /* The low 2 bits control the tcnt scaling */
+            switch(val & 3) {
+            case 0:
+                cpu->io.pr_tcnt.limit = 1;
+                break;
+            case 1:
+                cpu->io.pr_tcnt.limit = 4;
+                break;
+            case 2:
+                cpu->io.pr_tcnt.limit = 8;
+                break;
+            case 3:
+                cpu->io.pr_tcnt.limit = 16;
+                break;
+            }
             break;
         case 0x25:
             cpu->io.tflg2 = val;
             break;
         case 0x26:
             cpu->io.pactl = val;
+            /* Adjust the rti scaling */
+            cpu->io.rti.limit = 1 << (val & 3);
             break;
         case 0x27:
             cpu->io.pacnt = val;
@@ -3656,10 +3725,21 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
         case 0x29:
             break;
         case 0x2A:
-            cpu->io.spdr = m68hc11_spi_begin(cpu, val);
-            /* TODO */
-            /* We should really set a timer to interrupt the right number
-               of clocks later and then move the result in and flag complete */
+            /* SPI is off */
+            if (!(cpu->io.spcr & SPCR_SPE))
+                break;
+            /* Write is inhibited until the received data is read - even if
+               you just need to discard it */
+            if (cpu->io.spsr & SPSR_SPIF)
+                break;
+            /* Tell the emulator an SPI transfer is beginning */
+             m68hc11_spi_begin(cpu, val);
+            /* Flat out is E/2 */
+            cpu->io.spi_ticks = 16;
+            if (cpu->io.spcr & 1)	/* Divide by 2 */
+                cpu->io.spi_ticks <<= 1;
+            if (cpu->io.spcr & 2)	/* Divide by 8 */
+                cpu->io.spi_ticks <<= 3;
             break;
         case 0x2B:	/* Baud rate */
             cpu->io.baud = val;
@@ -3696,11 +3776,29 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
         case 0x34:
             cpu->io.adr4 = val;
             break;
+        case 0x35:
+            cpu->io.bprot = val & 0x1F;
+        case 0x36:
+            if (!cpu->io.lock)
+                return;
+            /* Not that we emulated the eeprom */
+            cpu->io.eprog = val & 0xBF;
+            break;
         case 0x39:
-            cpu->io.hprio = val;
+            if (!cpu->io.lock) {
+                val &= 0xC8;
+                val |= (cpu->io.option & 0x33);
+            }
+            cpu->io.option = val & 0xFB;
+            cpu->io.cop.limit = cop_limit[val & 3];
+            break;
+        case 0x3A:
+            if (cpu->io.coprst == 0x55 && val == 0xAA)
+                cpu->io.cop.count = 0;
+            cpu->io.coprst = val;
             break;
         case 0x3C:
-            cpu->io.option = val;
+            cpu->io.hprio = val;
             break;
         case 0x3D:
             /* Will need to be smarter as we support more CPU types */
@@ -3708,14 +3806,13 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.iobase = (val & 0x0FU) << 12;
             cpu->io.ioend = cpu->io.iobase + 0x3F;
             cpu->io.irambase = (val & 0xF0U) << 8;
-            cpu->io.iramend = cpu->io.irambase + cpu->io.iramsize;
-            printf("IO moves to %04x, IRAM to %04x\n",
-                cpu->io.iobase, cpu->io.irambase);
+            cpu->io.iramend = cpu->io.irambase + cpu->io.iramsize - 1;
             break;
         case 0x3E:
             /* This is actually test1 if we ever care */
             break;
         case 0x3F:
+            /* This does nothing to the running config in normal modes */
             cpu->io.config = val;
             break;
     }
@@ -3750,6 +3847,11 @@ uint8_t m6800_do_read(struct m6800 *cpu, uint16_t addr)
             return m68hc11_read_io(cpu, addr);
         if (addr >= cpu->io.irambase && addr <= cpu->io.iramend)
             return cpu->iram[addr];
+        if (addr >= cpu->io.erombase && addr <= cpu->io.eromend &&
+                (cpu->io.config_latch & CFG_EEON))
+            return cpu->io.eerom[addr - cpu->io.rombase];
+        if (addr >= cpu->io.rombase && (cpu->io.config_latch & CFG_ROMON))
+            return cpu->io.rom[addr - cpu->io.rombase];
         return m6800_read(cpu, addr);
 #endif        
     }
@@ -3779,6 +3881,12 @@ void m6800_do_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
         break;
 #ifdef WITH_HC11        
     case INTIO_HC11:
+        /* No emulation of writable EEROM yet */
+        if (addr >= cpu->io.rombase && (cpu->io.config_latch & CFG_ROMON))
+            return;
+        else if (addr >= cpu->io.erombase && addr <= cpu->io.eromend &&
+            (cpu->io.config_latch & CFG_EEON))
+            return;
         if (addr >= cpu->io.iobase && addr <= cpu->io.ioend)
             m68hc11_write_io(cpu, addr, val);
         else if (addr >= cpu->io.irambase && addr <= cpu->io.iramend)

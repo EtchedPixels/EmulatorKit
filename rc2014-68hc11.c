@@ -150,9 +150,13 @@ void m68hc11_port_direction(struct m6800 *cpu, int port)
 {
 }
 
-uint8_t m68hc11_spi_begin(struct m6800 *cpu, uint8_t val)
+void m68hc11_spi_begin(struct m6800 *cpu, uint8_t val)
 {
-	return 0xFF;
+}
+
+uint8_t m68hc11_spi_done(struct m6800 *cpu)
+{
+	return 0xff;
 }
 
 static int ide = 0;
@@ -501,7 +505,7 @@ int main(int argc, char *argv[])
 	cpu.type = CPU_68HC11;
 	cpu.intio = INTIO_HC11;
 	/* 68HC11E0 */
-	m68hc11e_reset(&cpu, 0);
+	m68hc11e_reset(&cpu, 0, 0, NULL, NULL);
 
 	if (trace & TRACE_CPU) {
 		fprintf(stderr, "CPU trace on.\n");
