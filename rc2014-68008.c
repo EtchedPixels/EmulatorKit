@@ -385,7 +385,7 @@ static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
         break;
     case 1:	/* If dlab = 0, then IER */
         if (uptr->dlab) {
-            uptr->ms= val;
+            uptr->ms = val;
             show_settings(uptr);
         }
         else
@@ -424,9 +424,12 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
             uart_clear_interrupt(uptr, RXDA);
             return next_char();
         }
+        return uptr->ls;
         break;
     case 1:
         /* IER */
+        if (uptr->dlab)
+	        return uptr->ms;
         return uptr->ier;
     case 2:
         /* IIR */
@@ -677,10 +680,9 @@ static void rtc_write(uint8_t val)
 	rtcst = val;
 }
 
-uint8_t mmio_read_68000(uint16_t addr)
+static uint8_t do_mmio_read_68000(uint16_t addr)
 {
-	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
+	addr &= 0xFF;
 	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
 		return acia_read(addr & 1);
 	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
@@ -700,10 +702,22 @@ uint8_t mmio_read_68000(uint16_t addr)
 	return 0xFF;
 }
 
+uint8_t mmio_read_68000(uint16_t addr)
+{
+	uint8_t r;
+	if (trace & TRACE_IO)
+		fprintf(stderr, "read %04x <- ", addr);
+	r = do_mmio_read_68000(addr);
+	if (trace & TRACE_IO)
+		fprintf(stderr, "%02x\n", r);
+	return r;
+}
+
 void mmio_write_68000(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %02x <- %02x\n", addr, val);
+		fprintf(stderr, "write %04x <- %02x\n", addr, val);
+	addr &= 0xFF;
 	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
 		acia_write(addr & 1, val);
 	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
