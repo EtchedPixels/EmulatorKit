@@ -46,8 +46,8 @@ static uint8_t wiznet = 0;
 struct ppide *ppide;
 struct rtc *rtcdev;
 
-/* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
-   rate and get 115200 baud - which is pushing it admittedly! */
+/* The CPU E clock runs at CLK/4. The RC2014 standard clock is fine
+   and makes serial rates easy */
 static uint16_t clockrate =  364/4;
 
 /* Who is pulling on the IRQ1 interrupt line */
@@ -126,8 +126,20 @@ void recalc_interrupts(void)
 
 void m6800_sci_change(struct m6800 *cpu)
 {
+	static uint_fast8_t pscale[4] = {1, 3, 4, 13 };
+	unsigned int baseclock = 7372800 / 4;	/* E clock */
+	unsigned int prescale = pscale[(cpu->io.baud >> 4) & 0x03];
+	unsigned int divider = 1 << (cpu->io.baud & 7);
+
 	/* SCI changed status - could add debug here FIXME */
-	/* FIXME: report baud */
+	if (!(trace & TRACE_UART))
+		return;
+
+	baseclock /= prescale;
+	baseclock /= divider;
+	baseclock /= 16;
+
+	fprintf(stderr, "[UART  %d baud]\n", baseclock);
 }
 
 void m6800_tx_byte(struct m6800 *cpu, uint8_t byte)
@@ -143,6 +155,8 @@ void m6800_port_output(struct m6800 *cpu, int port)
 
 uint8_t m6800_port_input(struct m6800 *cpu, int port)
 {
+	if (port == 5)
+		return 0x00;
 	return 0xFF;
 }
 
@@ -502,8 +516,6 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	cpu.type = CPU_68HC11;
-	cpu.intio = INTIO_HC11;
 	/* 68HC11E0 */
 	m68hc11e_reset(&cpu, 0, 0, NULL, NULL);
 
@@ -519,18 +531,21 @@ int main(int argc, char *argv[])
 
 	while (!done) {
 		unsigned int i;
-		/* 36400 T states for base RC2014 - varies for others */
-		for (i = 0; i < 100; i++) {
-			while(cycles < clockrate)
-				cycles += m68hc11_execute(&cpu);
-			cycles -= clockrate;
+		unsigned int j;
+			/* 36400 T states for base RC2014 - varies for others */
+		for (j = 0; j < 10; j++) {
+			for (i = 0; i < 10; i++) {
+				while(cycles < clockrate)
+					cycles += m68hc11_execute(&cpu);
+				cycles -= clockrate;
+			}
+			/* Drive the internal serial */
+			i = check_chario();
+			if (i & 1)
+				m68hc11_rx_byte(&cpu, next_char());
+			if (i & 2)
+				m68hc11_tx_done(&cpu);
 		}
-		/* Drive the internal serial */
-		i = check_chario();
-		if (i & 1)
-			m68hc11_rx_byte(&cpu, next_char());
-		if (i & 2)
-			m68hc11_tx_done(&cpu);
 		/* Wiznet timer */
 		if (wiznet)
 			w5100_process(wiz);
