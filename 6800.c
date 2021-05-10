@@ -2163,6 +2163,9 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x82:	/* SBCA immed */
         cpu->a = m6800_maths8_noh(cpu, cpu->a, data8, cpu->a - data8 - CARRY);
         return clocks;
+    case 0x1A83:	/* CPD immed16 */
+        m6800_maths16_noh(cpu, REG_D, data16, REG_D - data16);
+        return clocks;
     case 0x83:	/* SUBD immed16 */
         tmp16 = m6800_maths16_noh(cpu, REG_D, data16, REG_D - data16);
         cpu->a = tmp16 >> 8;
@@ -2245,6 +2248,11 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x92:	/* SBCA dir */
         tmp8 = m6800_do_read(cpu, data8);
         cpu->a = m6800_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8 - CARRY);
+        return clocks;
+    case 0x1A93: /* CPD dir */
+        tmp16 = m6800_do_read(cpu, data8) << 8;
+        tmp16 |= m6800_do_read(cpu, data8 + 1);
+        m6800_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
         return clocks;
     case 0x93:	/* SUBD dir */
         tmp16 = m6800_do_read(cpu, data8) << 8;
@@ -2331,6 +2339,11 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0xA2:	/* SBCA indexed */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = m6800_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8 - CARRY);
+        return clocks;
+    case 0x1AA3: /* CPD indexed */
+        tmp16 = m6800_do_read(cpu, data16) << 8;
+        tmp16 |= m6800_do_read(cpu, data16 + 1);
+        m6800_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
         return clocks;
     case 0x18A3:
     case 0xA3:	/* SUBD indexed */
@@ -2428,6 +2441,11 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0xB2:	/* SBCA extended */
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = m6800_maths8_noh(cpu, cpu->a, tmp8, cpu->a - tmp8 - CARRY);
+        return clocks;
+    case 0x1AB3: /* CPD extended */
+        tmp16 = m6800_do_read(cpu, data16) << 8;
+        tmp16 |= m6800_do_read(cpu, data16 + 1);
+        m6800_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
         return clocks;
     case 0xB3:	/* SUBD extended */
         tmp16 = m6800_do_read(cpu, data16) << 8;
@@ -3115,7 +3133,7 @@ void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint
     cpu->io.option = 0x10;	/* TODO */
     cpu->io.coprst = 0x00;
     cpu->io.pprog = 0x00;	/* TODO */
-    cpu->io.hprio = 0x06;
+    cpu->io.hprio = 0x26;	/* Expanded mode */
     cpu->io.init = 0x01;
     cpu->io.config = cfg;
     cpu->io.config_latch = cfg;
