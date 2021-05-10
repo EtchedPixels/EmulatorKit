@@ -15,9 +15,12 @@ struct  m68hc11 {
     struct prescaler cop;
 
     uint16_t lock;
+    uint16_t flags;
+#define CPUIO_HC811_CONFIG	1	/* Device has HC811 style CONFIG reg */
 
     uint8_t *eerom;
-    uint8_t *rom;
+    const uint8_t *rom;
+    const uint8_t *bootrom;
 
     /* I/O ports */
     uint16_t iobase;
@@ -131,6 +134,10 @@ struct  m68hc11 {
     uint8_t coprst;		/* We use this to hold the last write */
     uint8_t pprog;
     uint8_t hprio;
+#define HPRIO_RBOOT	0x80
+#define HPRIO_SMOD	0x40
+#define HPRIO_MDA	0x20
+#define HPRIO_IRV	0x10
     uint8_t init;
     uint8_t config;
 #define CFG_NOSEC	0x08
@@ -272,7 +279,8 @@ extern void m68hc11_tx_done(struct m6800 *cpu);
 
 /* Provided by the 6800 emulator */
 extern void m6800_reset(struct m6800 *cpu, int mode);
-extern void m68hc11e_reset(struct m6800 *cpu, int variant, uint8_t cfg, uint8_t *rom, uint8_t *eerom);
+extern void m68hc11a_reset(struct m6800 *cpu, int variant, uint8_t cfg, const uint8_t *rom, uint8_t *eerom);
+extern void m68hc11e_reset(struct m6800 *cpu, int variant, uint8_t cfg, const uint8_t *rom, uint8_t *eerom);
 extern int m6800_execute(struct m6800 *cpu);
 extern int m68hc11_execute(struct m6800 *cpu);
 extern void m6800_clear_interrupt(struct m6800 *cpu, int irq);

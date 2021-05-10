@@ -67,6 +67,64 @@
 #define CARRY	(cpu->p & P_C)
 #define HALFCARRY	(cpu->p & P_H)
 
+/* Fake a boot rom so special mode vectors work. For now our rom
+   just reports E9E9 for the part which will do for a bit */
+
+#ifdef WITH_HC11
+
+static const uint8_t dummy_bootrom[256] = {
+/* 00 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 10 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 20 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 30 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 40 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 50 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 60 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 70 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 80 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 90 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* A0 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* B0 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* C0 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* D0 */
+    0x00, 0x41, 0x00, 0x00, 0xE9, 0xE9, 0x00, 0xC4,
+    0x00, 0xC7, 0x00, 0xCA, 0x00, 0xCD, 0x00, 0xD0,
+/* E0 */
+    0x00, 0xD3, 0x00, 0xD6, 0x00, 0xD9, 0x00, 0xDC,
+    0x00, 0xDF, 0x00, 0xE2, 0x00, 0xE5, 0x00, 0xE8,
+/* F0 */
+    0x00, 0xEB, 0x00, 0xEE, 0x00, 0xF1, 0x00, 0xF4,
+    0x00, 0xF7, 0x00, 0xFA, 0x00, 0xFD, 0x00, 0x00
+};
+
+#endif
+
 /*
  *	Timing and validity table
  *
@@ -378,9 +436,9 @@ static uint8_t clock_hc11[256][4] = {
     /* 0x10 */
     { 2, 0, 0, 0 },			/* SBA */
     { 2, 0, 0, 0 },			/* CBA */
-    { 0, 0, 0, 0 },
-    { 6, 0, 0, 0 },			/* BRCLR dir */
     { 6, 0, 0, 0 },			/* BRSET dir */
+    { 6, 0, 0, 0 },			/* BRCLR dir */
+    { 6, 0, 0, 0 },			/* BSET dir */
     { 6, 0, 0, 0 },			/* BCLR dir */
     { 2, 0, 0, 0 },			/* TAB */
     { 2, 0, 0, 0 },			/* TBA */
@@ -388,7 +446,7 @@ static uint8_t clock_hc11[256][4] = {
     { 2, 0, 0, 0 },			/* DAA */
     { 0, 0, 0, 0 },
     { 2, 0, 0, 0 },			/* ABA */
-    { 0, 0, 0, 0 },
+    { 7, 7, 0, 0 },			/* BSET indexed */
     { 7, 7, 0, 0 },			/* BCLR indexed */
     { 7, 7, 0, 0 },			/* BRSET indexed */
     { 7, 7, 0, 0 },			/* BRCLR indexed */
@@ -652,8 +710,12 @@ static char *m6800_flags(struct m6800 *cpu)
 
 static void m6800_cpu_state(struct m6800 *cpu)
 {
-    fprintf(stderr, "%04X : %6s %02X|%02X %04X %04X | ",
-        cpu->pc, m6800_flags(cpu), cpu->a, cpu->b, cpu->x, cpu->s);
+    if (cpu->type == CPU_68HC11)
+        fprintf(stderr, "%04X : %6s %02X|%02X %04X %04X %04X | ",
+            cpu->pc, m6800_flags(cpu), cpu->a, cpu->b, cpu->x, cpu->y, cpu->s);
+    else
+        fprintf(stderr, "%04X : %6s %02X|%02X %04X %04X | ",
+            cpu->pc, m6800_flags(cpu), cpu->a, cpu->b, cpu->x, cpu->s);
 }
 
 static char *opmap[256] = {
@@ -1111,9 +1173,11 @@ static int m6800_vector(struct m6800 *cpu, uint16_t vector)
     int clocks = 2;
     if (cpu->wait == 0) {
         m6800_push_interrupt(cpu);
-        if (cpu->type == CPU_68HC11)
+        if (cpu->type == CPU_68HC11) {
             clocks += 12;
-        else
+            if (cpu->io.hprio & HPRIO_SMOD)
+                vector &= ~0x4000;
+        } else
             clocks += 10;
     }
     cpu->p |= P_I;
@@ -1423,8 +1487,8 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* The HC11 pushes the prefix address */
         if (cpu->type == CPU_6303 || cpu->type == CPU_68HC11) {
             /* TRAP pushes the faulting address */
-            fprintf(stderr, "illegal instruction %02X at %04X\n",
-                opcode, fetch_pc);
+            fprintf(stderr, "illegal instruction %02X:%02X at %04X\n",
+                opcode, m6800_do_read(cpu, fetch_pc + 1), fetch_pc);
             cpu->pc = fetch_pc;
             if (cpu->type == CPU_6303)
                 m6800_vector(cpu, 0xFFEE);
@@ -2967,8 +3031,6 @@ void m6800_reset(struct m6800 *cpu, int mode)
     memset(cpu, 0, sizeof(*cpu));
 
     cpu->p = P_I;
-    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
-    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
     cpu->ramcr = RAMCR_RAME;	/* Internal RAM on FIXME check */
     cpu->tcsr = 0;
     cpu->counter = 0;	/* Really this is E clocks after reset FIXME */
@@ -2979,6 +3041,8 @@ void m6800_reset(struct m6800 *cpu, int mode)
     cpu->p2ddr = 0;
     cpu->p1ddr = 0;
     cpu->iram_base = 0x80;	/* We don't yet emulate X/Y1 CPUs */
+    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
+    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
 }
 
 #ifdef WITH_HC11
@@ -3085,7 +3149,7 @@ int m68hc11_execute(struct m6800 *cpu)
     return cycles;
 }
 
-void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint8_t *eerom)
+void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, const uint8_t *rom, uint8_t *eerom)
 {
     memset(cpu, 0, sizeof(*cpu));
 
@@ -3093,11 +3157,9 @@ void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint
     cpu->intio = INTIO_HC11;
 
     cpu->p = P_I;
-    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
-    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
-
     cpu->io.rom = rom;
     cpu->io.eerom = eerom;
+    cpu->io.bootrom = dummy_bootrom;
 
     cpu->io.padr = 0x8F;
     cpu->io.pioc = 0x03;
@@ -3154,11 +3216,9 @@ void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint
     /* Internal EEROM/EPROM/ROM is not yet modelled */
     case 9:	/* As 1 with 12K of ROM or EPROM */
         cpu->io.rombase = 0xD000;
-        break;
     case 1:	/* 68HC11E1, 512 bytes IRAM, 512 bytes EEPROM */
         cpu->io.erombase = 0xB600;
         cpu->io.eromend = 0xB7FF;
-        break;
     case 0:	/* 68HC11E0, 512 bytes IRAM no ROM/EPROM/EEPROM */
         cpu->io.iramend = cpu->io.iramsize = 512;
         break;
@@ -3172,11 +3232,101 @@ void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint
         /* The EEPROM location is configurable */
         cpu->io.erombase = 0x0800 + ((cfg & 0xF0) << 8);
         cpu->io.eromend = 0x0FFF + ((cfg & 0xF0) << 8);
+        cpu->io.flags |= CPUIO_HC811_CONFIG;
         break;
     default:
         fprintf(stderr, "Invalid 68HC11E variant.\n");
         exit(1);
     }    
+
+    cpu->io.lock = 64;		/* Some stuff locks after 64 cycles */
+
+    /* Must be last so the CPU config is correct for things like internal ROM */
+    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
+    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
+
+}
+
+void m68hc11a_reset(struct m6800 *cpu, int type, uint8_t cfg, const uint8_t *rom, uint8_t *eerom)
+{
+    memset(cpu, 0, sizeof(*cpu));
+
+    cpu->type = CPU_68HC11;
+    cpu->intio = INTIO_HC11;
+
+    cpu->p = P_I;
+    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
+    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
+
+    cpu->io.rom = rom;
+    cpu->io.eerom = eerom;
+    cpu->io.bootrom = dummy_bootrom;
+
+    cpu->io.padr = 0x8F;
+    cpu->io.pioc = 0x03;
+    cpu->io.ddrc = 0x00;
+    cpu->io.pddr = 0xFF;
+    cpu->io.ddrd = 0x00;
+    cpu->io.pedr = 0x00;
+    cpu->io.oc1m = 0x00;
+    cpu->io.oc1d = 0x00;
+    cpu->io.tcnt = 0x00;
+    cpu->io.toc1 = 0xFFFF;
+    cpu->io.toc2 = 0xFFFF;
+    cpu->io.toc3 = 0xFFFF;
+    cpu->io.toc4 = 0xFFFF;
+    cpu->io.toc5 = 0xFFFF;
+    cpu->io.tctl1 = 0x00;
+    cpu->io.tctl2 = 0x00;
+    cpu->io.tmsk1 = 0x00;
+    cpu->io.tmsk2 = 0x00;
+    cpu->io.tflg1 = 0x00;
+    cpu->io.tflg2 = 0x00;
+    cpu->io.pactl = 0x00;
+    cpu->io.pacnt = 0x00;
+    cpu->io.spcr = 0x04;
+    cpu->io.spsr = 0x00;
+    cpu->io.baud = 0x00;
+    cpu->io.sccr1 = 0xC0;
+    cpu->io.sccr2 = 0x00;
+    cpu->io.scsr = 0xC0;
+    cpu->io.adctl = 0x00;
+    cpu->io.bprot = 0x1F;
+    cpu->io.eprog = 0x00;
+    cpu->io.option = 0x10;	/* TODO */
+    cpu->io.coprst = 0x00;
+    cpu->io.pprog = 0x00;	/* TODO */
+    cpu->io.hprio = 0x26;	/* Expanded mode */
+    cpu->io.init = 0x01;
+    cpu->io.config = cfg;
+    cpu->io.config_latch = cfg;
+
+    cpu->io.pr_tcnt.count = 0;
+    cpu->io.pr_tcnt.limit = 1;	/* tmsk2 starts 0 so we start divide by 1 */
+    cpu->io.e13.count = 0;
+    cpu->io.e13.limit = 16384;	/* 2^13 divider */
+    cpu->io.rti.count = 0;
+    cpu->io.rti.limit = 1;	/* pactl starts 0 so we start divide by 1 */
+    cpu->io.cop.count = 0;
+    cpu->io.cop.limit = 4;	/* Default is by 4 */
+
+    cpu->io.iobase = 0x1000;
+    cpu->io.ioend = 0x103f;
+    cpu->io.irambase = 0;
+    switch(type) {
+    /* Internal EEROM/EPROM/ROM is not yet modelled */
+    case 8:	/* As 1 with 12K of ROM or EPROM */
+        cpu->io.rombase = 0xE000;
+    case 1:	/* 68HC11A1, 256 bytes IRAM, 256 bytes EEPROM */
+        cpu->io.erombase = 0xB600;
+        cpu->io.eromend = 0xB6FF;
+    case 0:	/* 68HC11A0, 256 bytes IRAM no ROM/EPROM/EEPROM */
+        cpu->io.iramend = cpu->io.iramsize = 256;
+        break;
+    default:
+        fprintf(stderr, "Invalid 68HC11A variant.\n");
+        exit(1);
+    }
 
     cpu->io.lock = 64;		/* Some stuff locks after 64 cycles */
 }
@@ -3483,6 +3633,7 @@ static uint8_t m68hc11_read_io(struct m6800 *cpu, uint8_t addr)
         case 0x08:	/* Port D */
             val = m6800_port_input(cpu, 4) & ~cpu->io.ddrd;
             val |= cpu->io.pddr & cpu->io.ddrd;
+            val &= 0x3F;
             return val;
         case 0x09:
             return cpu->io.ddrd;
@@ -3716,6 +3867,10 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.tflg1 = val;
             break;
         case 0x24:
+            if (!cpu->io.lock && !(cpu->io.hprio & HPRIO_SMOD)) {
+                val &= ~3;
+                val |= cpu->io.tmsk2 & 3;
+            }
             cpu->io.tmsk2 = val;
             /* The low 2 bits control the tcnt scaling */
             switch(val & 3) {
@@ -3802,6 +3957,8 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.adr4 = val;
             break;
         case 0x35:
+            if (!cpu->io.lock && !(cpu->io.hprio & HPRIO_SMOD))
+                val |= cpu->io.bprot;
             cpu->io.bprot = val & 0x1F;
         case 0x36:
             if (!cpu->io.lock)
@@ -3810,7 +3967,7 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.eprog = val & 0xBF;
             break;
         case 0x39:
-            if (!cpu->io.lock) {
+            if (!cpu->io.lock && !(cpu->io.hprio & HPRIO_SMOD)) {
                 val &= 0xC8;
                 val |= (cpu->io.option & 0x33);
             }
@@ -3823,10 +3980,20 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.coprst = val;
             break;
         case 0x3C:
+            /* Cannot write with interrupts unmasked */
+            if (!(cpu->p & P_I))
+                break;
+            /* Cannot set RBOOT without SMOD, cannot set SMOD once clear */
+            /* Cannot change MDA without SMOD */
+            if (!(cpu->io.hprio & HPRIO_SMOD)) {
+                val &= ~(HPRIO_RBOOT|HPRIO_SMOD|HPRIO_MDA);
+                val |= cpu->io.hprio & HPRIO_MDA;
+            }
             cpu->io.hprio = val;
             break;
         case 0x3D:
-            /* Will need to be smarter as we support more CPU types */
+            if (!cpu->io.lock && !(cpu->io.hprio & HPRIO_SMOD))
+                return;
             cpu->io.init = val;
             cpu->io.iobase = (val & 0x0FU) << 12;
             cpu->io.ioend = cpu->io.iobase + 0x3F;
@@ -3838,7 +4005,17 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             break;
         case 0x3F:
             /* This does nothing to the running config in normal modes */
-            cpu->io.config = val;
+            if (cpu->io.flags & CPUIO_HC811_CONFIG)
+                cpu->io.config = val;
+            else
+                cpu->io.config = val & 0x0F;
+            if (cpu->io.hprio & 0x40) {
+                cpu->io.config_latch = cpu->io.config;
+                if (cpu->io.flags & CPUIO_HC811_CONFIG) {
+                    cpu->io.erombase = 0x0800 + ((cpu->io.config & 0xF0) << 8);
+                    cpu->io.eromend = 0x0FFF + ((cpu->io.config & 0xF0) << 8);
+                }
+            }
             break;
     }
 }
@@ -3875,6 +4052,8 @@ uint8_t m6800_do_read(struct m6800 *cpu, uint16_t addr)
         if (addr >= cpu->io.erombase && addr <= cpu->io.eromend &&
                 (cpu->io.config_latch & CFG_EEON))
             return cpu->io.eerom[addr - cpu->io.rombase];
+        if (addr >= 0xBF00 && addr <= 0xBFFF && (cpu->io.hprio & HPRIO_RBOOT))
+            return cpu->io.bootrom[addr & 0xFF];
         if (addr >= cpu->io.rombase && (cpu->io.config_latch & CFG_ROMON))
             return cpu->io.rom[addr - cpu->io.rombase];
         return m6800_read(cpu, addr);
@@ -3916,6 +4095,8 @@ void m6800_do_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
             m68hc11_write_io(cpu, addr, val);
         else if (addr >= cpu->io.irambase && addr <= cpu->io.iramend)
             cpu->iram[addr] = val;
+        else if (addr >= 0xBF00 && addr <= 0xBFFF && (cpu->io.hprio & HPRIO_RBOOT))
+            return;
         else
             m6800_write(cpu, addr, val);
         break;
@@ -3948,9 +4129,14 @@ uint8_t m6800_do_debug_read(struct m6800 *cpu, uint16_t addr)
             return 0xff;
         if (addr >= cpu->io.irambase && addr <= cpu->io.iramend)
             return cpu->iram[addr];
+        if (addr >= cpu->io.erombase && addr <= cpu->io.eromend &&
+                (cpu->io.config_latch & CFG_EEON))
+            return cpu->io.eerom[addr - cpu->io.erombase];
+        if (addr >= 0xBF00 && addr <= 0xBFFF && (cpu->io.hprio & HPRIO_RBOOT))
+            return cpu->io.bootrom[addr & 0xFF];
+        if (addr >= cpu->io.rombase && (cpu->io.config_latch & CFG_ROMON))
+            return cpu->io.rom[addr - cpu->io.rombase];
         return m6800_read(cpu, addr);
 #endif        
     }
 }
-
-
