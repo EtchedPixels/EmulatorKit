@@ -32,6 +32,8 @@
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
+static uint8_t monitor[12288];		/* Monitor ROM - usually Buffalo */
+static uint8_t eerom[2048];		/* EEROM - not properly emulated yet */
 
 static unsigned int bankreg[4];
 static uint8_t bankenable;
@@ -70,6 +72,8 @@ static volatile int done;
 #define TRACE_CPU	128
 #define TRACE_IRQ	256
 #define TRACE_UART	512
+#define TRACE_SD	1024
+#define TRACE_SPI	2048
 
 static int trace = 0;
 
@@ -147,10 +151,179 @@ void m6800_tx_byte(struct m6800 *cpu, uint8_t byte)
 	write(1, &byte, 1);
 }
 
+/* Minimal SD card emulation (needs extracting into generic code */
+
+static int sd_mode = 0;
+static int sd_cmdp = 0;
+static int sd_ext = 0;
+static uint8_t sd_cmd[6];
+static uint8_t sd_in[520];
+static int sd_inlen, sd_inp;
+static uint8_t sd_out[520];
+static int sd_outlen, sd_outp;
+static int sd_fd = -1;
+static off_t sd_lba;
+static int sd_stuff;
+static uint8_t sd_poststuff;
+static const uint8_t sd_csd[17] = {
+
+	0xFE,		/* Sync byte before CSD */
+	/* Taken from a Toshiba 64MB card c/o softgun */
+	0x00, 0x2D, 0x00, 0x32,
+	0x13, 0x59, 0x83, 0xB1,
+	0xF6, 0xD9, 0xCF, 0x80,
+	0x16, 0x40, 0x00, 0x00
+};
+
+static uint8_t sd_process_command(void)
+{
+	if (sd_ext) {
+		sd_ext = 0;
+		switch(sd_cmd[0]) {
+		default:
+			return 0xFF;
+		}
+	}
+	if (trace & TRACE_SD)
+		fprintf(stderr, "Command received %x\n", sd_cmd[0]);
+	sd_stuff = 2 + (rand() & 7);
+	switch(sd_cmd[0]) {
+	case 0x40+0:		/* CMD 0 */
+		return 0x01;	/* Just respond 0x01 */
+	case 0x40+1:		/* CMD 1 - leave idle */
+		return 0x00;	/* Immediately indicate we did */
+	case 0x40+9:		/* CMD 9 - read the CSD */
+		memcpy(sd_out,sd_csd, 17);
+		sd_outlen = 17;
+		sd_outp = 0;
+		sd_mode = 2;
+		return 0x00;
+	case 0x40+16:		/* CMD 16 - set block size */
+		/* Should check data is 512 !! FIXME */
+		return 0x00;	/* Sure */
+	case 0x40+17:		/* Read */
+		sd_outlen = 514;
+		sd_outp = 0;
+		/* Sync mark then data */
+		sd_out[0] = 0xFF;
+		sd_out[1] = 0xFE;
+		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
+			16777216 * sd_cmd[1];
+		if (trace & TRACE_SD)
+			fprintf(stderr, "Read LBA %lx\n", (long)sd_lba);
+		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 || read(sd_fd, sd_out + 2, 512) != 512) {
+			if (trace & TRACE_SD)
+				fprintf(stderr, "Read LBA failed.\n");
+			return 0x01;
+		}
+		sd_mode = 2;
+		/* Result */
+		return 0x00;
+	case 0x40+24:		/* Write */
+		/* Will send us FE data FF FF */
+		if (trace & TRACE_SD)
+			fprintf(stderr, "Write LBA %lx\n", (long)sd_lba);
+		sd_inlen = 514;	/* Data FF FF */
+		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
+			16777216 * sd_cmd[1];
+		sd_inp = 0;
+		sd_mode = 4;	/* Send a pad then go to mode 3 */
+		return 0x00;	/* The expected OK */
+	case 0x40+55:
+		sd_ext = 1;
+		return 0x01;
+	default:
+		return 0x7F;
+	}
+}
+
+static uint8_t sd_process_data(void)
+{
+	switch(sd_cmd[0]) {
+	case 0x40+24:		/* Write */
+		sd_mode = 0;
+		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 ||
+			write(sd_fd, sd_in, 512) != 512) {
+			if (trace & TRACE_SD)
+				fprintf(stderr, "Write failed.\n");
+			return 0x1E;	/* Need to look up real values */
+		}
+		return 0x05;	/* Indicate it worked */
+	default:
+		sd_mode = 0;
+		return 0xFF;
+	}
+}
+
+static uint8_t sd_card_byte(uint8_t in)
+{
+	/* No card present */
+	if (sd_fd == -1)
+		return 0xFF;
+
+	/* Stuffing on commands */
+	if (sd_stuff) {
+		if (--sd_stuff)
+			return 0xFF;
+		return sd_poststuff;
+	}
+
+	if (sd_mode == 0) {
+		if (in != 0xFF) {
+			sd_mode = 1;	/* Command wait */
+			sd_cmdp = 1;
+			sd_cmd[0] = in;
+		}
+		return 0xFF;
+	}
+	if (sd_mode == 1) {
+		sd_cmd[sd_cmdp++] = in;
+		if (sd_cmdp == 6) {	/* Command complete */
+			sd_cmdp = 0;
+			sd_mode = 0;
+			/* Reply with either a stuff byte (CMD12) or a
+			   status */
+			sd_poststuff = sd_process_command();
+			return 0xFF;
+		}
+		/* Keep talking */
+		return 0xFF;
+	}
+	/* Writing out the response */
+	if (sd_mode == 2) {
+		if (sd_outp + 1 == sd_outlen)
+			sd_mode = 0;
+		return sd_out[sd_outp++];
+	}
+	/* Commands that need input blocks first */
+	if (sd_mode == 3) {
+		sd_in[sd_inp++] = in;
+		if (sd_inp == sd_inlen)
+			return sd_process_data();
+		/* Keep sending */
+		return 0xFF;
+	}
+	/* Sync up before data flow starts */
+	if (sd_mode == 4) {
+		/* Sync */
+		if (in == 0xFE)
+			sd_mode = 3;
+		return 0xFF;
+	}
+	return 0xFF;
+}
+
+static void sd_raise_cs(void)
+{
+	sd_mode = 0;
+}
+
 /* I/O ports: nothing for now */
 
 void m6800_port_output(struct m6800 *cpu, int port)
 {
+	if (port == 4 && (cpu->io.pddr & 0x20))
+		sd_raise_cs();
 }
 
 uint8_t m6800_port_input(struct m6800 *cpu, int port)
@@ -164,13 +337,25 @@ void m68hc11_port_direction(struct m6800 *cpu, int port)
 {
 }
 
+static uint8_t spi_rxbyte;
+
+/* Should fix this to model whether D bit 5 is assigned as GPIO */
+
 void m68hc11_spi_begin(struct m6800 *cpu, uint8_t val)
 {
+	spi_rxbyte = 0xFF;
+	if (!(cpu->io.pddr & 0x20)) {
+		if (trace & TRACE_SPI)
+			fprintf(stderr, "SPI -> %02X\n", val);
+		spi_rxbyte = sd_card_byte(val);
+		if (trace & TRACE_SPI)
+			fprintf(stderr, "SPI <- %02X\n", spi_rxbyte);
+	}
 }
 
 uint8_t m68hc11_spi_done(struct m6800 *cpu)
 {
-	return 0xff;
+	return spi_rxbyte;
 }
 
 static int ide = 0;
@@ -367,7 +552,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-6303: [-b] [-f] [-R] [-r rompath] [-i idepath] [-p ppidepath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-68hc11: [-b] [-f] [-R] [-r rom] [-i idedisk] [-S sdcard] [-m monitor] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -378,10 +563,12 @@ int main(int argc, char *argv[])
 	int fd;
 	int rom = 1;
 	char *rompath = "rc2014-68hc11.rom";
+	char *monpath = NULL;
 	char *idepath;
+	char *sdpath = NULL;
 	unsigned int cycles = 0;
 
-	while ((opt = getopt(argc, argv, "1abBd:fi:I:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:fi:I:r:RS:m:w")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -413,8 +600,14 @@ int main(int argc, char *argv[])
 		case 'R':
 			rtc = 1;
 			break;
+		case 'S':
+			sdpath = optarg;
+			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 'm':
+			monpath = optarg;
 			break;
 		default:
 			usage();
@@ -439,6 +632,26 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		close(fd);
+	}
+	if (monpath) {
+		fd = open(monpath, O_RDONLY);
+		if (fd == -1) {
+			perror(monpath);
+			exit(EXIT_FAILURE);
+		}
+		if (read(fd, monitor, 12288) != 12288) {
+			fprintf(stderr, "rc2014-68hc11: short monitor '%s'.\n", monpath);
+			exit(EXIT_FAILURE);
+		}
+		close(fd);
+	}
+
+	if (sdpath) {
+		sd_fd = open(sdpath, O_RDWR);
+		if (sd_fd == -1) {
+			perror(sdpath);
+			exit(1);
+		}
 	}
 
 	if (bank512 || bankhigh) {
@@ -516,8 +729,11 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	/* 68HC11E0 */
-	m68hc11e_reset(&cpu, 0, 0, NULL, NULL);
+	/* 68HC11E variants */
+	if (monpath) /* 68HC11E9 with EEROM and ROM */
+		m68hc11e_reset(&cpu, 9, 0x03, monitor, eerom);
+	else	/* 68HC11E0 for now */
+		m68hc11e_reset(&cpu, 0, 0, NULL, NULL);
 
 	if (trace & TRACE_CPU) {
 		fprintf(stderr, "CPU trace on.\n");
