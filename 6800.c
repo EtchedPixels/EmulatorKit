@@ -3055,6 +3055,11 @@ int m68hc11_execute(struct m6800 *cpu)
     else
         cycles += m6800_execute_one(cpu);
 
+    /* The timers do not run if you halt with interrupts off waiting for
+       an XIRQ. They do run if you wait with interrupts on */
+    if (cpu->wait && (cpu->p & P_I))
+        return cycles;
+
     /* Run the timers for these E cycles */
     for (i = 0; i < cycles; i++)
         m68hc11_e_clock(cpu);
