@@ -3071,6 +3071,9 @@ void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint
 {
     memset(cpu, 0, sizeof(*cpu));
 
+    cpu->type = CPU_68HC11;
+    cpu->intio = INTIO_HC11;
+
     cpu->p = P_I;
     cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
     cpu->pc |= m6800_do_read(cpu, 0xFFFF);
@@ -3156,7 +3159,6 @@ void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, uint8_t *rom, uint
         fprintf(stderr, "Invalid 68HC11E variant.\n");
         exit(1);
     }    
-    cpu->intio = INTIO_HC11;
 
     cpu->io.lock = 64;		/* Some stuff locks after 64 cycles */
 }
