@@ -1396,7 +1396,7 @@ static char *opmap_11[256] = {
 
 static void m6800_disassemble(struct m6800 *cpu, uint16_t pc)
 {
-    uint8_t op = m6800_read(cpu, pc++);
+    uint8_t op = m6800_do_debug_read(cpu, pc++);
     uint16_t data;
     uint16_t addr;
     int pcontent = 0;
@@ -1410,10 +1410,10 @@ static void m6800_disassemble(struct m6800 *cpu, uint16_t pc)
         page2 = 0;
         if (op == 0x18) {
             page2 = 1;
-            op = m6800_read(cpu, pc++);
+            op = m6800_do_debug_read(cpu, pc++);
             x = opmap_11[op];
         } else if (op == 0x1A) {
-            op = m6800_read(cpu, pc++);
+            op = m6800_do_debug_read(cpu, pc++);
             switch(op) {
             case 0x83:
                 x = "CPD #ii";
@@ -1440,7 +1440,8 @@ static void m6800_disassemble(struct m6800 *cpu, uint16_t pc)
                 x = NULL;
             }
         } else if (op == 0xCD) {
-            op = m6800_read(cpu, pc++);
+            page2 = 1;
+            op = m6800_do_debug_read(cpu, pc++);
             switch(op) {
             case 0xA3:
                 x = "CPD x2,Y";
@@ -1501,7 +1502,10 @@ static void m6800_disassemble(struct m6800 *cpu, uint16_t pc)
             /* Indexed */
             addr = m6800_do_debug_read(cpu, pc++);
             fprintf(stderr, "%02X", addr);
-            addr += cpu->x;
+            if (page2 == 1)
+                addr += cpu->y;
+            else
+                addr += cpu->x;
             pcontent = 1;
         } else if (*x == 'i')
             fprintf(stderr, "%02X", m6800_do_debug_read(cpu, pc++));
@@ -4546,7 +4550,7 @@ uint8_t m6800_do_debug_read(struct m6800 *cpu, uint16_t addr)
             return cpu->io.bootrom[addr & 0xFF];
         if (addr >= cpu->io.rombase && (cpu->io.config_latch & CFG_ROMON))
             return cpu->io.rom[addr - cpu->io.rombase];
-        return m6800_read(cpu, addr);
+        return m6800_debug_read(cpu, addr);
 #endif        
     }
 }
