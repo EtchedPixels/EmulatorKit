@@ -2804,6 +2804,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         tmp16 |= m6800_do_read(cpu, data16 + 1);
         m6800_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
         return clocks;
+    case 0xCDA3: /* CPD indexed,Y */
+        tmp16 = m6800_do_read(cpu, data16) << 8;
+        tmp16 |= m6800_do_read(cpu, data16 + 1);
+        tmp16 = m6800_maths16_noh(cpu, REG_D, tmp16, REG_D - tmp16);
+        return clocks;
     case 0x18A3:
     case 0xA3:	/* SUBD indexed */
         tmp16 = m6800_do_read(cpu, data16) << 8;
@@ -3120,6 +3125,10 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->x |= m6800_do_read(cpu, data8 + 1);
         m6800_logic16(cpu, cpu->x);
         return clocks;
+    case 0x18DF: /* STY direct */
+        m6800_do_write(cpu, data8, cpu->y >> 8);
+        m6800_do_write(cpu, data8 + 1, cpu->y);
+        return clocks;
     case 0xDF: /* STX direct */
         m6800_do_write(cpu, data8, cpu->x >> 8);
         m6800_do_write(cpu, data8 + 1, cpu->x);
@@ -3140,6 +3149,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         tmp8 = m6800_do_read(cpu, data16);
         cpu->b = m6800_maths8_noh(cpu, cpu->b, tmp8, cpu->b - tmp8 - CARRY);
         return clocks;
+    case 0x18E3:/* ADDD index,Y */
     case 0xE3:	/* ADDD indexed */
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
