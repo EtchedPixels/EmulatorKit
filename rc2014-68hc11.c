@@ -45,6 +45,8 @@ static uint8_t rtc;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 
+static uint8_t protlow, prothi;
+
 struct ppide *ppide;
 struct rtc *rtcdev;
 
@@ -79,11 +81,15 @@ static int trace = 0;
 
 struct m6800 cpu;
 
+static uint16_t lastch = 0xFFFF;
+
 int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
 	unsigned int r = 0;
+	char c;
+
 
 	FD_ZERO(&i);
 	FD_SET(0, &i);
@@ -98,8 +104,19 @@ int check_chario(void)
 		perror("select");
 		exit(1);
 	}
-	if (FD_ISSET(0, &i))
+	if (FD_ISSET(0, &i)) {
 		r |= 1;
+		if (lastch == 0xFFFF) {
+			if (read(0, &c, 1) == 1)
+				lastch = c;
+			if (c == ('V' & 31)) {
+				cpu.debug ^= 1;
+				fprintf(stderr, "CPUTRACE now %d\n", cpu.debug);
+				lastch = 0xFFFF;
+				r &= ~1;
+			}
+		}
+	}
 	if (FD_ISSET(1, &o))
 		r |= 2;
 	return r;
@@ -107,11 +124,8 @@ int check_chario(void)
 
 unsigned int next_char(void)
 {
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
+	char c = lastch;
+	lastch = 0xFFFF;
 	if (c == 0x0A)
 		c = '\r';
 	return c;
@@ -430,7 +444,11 @@ void m6800_outport(uint8_t addr, uint8_t val)
 	else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
-	} else if (trace & TRACE_UNK)
+	} else if (addr == 0xFC)
+		protlow = val;
+	else if (addr == 0xFB)
+		prothi = val;
+	else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
@@ -489,6 +507,11 @@ void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 		m6800_outport(addr & 0xFF, val);
 		return;
 	}
+	if (protlow && addr >> 8 >= protlow && addr >> 8 < prothi) {
+		fprintf(stderr, "MMU fault %04x %04x\n",
+			cpu->pc, addr);
+	}
+
 	if (bankhigh) {
 		uint8_t reg = mmureg;
 		uint8_t higha;
@@ -735,10 +758,8 @@ int main(int argc, char *argv[])
 	else	/* 68HC11E0 for now */
 		m68hc11e_reset(&cpu, 0, 0, NULL, NULL);
 
-	if (trace & TRACE_CPU) {
-		fprintf(stderr, "CPU trace on.\n");
+	if (trace & TRACE_CPU)
 		cpu.debug = 1;
-	}
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
@@ -748,7 +769,7 @@ int main(int argc, char *argv[])
 	while (!done) {
 		unsigned int i;
 		unsigned int j;
-			/* 36400 T states for base RC2014 - varies for others */
+		/* 36400 T states for base RC2014 - varies for others */
 		for (j = 0; j < 10; j++) {
 			for (i = 0; i < 10; i++) {
 				while(cycles < clockrate)
