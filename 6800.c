@@ -1056,6 +1056,344 @@ static char *opmap[256] = {
     "STX e2"
 };
 
+static char *opmap_11[256] = {
+    /* 0x00 */
+    "TEST",
+    "NOP",
+    "IDIV",
+    "EDIV",
+
+    "LSRD",
+    "ASLD",
+    "TAP",
+    "TPA",
+
+    "INy",
+    "DEy",
+    "CLV",
+    "SEV",
+
+    "CLC",
+    "SEC",
+    "CLI",
+    "SEI",
+
+    /* 0x10 */
+    "SBA",
+    "CBA",
+    "BRSET",
+    "BRCLR",
+
+    "BSET",
+    "BCLR",
+    "TAB",
+    "TBA",
+
+    "PAGE2",
+    "DAA",
+    "PAGE3",
+    "ABA",
+
+    "BSET",
+    "BCLR",
+    "BRSET",
+    "BRCLR",
+
+    /* 0x20 */
+    "BRA b",
+    "BRN b",
+    "BHI b",
+    "BLS b",
+
+    "BCC b",
+    "BCS b",
+    "BNE b",
+    "BEQ b",
+
+    "BVC b",
+    "BVS b",
+    "BPL b",
+    "BMI b",
+
+    "BGE b",
+    "BLT b",
+    "BGT b",
+    "BLE b",
+
+    /* 0x30 */
+    "TSy",
+    "INS",
+    "PULA",
+    "PULB",
+
+    "DES",
+    "TyS",
+    "PSHA",
+    "PSHB",
+
+    "PULy",
+    "RTS",
+    "ABy",
+    "RTI",
+
+    "PSHy",
+    "MUL",
+    "WAI",
+    "SWI",
+
+    /* 0x40 */
+    "NEGA",
+    NULL,
+    NULL,
+    "COMA",
+
+    "LSRA",
+    NULL,
+    "RORA",
+    "ASRA",
+
+    "ASLA",
+    "ROLA",
+    "DECA",
+    NULL,
+
+    "INCA",
+    "TSTA",
+    "T(HCF)",
+    "CLRA",
+
+    /* 0x50 */
+    "NEGB",
+    NULL,
+    NULL,
+    "COMB",
+
+    "LSRB",
+    NULL,
+    "RORB",
+    "ASRB",
+
+    "ASLB",
+    "ROLB",
+    "DECB",
+    NULL,
+
+    "INCB",
+    "TSTB",
+    "T(HCF)",
+    "CLRB",
+
+    /* 0x60 */
+    "NEG x,y",
+    NULL,
+    NULL,
+    "COM x,y",
+
+    "LSR x,y",
+    NULL,
+    "ROR x,y",
+    "ASR x,y",
+
+    "ASL x,y",
+    "ROL x,y",
+    "DEC x,y",
+    NULL,
+
+    "INC x,y",
+    "TST x,y",
+    "JMP x,y0",
+    "CLR x,y",
+
+    /* 0x70 */
+    "NEG e",
+    NULL,
+    NULL,
+    "COM e",
+
+    "LSR e",
+    NULL,
+    "ROR e",
+    "ASR e",
+
+    "ASL e",
+    "ROL e",
+    "DEC e",
+    NULL,
+
+    "INC e",
+    "TST e",
+    "JMP e0",
+    "CLR e",
+
+    /* 0x80 */
+    "SUBA #i",
+    "CMPA #i",
+    "SBCA #i",
+    "SUBD #ii",
+
+    "ANDA #i",
+    "BITA #i",
+    "LDAA #i",
+    NULL,
+
+    "EORA #i",
+    "ADCA #i",
+    "ORAA #i",
+    "ADDA #i",
+
+    "CPy #ii",
+    "BSR b",
+    "LDS #ii",
+    "XGDy",
+
+    /* 0x90 */
+    "SUBA d",
+    "CMPA d",
+    "SBCA d",
+    "SUBD d2",
+
+    "ANDA d",
+    "BITA d",
+    "LDAA d",
+    "STAA d",
+
+    "EORA d",
+    "ADCA d",
+    "ORAA d",
+    "ADDA d",
+
+    "CPy d2",
+    "JSR d0",
+    "LDS d2",
+    "STS d2",
+
+    /* 0xA0 */
+    "SUBA x,y",
+    "CMPA x,y",
+    "SBCA x,y",
+    "SUBD x,y",
+
+    "ANDA x,y",
+    "BITA x,y",
+    "LDAA x,y",
+    "STAA x,y",
+
+    "EORA x,y",
+    "ADCA x,y",
+    "ORAA x,y",
+    "ADDA x,y",
+
+    "CPy x,y2",
+    "JSR x,y0",
+    "LDS x,y2",
+    "STS x,y2",
+
+    /* 0xB0 */
+    "SUBA e",
+    "CMPA e",
+    "SBCA e",
+    "SUBD e",
+
+    "ANDA e",
+    "BITA e",
+    "LDAA e",
+    "STAA e",
+
+    "EORA e",
+    "ADCA e",
+    "ORAA e",
+    "ADDA e",
+
+    "CPy e2",
+    "JSR e0",
+    "LDS e2",
+    "STS e2",
+
+    /* 0xC0 */
+    "SUBB #i",
+    "CMPB #i",
+    "SBCB #i",
+    "ADDD #ii",
+
+    "ANDB #i",
+    "BITB #i",
+    "LDAB #i",
+    NULL,
+
+    "EORB #i",
+    "ADCB #i",
+    "ORAB #i",
+    "ADDB #i",
+
+    "LDD #ii",
+    "PAGE4",
+    "LDy #ii",
+    "STOP",
+
+    /* 0xD0 */
+    "SUBB d",
+    "CMPB d",
+    "SBCB d",
+    "ADDD d2",
+
+    "ANDB d",
+    "BITB d",
+    "LDAB d",
+    "STAB d",
+
+    "EORB d",
+    "ADCB d",
+    "ORAB d",
+    "ADDB d",
+
+    "LDD d2",
+    "STD d2",
+    "LDy d2",
+    "STy d2",
+
+    /* 0xE0 */
+    "SUBB x,y",
+    "CMPB x,y",
+    "SBCB x,y",
+    "ADDD x,y",
+
+    "ANDB x,y",
+    "BITB x,y",
+    "LDAB x,y",
+    "STAB x,y",
+
+    "EORB x,y",
+    "ADCB x,y",
+    "ORAB x,y",
+    "ADDB x,y",
+
+    "LDD x,y2",
+    "STD x,y2",
+    "LDX x,y2",
+    "STX x,y2",
+
+    /* 0xF0 */
+    "SUBB e",
+    "CMPB e",
+    "SBCB e",
+    "ADDD e",
+
+    "ANDB e",
+    "BITB e",
+    "LDAB e",
+    "STAB e",
+
+    "EORB e",
+    "ADCB e",
+    "ORAB e",
+    "ADDB e",
+
+    "LDD e2",
+    "STD e2",
+    "LDy e2",
+    "STy e2"
+};
+
 static void m6800_disassemble(struct m6800 *cpu, uint16_t pc)
 {
     uint8_t op = m6800_read(cpu, pc++);
@@ -1063,9 +1401,67 @@ static void m6800_disassemble(struct m6800 *cpu, uint16_t pc)
     uint16_t addr;
     int pcontent = 0;
     int ppair = 0;
-    char *x = opmap[op];
+    int page2;
+    char *x = NULL;
 
     m6800_cpu_state(cpu);
+
+    if (cpu->type == CPU_68HC11) {
+        page2 = 0;
+        if (op == 0x18) {
+            page2 = 1;
+            op = m6800_read(cpu, pc++);
+            x = opmap_11[op];
+        } else if (op == 0x1A) {
+            op = m6800_read(cpu, pc++);
+            switch(op) {
+            case 0x83:
+                x = "CPD #ii";
+                break;
+            case 0x93:
+                x = "CPD d";
+                break;
+            case 0xA3:
+                x = "CPD x2,X";
+                break;
+            case 0xB3:
+                x = "CPD e2";
+                break;
+            case 0xAC:
+                x = "CPY x2,X";
+                break;
+            case 0xEE:
+                x = "LDY x2,X";
+                break;
+            case 0xEF:
+                x = "STY x2,X";
+                break;
+            default:
+                x = NULL;
+            }
+        } else if (op == 0xCD) {
+            op = m6800_read(cpu, pc++);
+            switch(op) {
+            case 0xA3:
+                x = "CPD x2,Y";
+                break;
+            case 0xAC:
+                x = "CPX x2,Y";
+                break;
+            case 0xEE:
+                x = "LDX x2,Y";
+                break;
+            case 0xEF:
+                x = "STX x2,Y";
+                break;
+            default:
+                x = NULL;
+            }
+        } else {
+            x = opmap_11[op];
+        }
+    } else
+        x = opmap[op];
 
     if (x == NULL) {
         fprintf(stderr, "<ILLEGAL %02X>\n", op);
@@ -1111,14 +1507,13 @@ static void m6800_disassemble(struct m6800 *cpu, uint16_t pc)
             fprintf(stderr, "%02X", m6800_do_debug_read(cpu, pc++));
         else if (*x == 'a')
             fprintf(stderr, " (%04X)", addr);
+        else if (*x == 'y')
+                fprintf(stderr, "%c", "XY"[page2]);
         else
             fputc(*x, stderr);
         x++;
     }
-    /* Don't re-read stuff with side effects */
-    /* FIXME: need a debug_read() so the emulator can also avoid this for
-       MMIO */
-    if (pcontent && addr > 0x1f) {
+    if (pcontent) {
         if (ppair) {
             data = m6800_do_debug_read(cpu, addr++) << 8;
             data |= m6800_do_debug_read(cpu, addr);
@@ -1443,7 +1838,7 @@ static int m6800_execute_one(struct m6800 *cpu)
             if (opcode != 0x8D && ((opcode & 0x0F) >= 0x0C || (opcode & 0x0F) == 3)) {
                 /* The apparent store immediates (and 68HC11 XGDX) break the
                    decode rule */
-                if (opcode != 0x8F && opcode != 0xCF) {
+                if ((opcode & 0xFF) != 0x8F && (opcode & 0xFF) != 0xCF) {
                     data16 = m6800_do_read(cpu, cpu->pc++) << 8; 
                     data16 |= m6800_do_read(cpu, cpu->pc++);
                 }
@@ -2810,9 +3205,9 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     case 0x18EE: /* LDY index,Y */
     case 0x1AEE: /* LDY index,X */
-        cpu->x = m6800_do_read(cpu, data16) << 8;
-        cpu->x |= m6800_do_read(cpu, data16 + 1);
-        m6800_logic16(cpu, cpu->x);
+        cpu->y = m6800_do_read(cpu, data16) << 8;
+        cpu->y |= m6800_do_read(cpu, data16 + 1);
+        m6800_logic16(cpu, cpu->y);
         return clocks;
     case 0xCDEE: /* LDX index,Y */
     case 0xEE:	/* LDX indexed */
@@ -2822,13 +3217,13 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     case 0x1AEF:/* STY ,X */
     case 0x18EF:/* STY ,Y */
-        m6800_do_write(cpu, data8, cpu->y >> 8);
-        m6800_do_write(cpu, data8 + 1, cpu->y);
+        m6800_do_write(cpu, data16, cpu->y >> 8);
+        m6800_do_write(cpu, data16 + 1, cpu->y);
         return clocks;
     case 0xCDEF:/* STX index,Y */
     case 0xEF:	/* STX indexed */
-        m6800_do_write(cpu, data8, cpu->x >> 8);
-        m6800_do_write(cpu, data8 + 1, cpu->x);
+        m6800_do_write(cpu, data16, cpu->x >> 8);
+        m6800_do_write(cpu, data16 + 1, cpu->x);
         return clocks;
     /* 0xFX: extended */
     case 0xF0:	/* SUBB extended */
@@ -2905,6 +3300,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->x = m6800_do_read(cpu, data16) << 8;
         cpu->x |= m6800_do_read(cpu, data16 + 1);
         m6800_logic16(cpu, cpu->x);
+        return clocks;
+    case 0x18FF:/* STY extened */
+        m6800_do_write(cpu, data16, cpu->y >> 8 );
+        m6800_do_write(cpu, data16 + 1, cpu->y);
+        m6800_logic16(cpu, cpu->y);
         return clocks;
     case 0xFF:	/* STX extened */
         m6800_do_write(cpu, data16, cpu->x >> 8 );
