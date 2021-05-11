@@ -3052,6 +3052,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->pc++;
         m6800_do_write(cpu, cpu->pc++, cpu->x >> 8);
         m6800_do_write(cpu, cpu->pc++, cpu->x);
+        m6800_logic16(cpu, cpu->x);
         return clocks;
     /* Same again for direct */
     case 0xD0:	/* SUBB dir */
@@ -3132,10 +3133,12 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x18DF: /* STY direct */
         m6800_do_write(cpu, data8, cpu->y >> 8);
         m6800_do_write(cpu, data8 + 1, cpu->y);
+        m6800_logic16(cpu, cpu->y);
         return clocks;
     case 0xDF: /* STX direct */
         m6800_do_write(cpu, data8, cpu->x >> 8);
         m6800_do_write(cpu, data8 + 1, cpu->x);
+        m6800_logic16(cpu, cpu->x);
         return clocks;
     /* 0xEX: indexed version */
     case 0x18E0:
@@ -3233,11 +3236,13 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x18EF:/* STY ,Y */
         m6800_do_write(cpu, data16, cpu->y >> 8);
         m6800_do_write(cpu, data16 + 1, cpu->y);
+        m6800_logic16(cpu, cpu->y);
         return clocks;
     case 0xCDEF:/* STX index,Y */
     case 0xEF:	/* STX indexed */
         m6800_do_write(cpu, data16, cpu->x >> 8);
         m6800_do_write(cpu, data16 + 1, cpu->x);
+        m6800_logic16(cpu, cpu->x);
         return clocks;
     /* 0xFX: extended */
     case 0xF0:	/* SUBB extended */
