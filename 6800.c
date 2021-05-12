@@ -1859,7 +1859,7 @@ static int m6800_execute_one(struct m6800 *cpu)
             /* Save the first byte for the strange 6303 logic immediate ops */
             data8 = m6800_do_read(cpu, cpu->pc++);
             data16 = data8 + cpu->x;
-            /* 0x18: Use y, index via Y
+            /* 0x18: Use Y, index via Y
                0x1A: Use Y, index via X
                0xCD: Use X, index via Y - some exceptions */
             if ((opcode & 0xFF00) == 0x1800 || (opcode & 0xFF00) == 0xCD00)
@@ -2865,17 +2865,17 @@ static int m6800_execute_one(struct m6800 *cpu)
         tmp8 = m6800_do_read(cpu, data16);
         cpu->a = m6800_maths8(cpu, cpu->a, tmp8, cpu->a + tmp8);
         return clocks;
-    case 0x1AAC:/* CPY ,Y */
-    case 0x18AC:/* CPY */
+    case 0x1AAC:/* CPY ,X */
+    case 0x18AC:/* CPY ,Y*/
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
-        m6800_cpx(cpu, cpu->y, data16, cpu->y - data16);
+        m6800_cpx(cpu, cpu->y, data16, cpu->y - tmp16);
         return clocks;
     case 0xCDAC:/* CPX ,Y */
-    case 0xAC:	/* CPX */
+    case 0xAC:	/* CPX ,X*/
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
-        m6800_cpx(cpu, cpu->x, data16, cpu->x - data16);
+        m6800_cpx(cpu, cpu->x, tmp16, cpu->x - tmp16);
         return clocks;
     case 0x18AD:/* JSR ,Y */
     case 0xAD:	/* JSR ,X */
