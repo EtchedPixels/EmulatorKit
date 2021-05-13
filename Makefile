@@ -12,8 +12,8 @@ libz80/libz80.o:
 lib765/lib/lib765.a:
 	$(MAKE) --directory lib765/lib
 
-rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a
-	cc -g3 rc2014.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a -o rc2014
+rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a
+	cc -g3 rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a -o rc2014
 
 rbcv2:	rbcv2.o ide.o w5100.o libz80/libz80.o
 	cc -g3 rbcv2.o ide.o w5100.o libz80/libz80.o -o rbcv2
@@ -21,8 +21,8 @@ rbcv2:	rbcv2.o ide.o w5100.o libz80/libz80.o
 searle:	searle.o ide.o libz80/libz80.o
 	cc -g3 searle.o ide.o libz80/libz80.o -o searle
 
-linc80:	linc80.o ide.o libz80/libz80.o
-	cc -g3 linc80.o ide.o libz80/libz80.o -o linc80
+linc80:	linc80.o ide.o sdcard.o libz80/libz80.o
+	cc -g3 linc80.o ide.o sdcard.o libz80/libz80.o -o linc80
 
 mbc2:	mbc2.o ide.o libz80/libz80.o
 	cc -g3 mbc2.o libz80/libz80.o -o mbc2
@@ -53,8 +53,8 @@ rc2014-6800: rc2014-6800.o 6800.o ide.o acia.o
 rc2014-6809: rc2014-6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o
 	cc -g3 rc2014-6809.o ide.o ppide.o w5100.o rtc_bitbang.o e6809.o -o rc2014-6809
 
-rc2014-68hc11: rc2014-68hc11.o 68hc11.o ide.o w5100.o ppide.o rtc_bitbang.o
-	cc -g3 rc2014-68hc11.o ide.o ppide.o rtc_bitbang.o w5100.o 68hc11.o -o rc2014-68hc11
+rc2014-68hc11: rc2014-68hc11.o 68hc11.o ide.o w5100.o ppide.o rtc_bitbang.o sdcard.o
+	cc -g3 rc2014-68hc11.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o 68hc11.o -o rc2014-68hc11
 
 rc2014-68008: rc2014-68008.o ide.o w5100.o m68k/lib68k.a
 	cc -g3 rc2014-68008.o ide.o w5100.o ppide.o m68k/lib68k.a -o rc2014-68008
@@ -84,8 +84,8 @@ smallz80: smallz80.o ide.o libz80/libz80.o
 sbc2g:	sbc2g.o ide.o libz80/libz80.o
 	cc -g3 sbc2g.o ide.o libz80/libz80.o -o sbc2g
 
-z80mc:	z80mc.o libz80/libz80.o
-	cc -g3 z80mc.o libz80/libz80.o -o z80mc
+z80mc:	z80mc.o sdcard.o libz80/libz80.o
+	cc -g3 z80mc.o sdcard.o libz80/libz80.o -o z80mc
 
 flexbox: flexbox.o 6800.o acia.o ide.o
 	cc -g3 flexbox.o 6800.o acia.o ide.o -o flexbox

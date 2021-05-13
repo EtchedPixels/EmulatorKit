@@ -39,6 +39,7 @@
 #include "ide.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
+#include "sdcard.h"
 #include "w5100.h"
 #include "z80copro.h"
 #include "z80dma.h"
@@ -50,6 +51,7 @@ static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
 static uint8_t switchrom = 1;
+static uint32_t romsize = 65536;
 
 #define CPUBOARD_Z80		0
 #define CPUBOARD_SC108		1
@@ -60,6 +62,8 @@ static uint8_t switchrom = 1;
 #define CPUBOARD_MICRO80	6
 #define CPUBOARD_ZRCC		7
 #define CPUBOARD_TINYZ80	8
+#define CPUBOARD_PDOG128	9
+#define CPUBOARD_PDOG512	10
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -78,6 +82,7 @@ static uint8_t has_tms = 1;
 static uint8_t is_z512;
 static uint8_t z512_control = 0;
 static struct ppide *ppide;
+static struct sdcard *sdcard;
 static struct z80copro *copro;
 static FDC_PTR fdc;
 static FDRV_PTR drive_a, drive_b;
@@ -377,7 +382,7 @@ static void mem_writezrcc(uint16_t addr, uint8_t val)
 		return;
 	}
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W %04x = %02X\n", addr, val);
+		fprintf(stderr, "W %04X = %02X\n", addr, val);
 	if (addr >= 0x8000)
 		ramrom[addr + 65536] = val;
 	else
@@ -465,6 +470,88 @@ static void mem_write_micro80(uint16_t addr, uint8_t val)
 		*p = val;
 }
 
+/*
+ *	Pickled Dog 128K and 512K RAM boards
+ *
+ *	These use a configuration close to that of the Retrobrew SBC but
+ *	fixed to 32K/32K divide and with the same register controlling both
+ *	ROM and RAM.
+ *
+ *	On the 512K/512K set up the low 4 bits of the port are the bank for
+ *	low memory and the top bit is set to indicate RAM bank. On the 128K
+ *	the set up is quite different with separate banking for the lower and
+ *	upper 128K
+ *
+ */
+
+static uint8_t pick_bank;
+
+static uint8_t *mmu_pickled128(uint16_t addr, uint8_t wr)
+{
+	uint8_t b = pick_bank;
+	if (addr & 0x8000) {
+		b >>= 4;
+		addr &= 0x7FFF;
+	}
+	if (b & 0x08)
+		return &ramrom[addr + 131072 + ((pick_bank & 7) << 15)];
+	if (wr)
+		return NULL;
+	return &ramrom[addr + (pick_bank << 15)];
+}
+
+static uint8_t mem_read_pickled128(uint16_t addr)
+{
+	uint8_t *p = mmu_pickled128(addr, 0);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04X = %02X\n", addr, *p);
+	return *p;
+}
+
+static void mem_write_pickled128(uint16_t addr, uint8_t val)
+{
+	uint8_t *p = mmu_pickled128(addr, 1);
+	if (p == NULL) {
+		fprintf(stderr, "%04X: write to ROM of %02X attempted.\n", addr, val);
+		return;
+	}
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "%04X = %02X\n", addr, val);
+	*p = val;
+}
+
+static uint8_t *mmu_pickled512(uint16_t addr, uint8_t wr)
+{
+	/* Top 32K of RAM bank */
+	if (addr & 0x8000)
+		return &ramrom[addr + 0x100000 - 0x8000];
+	if (pick_bank & 0x80)
+		return &ramrom[addr + 524288 + (pick_bank << 15)];
+	if (wr)
+		return NULL;
+	return &ramrom[addr + (pick_bank << 15)];
+}
+
+static uint8_t mem_read_pickled512(uint16_t addr)
+{
+	uint8_t *p = mmu_pickled512(addr, 0);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04X = %02X\n", addr, *p);
+	return *p;
+}
+
+static void mem_write_pickled512(uint16_t addr, uint8_t val)
+{
+	uint8_t *p = mmu_pickled512(addr, 1);
+	if (p == NULL) {
+		fprintf(stderr, "%04X: write to ROM of %02X attempted.\n", addr, val);
+		return;
+	}
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "%04X = %02X\n", addr, val);
+	*p = val;
+}
+
 uint8_t mem_read(int unused, uint16_t addr)
 {
 	static uint8_t rstate = 0;
@@ -495,6 +582,12 @@ uint8_t mem_read(int unused, uint16_t addr)
 		break;
 	case CPUBOARD_TINYZ80:
 		r = mem_read0(addr);
+		break;
+	case CPUBOARD_PDOG128:
+		r = mem_read_pickled128(addr);
+		break;
+	case CPUBOARD_PDOG512:
+		r = mem_read_pickled512(addr);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -546,6 +639,12 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_TINYZ80:
 		mem_write0(addr, val);
+		break;
+	case CPUBOARD_PDOG128:
+		mem_write_pickled128(addr, val);
+		break;
+	case CPUBOARD_PDOG512:
+		mem_write_pickled512(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -1409,166 +1508,6 @@ static uint8_t sd_miso = 0x80;
 
 static uint8_t sd_port = 1;	/* Channel for data in */
 
-static int sd_mode = 0;
-static int sd_cmdp = 0;
-static int sd_ext = 0;
-static uint8_t sd_cmd[6];
-static uint8_t sd_in[520];
-static int sd_inlen, sd_inp;
-static uint8_t sd_out[520];
-static int sd_outlen, sd_outp;
-static int sd_fd = -1;
-static off_t sd_lba;
-static int sd_stuff;
-static uint8_t sd_poststuff;
-static const uint8_t sd_csd[17] = {
-
-	0xFE,		/* Sync byte before CSD */
-	/* Taken from a Toshiba 64MB card c/o softgun */
-	0x00, 0x2D, 0x00, 0x32,
-	0x13, 0x59, 0x83, 0xB1,
-	0xF6, 0xD9, 0xCF, 0x80,
-	0x16, 0x40, 0x00, 0x00
-};
-
-static uint8_t sd_process_command(void)
-{
-	if (sd_ext) {
-		sd_ext = 0;
-		switch(sd_cmd[0]) {
-		default:
-			return 0xFF;
-		}
-	}
-	if (trace & TRACE_SD)
-		fprintf(stderr, "Command received %x\n", sd_cmd[0]);
-	sd_stuff = 1 + (rand() & 7);
-	switch(sd_cmd[0]) {
-	case 0x40+0:		/* CMD 0 */
-		return 0x01;	/* Just respond 0x01 */
-	case 0x40+1:		/* CMD 1 - leave idle */
-		return 0x00;	/* Immediately indicate we did */
-	case 0x40+9:		/* CMD 9 - read the CSD */
-		memcpy(sd_out,sd_csd, 17);
-		sd_outlen = 17;
-		sd_outp = 0;
-		sd_mode = 2;
-		return 0x00;
-	case 0x40+16:		/* CMD 16 - set block size */
-		/* Should check data is 512 !! FIXME */
-		return 0x00;	/* Sure */
-	case 0x40+17:		/* Read */
-		sd_outlen = 514;
-		sd_outp = 0;
-		/* Sync mark then data */
-		sd_out[0] = 0xFF;
-		sd_out[1] = 0xFE;
-		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
-			16777216 * sd_cmd[1];
-		if (trace & TRACE_SD)
-			fprintf(stderr, "Read LBA %lx\n", (long)sd_lba);
-		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 || read(sd_fd, sd_out + 2, 512) != 512) {
-			if (trace & TRACE_SD)
-				fprintf(stderr, "Read LBA failed.\n");
-			return 0x01;
-		}
-		sd_mode = 2;
-		/* Result */
-		return 0x00;
-	case 0x40+24:		/* Write */
-		/* Will send us FE data FF FF */
-		if (trace & TRACE_SD)
-			fprintf(stderr, "Write LBA %lx\n", (long)sd_lba);
-		sd_inlen = 514;	/* Data FF FF */
-		sd_lba = sd_cmd[4] + 256 * sd_cmd[3] + 65536 * sd_cmd[2] +
-			16777216 * sd_cmd[1];
-		sd_inp = 0;
-		sd_mode = 4;	/* Send a pad then go to mode 3 */
-		return 0x00;	/* The expected OK */
-	case 0x40+55:
-		sd_ext = 1;
-		return 0x01;
-	default:
-		return 0x7F;
-	}
-}
-
-static uint8_t sd_process_data(void)
-{
-	switch(sd_cmd[0]) {
-	case 0x40+24:		/* Write */
-		sd_mode = 0;
-		if (lseek(sd_fd, sd_lba, SEEK_SET) < 0 ||
-			write(sd_fd, sd_in, 512) != 512) {
-			if (trace & TRACE_SD)
-				fprintf(stderr, "Write failed.\n");
-			return 0x1E;	/* Need to look up real values */
-		}
-		return 0x05;	/* Indicate it worked */
-	default:
-		sd_mode = 0;
-		return 0xFF;
-	}
-}
-
-static uint8_t sd_card_byte(uint8_t in)
-{
-	/* No card present */
-	if (sd_fd == -1)
-		return 0xFF;
-
-	/* Stuffing on commands */
-	if (sd_stuff) {
-		if (--sd_stuff)
-			return 0xFF;
-		return sd_poststuff;
-	}
-
-	if (sd_mode == 0) {
-		if (in != 0xFF) {
-			sd_mode = 1;	/* Command wait */
-			sd_cmdp = 1;
-			sd_cmd[0] = in;
-		}
-		return 0xFF;
-	}
-	if (sd_mode == 1) {
-		sd_cmd[sd_cmdp++] = in;
-		if (sd_cmdp == 6) {	/* Command complete */
-			sd_cmdp = 0;
-			sd_mode = 0;
-			/* Reply with either a stuff byte (CMD12) or a
-			   status */
-			sd_poststuff = sd_process_command();
-			return 0xFF;
-		}
-		/* Keep talking */
-		return 0xFF;
-	}
-	/* Writing out the response */
-	if (sd_mode == 2) {
-		if (sd_outp + 1 == sd_outlen)
-			sd_mode = 0;
-		return sd_out[sd_outp++];
-	}
-	/* Commands that need input blocks first */
-	if (sd_mode == 3) {
-		sd_in[sd_inp++] = in;
-		if (sd_inp == sd_inlen)
-			return sd_process_data();
-		/* Keep sending */
-		return 0xFF;
-	}
-	/* Sync up before data flow starts */
-	if (sd_mode == 4) {
-		/* Sync */
-		if (in == 0xFE)
-			sd_mode = 3;
-		return 0xFF;
-	}
-	return 0xFF;
-}
-
 struct z80_pio {
 	uint8_t data[2];
 	uint8_t mask[2];
@@ -1589,7 +1528,7 @@ static uint8_t pio_cs;
 
 static uint8_t spi_byte_sent(uint8_t val)
 {
-	uint8_t r = sd_card_byte(val);
+	uint8_t r = sd_spi_in(sdcard, val);
 	if (trace & TRACE_SPI)
 		fprintf(stderr,	"[SPI %02X:%02X]\n", val, r);
 	return r;
@@ -1607,17 +1546,23 @@ static void bitbang_spi(uint8_t val)
 
 	old = val;
 
-	if ((pio_cs & 0x03) == 0x01) {		/* CS high - deselected */
-		if ((trace & TRACE_SPI) && !oldcs)
-			fprintf(stderr,	"[Raised \\CS]\n");
-		bits = 0;
-		sd_mode = 0;	/* FIXME: layering */
-		oldcs = 1;
+	if (!sdcard)
 		return;
+
+	if ((pio_cs & 0x03) == 0x01) {		/* CS high - deselected */
+		if (!oldcs) {
+			if (trace & TRACE_SPI)
+				fprintf(stderr,	"[Raised \\CS]\n");
+			bits = 0;
+			oldcs = 1;
+			sd_spi_raise_cs(sdcard);
+		}
+	} else if (oldcs) {
+		if (trace & TRACE_SPI)
+			fprintf(stderr, "[Lowered \\CS]\n");
+		oldcs = 0;
+		sd_spi_lower_cs(sdcard);
 	}
-	if ((trace & TRACE_SPI) && oldcs)
-		fprintf(stderr, "[Lowered \\CS]\n");
-	oldcs = 0;
 	/* Capture clock edge */
 	if (delta & sd_clock) {		/* Clock edge */
 		if (val & sd_clock) {	/* Rising - capture in SPI0 */
@@ -2482,6 +2427,17 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
+static void io_write_pdog(uint16_t addr, uint8_t val)
+{
+	if ((addr & 0xFB) == 0x78) {	/* 78 or 7C */
+		if (cpuboard == CPUBOARD_PDOG512)
+			val &= 0x8F;
+		pick_bank = val;
+	} else
+		io_write_2014(addr, val, 0);
+}
+
+
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
@@ -2508,6 +2464,10 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case CPUBOARD_TINYZ80:
 		io_write_5(addr, val);
 		break;
+	case CPUBOARD_PDOG128:
+	case CPUBOARD_PDOG512:
+		io_write_pdog(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2519,6 +2479,8 @@ uint8_t io_read(int unused, uint16_t addr)
 	switch (cpuboard) {
 	case CPUBOARD_Z80:
 	case CPUBOARD_SC108:
+	case CPUBOARD_PDOG128:
+	case CPUBOARD_PDOG512:
 		return io_read_2014(addr);
 	case CPUBOARD_SC114:
 	case CPUBOARD_SC121:
@@ -2776,6 +2738,18 @@ int main(int argc, char *argv[])
 				sio2_input = 1;
 				has_im2 = 1;
 				tstate_steps = 500;
+			} else if (strcmp(optarg, "pdog128") == 0) {
+				cpuboard = CPUBOARD_PDOG128;
+				switchrom = 0;
+				bank512 = 0;
+				romsize = 131072;
+				rom = 1;
+			} else if (strcmp(optarg, "pdog512") == 0) {
+				cpuboard = CPUBOARD_PDOG512;
+				switchrom = 0;
+				bank512 = 0;
+				romsize = 524288;
+				rom = 1;
 			} else {
 				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
 						stderr);
@@ -2847,7 +2821,7 @@ int main(int argc, char *argv[])
 			perror("lseek");
 			exit(1);
 		}
-		if (read(fd, ramrom, 65536) < 8192) {
+		if (read(fd, ramrom, romsize) < 8192) {
 			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
@@ -2946,11 +2920,15 @@ int main(int argc, char *argv[])
 		sd_miso = 1;
 	}
 	if (sdpath) {
-		sd_fd = open(sdpath, O_RDWR);
-		if (sd_fd == -1) {
+		sdcard = sd_create("sd0");
+		fd = open(sdpath, O_RDWR);
+		if (fd == -1) {
 			perror(sdpath);
 			exit(1);
 		}
+		sd_attach(sdcard, fd);
+		if (trace & TRACE_SD)
+			sd_trace(sdcard, 1);
 	}
 
 	if (has_acia) {
