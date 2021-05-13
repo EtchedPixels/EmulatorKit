@@ -2029,16 +2029,19 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x14:  /* BSET direct */
         if (cpu->type == CPU_6800) {
             cpu->a &= cpu->b;
+            m6800_logic8(cpu, cpu->a);
             return clocks;
         }
         data8 = m6800_do_read(cpu, cpu->pc++);
-        m6800_do_write(cpu, data8, m6800_do_read(cpu, data8) |
-                                    m6800_do_read(cpu, cpu->pc++));
+        tmp8 = m6800_do_read(cpu, data8) | m6800_do_read(cpu, cpu->pc++);
+        m6800_logic8(cpu, tmp8);
+        m6800_do_write(cpu, data8, tmp8);
         return clocks;
     case 0x15:  /* BCLR direct */
         data8 = m6800_do_read(cpu, cpu->pc++);
-        m6800_do_write(cpu, data8, m6800_do_read(cpu, data8) &
-                                    ~m6800_do_read(cpu, cpu->pc++));
+        tmp8 = m6800_do_read(cpu, data8) & ~m6800_do_read(cpu, cpu->pc++);
+        m6800_logic8(cpu, tmp8);
+        m6800_do_write(cpu, data8, tmp8);
         return clocks;
     case 0x16:	/* TAB */
         cpu->b = cpu->a;
@@ -2108,22 +2111,30 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x181C:  /* BSET indexed,Y */
         data16 = cpu->y + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, cpu->pc++);
-        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) | tmp8);
+        tmp8 = m6800_do_read(cpu, data16) | tmp8;
+        m6800_logic8(cpu, tmp8);
+        m6800_do_write(cpu, data16, tmp8);
         return clocks;
     case 0x1C:  /* BSET indexed */
         data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, cpu->pc++);
-        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) | tmp8);
+        tmp8 = m6800_do_read(cpu, data16) | tmp8;
+        m6800_logic8(cpu, tmp8);
+        m6800_do_write(cpu, data16, tmp8);
         return clocks;
     case 0x181D:  /* BCLR indexed,Y */
         data16 = cpu->y + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, cpu->pc++);
-        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) &~tmp8);
+        tmp8 = m6800_do_read(cpu, data16) & ~tmp8;
+        m6800_logic8(cpu, tmp8);
+        m6800_do_write(cpu, data16, tmp8);
         return clocks;
     case 0x1D:  /* BCLR indexed */
         data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, cpu->pc++);
-        m6800_do_write(cpu, data16, m6800_do_read(cpu, data16) &~tmp8);
+        tmp8 = m6800_do_read(cpu, data16) & ~tmp8;
+        m6800_logic8(cpu, tmp8);
+        m6800_do_write(cpu, data16, tmp8);
         return clocks;
     case 0x181E:
         data8 = m6800_do_read(cpu, cpu->y + m6800_do_read(cpu, cpu->pc++));
