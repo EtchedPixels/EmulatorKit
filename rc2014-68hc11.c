@@ -41,10 +41,13 @@ static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
 static uint8_t bankhigh = 0;
+static uint8_t bankflat = 0;
 static uint8_t mmureg = 0;
 static uint8_t rtc;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
+
+static uint32_t flatahigh = 0;		/* Flat model high address bits */
 
 static uint8_t protlow, prothi;
 
@@ -167,11 +170,34 @@ void m6800_tx_byte(struct m6800 *cpu, uint8_t byte)
 	write(1, &byte, 1);
 }
 
+static void flatarecalc(struct m6800 *cpu)
+{
+	uint8_t bits = cpu->io.padr;
+	/* PA3 has a pull down so if it is an input (eg at boot)
+	   then it is low */
+	if (!(cpu->io.pactl & 0x10))
+		bits &= 0xF7;
+	/* We should check for OC/IC function and blow up messily
+	   if set */
+	flatahigh = 0;
+	if (bits & 0x40)
+		flatahigh += 0x10000;
+	if (bits & 0x20)
+		flatahigh += 0x20000;
+	if (bits & 0x10)
+		flatahigh += 0x40000;
+	if (bits & 0x08)
+		flatahigh += 0x80000;
+}
 
-/* I/O ports: nothing for now */
+
+/* I/O ports */
 
 void m6800_port_output(struct m6800 *cpu, int port)
 {
+	/* Port A is the flat model A16-A20 */
+	if (port == 1)
+		flatarecalc(cpu);
 	if (sdcard && port == 4) {
 		if (cpu->io.pddr & 0x20)
 			sd_spi_raise_cs(sdcard);
@@ -189,6 +215,7 @@ uint8_t m6800_port_input(struct m6800 *cpu, int port)
 
 void m68hc11_port_direction(struct m6800 *cpu, int port)
 {
+	flatarecalc(cpu);
 }
 
 static uint8_t spi_rxbyte;
@@ -324,6 +351,10 @@ uint8_t m6800_read_op(struct m6800 *cpu, uint16_t addr, int debug)
 			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
 		addr &= 0x3FFF;
 		return ramrom[(bankreg[bank] << 14) + addr];
+	} else if (bankflat) {
+		if (!debug && (trace & TRACE_MEM))
+			fprintf(stderr, "R [%02X]%04x = %02X\n", flatahigh >> 16, addr, (unsigned int) ramrom[flatahigh + addr]);
+		return ramrom[flatahigh + addr];
 	}
 	if (!debug && (trace & TRACE_MEM))
 		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
@@ -385,6 +416,15 @@ void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 		/* ROM writes go nowhere */
 		else if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
+	} else if (bankflat) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "W [%02X]%04x = %02X\n", flatahigh >> 16, (unsigned int) addr, (unsigned int) val);
+		if (flatahigh >= 0x80000)
+			ramrom[flatahigh + addr] = val;
+		/* ROM writes go nowhere */
+		else if (trace & TRACE_MEM)
+			fprintf(stderr, "[Discarded: ROM]\n");
+	} else if (bankflat) {
 	} else {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W: %04X = %02X\n", addr, val);
@@ -415,7 +455,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-68hc11: [-b] [-f] [-R] [-r rom] [-i idedisk] [-S sdcard] [-m monitor] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-68hc11: [-b] [-B] [-F] [-f] [-R] [-r rom] [-i idedisk] [-S sdcard] [-m monitor] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -431,7 +471,7 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	unsigned int cycles = 0;
 
-	while ((opt = getopt(argc, argv, "1abBd:fi:I:r:RS:m:w")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:Ffi:I:r:RS:m:w")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -439,11 +479,19 @@ int main(int argc, char *argv[])
 		case 'b':
 			bank512 = 1;
 			bankhigh = 0;
+			bankflat = 0;
 			rom = 0;
 			break;
 		case 'B':
 			bankhigh = 1;
 			bank512 = 0;
+			bankflat = 0;
+			rom = 0;
+			break;
+		case 'F':
+			bankhigh = 0;
+			bank512 = 0;
+			bankflat = 1;
 			rom = 0;
 			break;
 		case 'i':
@@ -479,7 +527,7 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
+	if (rom == 0 && bank512 == 0 && bankhigh == 0 && bankflat == 0) {
 		fprintf(stderr, "rc2014-68hc11: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
@@ -521,7 +569,7 @@ int main(int argc, char *argv[])
 			sd_trace(sdcard, 1);
 	}
 
-	if (bank512 || bankhigh) {
+	if (bank512 || bankhigh || bankflat) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
