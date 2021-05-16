@@ -196,7 +196,7 @@ struct m6800 {
 #define INTIO_6802	1
 #define INTIO_6803	2
 #define INTIO_HC11	3
-    uint8_t irq;
+    uint32_t irq;
     uint8_t mode;
     int debug;
 
@@ -260,6 +260,17 @@ struct m6800 {
 #define IRQ_TOF		0x10
 #define IRQ_SCI		0x20
 #define IRQ_SPI		0x40
+#define IRQ_RTI		0x80
+#define IRQ_OC1		0x100
+#define IRQ_OC2		0x200
+#define IRQ_OC3		0x400
+#define IRQ_OC4		0x800
+#define IRQ_IC4OC5	0x1000
+#define IRQ_IC1		0x2000
+#define IRQ_IC2		0x4000
+#define IRQ_IC3		0x8000
+#define IRQ_PAOV	0x10000
+#define IRQ_PAI		0x20000
 
 extern uint8_t m6800_read(struct m6800 *cpu, uint16_t addr);
 extern uint8_t m6800_debug_read(struct m6800 *cpu, uint16_t addr);
@@ -278,7 +289,7 @@ extern void m6800_tx_done(struct m6800 *cpu);
 extern void m68hc11_tx_done(struct m6800 *cpu);
 
 /* Provided by the 6800 emulator */
-extern void m6800_reset(struct m6800 *cpu, int mode);
+extern void m6800_reset(struct m6800 *cpu, int type, int mode, int io);
 extern void m68hc11a_reset(struct m6800 *cpu, int variant, uint8_t cfg, const uint8_t *rom, uint8_t *eerom);
 extern void m68hc11e_reset(struct m6800 *cpu, int variant, uint8_t cfg, const uint8_t *rom, uint8_t *eerom);
 extern int m6800_execute(struct m6800 *cpu);

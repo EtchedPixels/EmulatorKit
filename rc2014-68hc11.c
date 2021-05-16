@@ -175,7 +175,9 @@ static void flatarecalc(struct m6800 *cpu)
 	uint8_t bits = cpu->io.padr;
 	/* PA3 has a pull down so if it is an input (eg at boot)
 	   then it is low */
-	if (!(cpu->io.pactl & 0x10))
+	fprintf(stderr, "pactl %02X padr %02X\n", cpu->io.pactl, cpu->io.padr);
+
+	if (!(cpu->io.pactl & 0x08))
 		bits &= 0xF7;
 	/* We should check for OC/IC function and blow up messily
 	   if set */
@@ -579,7 +581,8 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "rc2014-68hc11: banked rom image should be 512K.\n");
 			exit(EXIT_FAILURE);
 		}
-		bankenable = 1;
+		if (bank512 || bankhigh)
+			bankenable = 1;
 		close(fd);
 	}
 

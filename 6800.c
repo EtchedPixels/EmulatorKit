@@ -3458,7 +3458,7 @@ int m6800_execute(struct m6800 *cpu)
     /* Interrupts ? */
     cycles = m6800_pre_execute(cpu);
     /* A cycle passes but we are waiting */
-    if (!cpu->wait)
+    if (cpu->wait)
         cycles = 1;
     else
         cycles += m6800_execute_one(cpu);
@@ -3484,7 +3484,7 @@ int m6800_execute(struct m6800 *cpu)
     return cycles;
 }
 
-void m6800_reset(struct m6800 *cpu, int mode)
+void m6800_reset(struct m6800 *cpu, int type, int io, int mode)
 {
     memset(cpu, 0, sizeof(*cpu));
 
@@ -3495,6 +3495,8 @@ void m6800_reset(struct m6800 *cpu, int mode)
     cpu->rmcr = 0;
     cpu->trcsr = TRCSR_TDRE;
     cpu->mode = mode;
+    cpu->type = type;
+    cpu->intio = io;
     cpu->p2dr = mode << 5;
     cpu->p2ddr = 0;
     cpu->p1ddr = 0;
@@ -4122,10 +4124,14 @@ void m68hc11_tx_done(struct m6800 *cpu)
 static uint8_t m68hc11_read_io(struct m6800 *cpu, uint8_t addr)
 {
     uint8_t val;
+    uint8_t mask;
+
     switch(addr) {
         case 0x00:	/* Port A */
-            val = m6800_port_input(cpu, 1) & ~cpu->io.padr;
-            val |= cpu->io.padr & cpu->io.padr;
+            mask = 0x8F;
+            mask &= ~(cpu->io.pactl & 0x88);
+            val = m6800_port_input(cpu, 1) & mask;
+            val |= cpu->io.padr & ~mask;
             return val;
         case 0x01:	/* Port A direction register */
             return cpu->io.padr;/*??*/

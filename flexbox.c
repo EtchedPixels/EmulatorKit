@@ -561,9 +561,7 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	cpu.type = CPU_6800;
-	cpu.intio = INTIO_NONE;
-	m6800_reset(&cpu, 3);
+	m6800_reset(&cpu, CPU_6800, INTIO_NONE, 3);
 
 	acia = acia_create();
 

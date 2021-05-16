@@ -494,9 +494,7 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	cpu.type = CPU_6303;
-	cpu.intio = INTIO_6803;
-	m6800_reset(&cpu, 3);
+	m6800_reset(&cpu, CPU_6303, INTIO_6803, 3);
 
 	if (trace & TRACE_CPU)
 		cpu.debug = 1;
