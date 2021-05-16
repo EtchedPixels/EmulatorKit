@@ -1081,11 +1081,11 @@ static char *opmap_11[256] = {
     /* 0x10 */
     "SBA",
     "CBA",
-    "BRSET",
-    "BRCLR",
+    "BRSET i i b",
+    "BRCLR i i b",
 
-    "BSET",
-    "BCLR",
+    "BSET i i",
+    "BCLR i i",
     "TAB",
     "TBA",
 
@@ -1094,10 +1094,10 @@ static char *opmap_11[256] = {
     "PAGE3",
     "ABA",
 
-    "BSET",
-    "BCLR",
-    "BRSET",
-    "BRCLR",
+    "BSET i,y i",
+    "BCLR i,y i",
+    "BRSET i,y i b",
+    "BRCLR i,y i b",
 
     /* 0x20 */
     "BRA b",
@@ -1908,7 +1908,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     case 0x02:	/* IDIV */
         if (cpu->x == 0) {
+            /* "In the case of divide by 0 the quotient is set to $FFFF
+                and the remainder is indeterminate */
             cpu->x = 0xFFFF;
+            cpu->a = 0x68;
+            cpu->b = 0x00;	/* Sneaky way to detect the emulator if needed */
             cpu->p |= P_C;
         } else {
             tmp16 = REG_D / cpu->x;
@@ -1916,6 +1920,7 @@ static int m6800_execute_one(struct m6800 *cpu)
             cpu->a = data16 >> 8;
             cpu->b = data16;
             cpu->x = tmp16;
+            /* V always cleared, C set on divide by 0, Z on result 0 */
             cpu->p &= ~(P_C|P_V|P_Z);
             if (cpu->x == 0)
                 cpu->p |= P_Z;
@@ -1924,17 +1929,23 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x03:	/* FDIV */
         if (cpu->x == 0) {
             cpu->x = 0xFFFF;
+            /* Note: the 68HC11 reference manual is *wrong* here - it lists Z
+               twice but means C for the X == 0 case */
             cpu->p |= P_C;
         } else {
+            /* FDIV is (D * 2^16) / X */
             uint32_t d32 = ((uint32_t)REG_D) << 16;
             uint32_t tmp32 = d32 / cpu->x;
             cpu->p &= ~(P_C|P_V|P_Z);
-            if (cpu->x <= REG_D)
+            /* V is set if the input X < D */
+            if (cpu->x < REG_D)
                 cpu->p |= P_V;
-            tmp16 = (uint16_t)(d32/cpu->x);
+            /* Remainder into D, quotient into X */
+            tmp16 = (uint16_t)(d32 % cpu->x);
             cpu->a = tmp16 >> 8;
             cpu->b = tmp16;
             cpu->x = (uint16_t)tmp32;
+            /* Z is set if the quotient result is zero */
             if (cpu->x == 0)
                 cpu->p |= P_Z;
         }
@@ -3394,17 +3405,34 @@ static int m68hc11_pre_execute(struct m6800 *cpu)
     }
     if (cpu->irq & IRQ_IRQ1)	/* External IRQ */
         return m6800_vector_masked(cpu, 0xFFF2);
-    if (cpu->irq & IRQ_ICF)	/* ICF1 */
+    if (cpu->irq & IRQ_RTI)
+        return m6800_vector_masked(cpu, 0xFFF0);
+    if (cpu->irq & IRQ_IC1)	/* IC1 */
         return m6800_vector_masked(cpu, 0xFFEE);
-    if (cpu->irq & IRQ_OCF)	/* OCF1 */
+    if (cpu->irq & IRQ_IC2)	/* IC2 */
+        return m6800_vector_masked(cpu, 0xFFEC);
+    if (cpu->irq & IRQ_IC3)	/* IC3 */
+        return m6800_vector_masked(cpu, 0xFFEA);
+    if (cpu->irq & IRQ_OC1)	/* OC1 */
         return m6800_vector_masked(cpu, 0xFFE8);
-    if (cpu->irq & IRQ_TOF)
+    if (cpu->irq & IRQ_OC2)	/* OC2 */
+        return m6800_vector_masked(cpu, 0xFFE6);
+    if (cpu->irq & IRQ_OC3)	/* OC3 */
+        return m6800_vector_masked(cpu, 0xFFE4);
+    if (cpu->irq & IRQ_OC4)	/* OC4 */
+        return m6800_vector_masked(cpu, 0xFFE2);
+    if (cpu->irq & IRQ_IC4OC5)	/* OC5 or IC4 */
+        return m6800_vector_masked(cpu, 0xFFE0);
+    if (cpu->irq & IRQ_TOF)	/* Timer overflow */
         return m6800_vector_masked(cpu, 0xFFDE);
-    if (cpu->irq & IRQ_SCI)
-        return m6800_vector_masked(cpu, 0xFFD6);
-    if (cpu->irq & IRQ_SPI)
+    if (cpu->irq & IRQ_PAOV)	/* Pulse overflow */
+        return m6800_vector_masked(cpu, 0xFFDC);
+    if (cpu->irq & IRQ_PAI)	/* Pulse input */
+        return m6800_vector_masked(cpu, 0xFFDA);
+    if (cpu->irq & IRQ_SPI)	/* SPI */
         return m6800_vector_masked(cpu, 0xFFD8);
-    /* TODO add others */
+    if (cpu->irq & IRQ_SCI)	/* SCI serial */
+        return m6800_vector_masked(cpu, 0xFFD6);
     return 0;
 }
 #endif
@@ -3547,6 +3575,57 @@ static void m68hc11_e_clock(struct m6800 *cpu)
         cpu->io.tflg1 |= TF1_OC5F;
     /* We don't model input counts on IC1-IC3 but if we did it would go
        here */
+
+    /* Turn compare flags into IRQ bits */
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x80)
+        m6800_raise_interrupt(cpu, IRQ_OC1);
+    else
+        m6800_clear_interrupt(cpu, IRQ_OC1);
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x40)
+        m6800_raise_interrupt(cpu, IRQ_OC2);
+    else
+        m6800_clear_interrupt(cpu, IRQ_OC2);
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x20)
+        m6800_raise_interrupt(cpu, IRQ_OC3);
+    else
+        m6800_clear_interrupt(cpu, IRQ_OC3);
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x10)
+        m6800_raise_interrupt(cpu, IRQ_OC4);
+    else
+        m6800_clear_interrupt(cpu, IRQ_OC4);
+    /* This one is special - its OC5 or IC4  */
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x08)
+        m6800_raise_interrupt(cpu, IRQ_IC4OC5);
+    else
+        m6800_clear_interrupt(cpu, IRQ_IC4OC5);
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x04)
+        m6800_raise_interrupt(cpu, IRQ_IC1);
+    else
+        m6800_clear_interrupt(cpu, IRQ_IC1);
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x02)
+        m6800_raise_interrupt(cpu, IRQ_IC2);
+    else
+        m6800_clear_interrupt(cpu, IRQ_IC2);
+    if ((cpu->io.tflg1 & cpu->io.tmsk1) & 0x01)
+        m6800_raise_interrupt(cpu, IRQ_IC3);
+    else
+        m6800_clear_interrupt(cpu, IRQ_IC3);
+    if ((cpu->io.tflg2 & cpu->io.tmsk2) & 0x80)
+        m6800_raise_interrupt(cpu, IRQ_TOF);
+    else
+        m6800_clear_interrupt(cpu, IRQ_TOF);
+    if ((cpu->io.tflg2 & cpu->io.tmsk2) & 0x40)
+        m6800_raise_interrupt(cpu, IRQ_RTI);
+    else
+        m6800_clear_interrupt(cpu, IRQ_RTI);
+    if ((cpu->io.tflg2 & cpu->io.tmsk2) & 0x20)
+        m6800_raise_interrupt(cpu, IRQ_PAOV);
+    else
+        m6800_clear_interrupt(cpu, IRQ_PAOV);
+    if ((cpu->io.tflg2 & cpu->io.tmsk2) & 0x10)
+        m6800_raise_interrupt(cpu, IRQ_PAI);
+    else
+        m6800_clear_interrupt(cpu, IRQ_PAI);
 }
 
 
@@ -3586,7 +3665,7 @@ void m68hc11e_reset(struct m6800 *cpu, int type, uint8_t cfg, const uint8_t *rom
     cpu->type = CPU_68HC11;
     cpu->intio = INTIO_HC11;
 
-    cpu->p = P_I;
+    cpu->p = P_I | P_S | P_X;
     cpu->io.rom = rom;
     cpu->io.eerom = eerom;
     cpu->io.bootrom = dummy_bootrom;
@@ -3684,7 +3763,7 @@ void m68hc11a_reset(struct m6800 *cpu, int type, uint8_t cfg, const uint8_t *rom
     cpu->type = CPU_68HC11;
     cpu->intio = INTIO_HC11;
 
-    cpu->p = P_I;
+    cpu->p = P_I | P_S | P_X;
     cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
     cpu->pc |= m6800_do_read(cpu, 0xFFFF);
 
@@ -4294,7 +4373,8 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             cpu->io.tmsk1 = val;
             break;
         case 0x23:
-            cpu->io.tflg1 = val;
+            /* Clear flags by writing a 1 bit to the bits to clear */
+            cpu->io.tflg1 &= ~val;
             break;
         case 0x24:
             if (!cpu->io.lock && !(cpu->io.hprio & HPRIO_SMOD)) {
@@ -4319,7 +4399,8 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             }
             break;
         case 0x25:
-            cpu->io.tflg2 = val;
+            /* Clear flags by writing a 1 bit into the bit position */
+            cpu->io.tflg2 &= ~(val & 0xF0);
             break;
         case 0x26:
             cpu->io.pactl = val;
@@ -4361,14 +4442,16 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             break;
         case 0x2D:
             cpu->io.sccr2 = val;
+            m6800_sci_ints(cpu);
             break;
         case 0x2E:
             break;
         case 0x2F:
             cpu->io.scdr_w = val;
-            cpu->io.scsr &= ~SCSR_TDRE;
+            cpu->io.scsr &= ~(SCSR_TDRE|SCSR_TC);
             if (cpu->io.sccr2 & SCCR2_TE)
                 m6800_tx_byte(cpu, val);
+            m68hc11_sci_ints(cpu);
             break;
         case 0x30:
             cpu->io.adctl &= 0x80;
