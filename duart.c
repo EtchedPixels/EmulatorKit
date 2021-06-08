@@ -48,7 +48,6 @@ static void duart_irq_calc(struct duart *d)
 
 static void duart_irq_raise(struct duart *d, uint8_t m)
 {
-	fprintf(stderr, "RAISE %02X (%02X)\n", m, d->isr);
 	if (!(d->isr & m)) {
 		d->isr |= m;
 		if (d->trace)
@@ -346,7 +345,7 @@ void duart_write(struct duart *d, uint16_t address, uint8_t value)
 		d->opcr &= ~value;
 		break;
 	}
-	if (bgrc) {
+	if (bgrc && d->trace) {
 		printf("BGR %d\n", d->acr >> 7);
 		printf("CSR %d\n", d->port[0].csr >> 4);
 	}
