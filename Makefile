@@ -4,7 +4,7 @@ CFLAGS = -Wall -pedantic -g3 -Werror
 all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 	rc2014-6800 rc2014-68008 rc2014-68hc11 rc2014-80c188 rc2014-8085 \
 	rc2014-z8 rbcv2 searle linc80 makedisk mbc2 smallz80 sbc2g z80mc \
-	simple80 flexbox
+	simple80 flexbox tiny68k
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -83,6 +83,12 @@ smallz80: smallz80.o ide.o libz80/libz80.o
 
 sbc2g:	sbc2g.o ide.o libz80/libz80.o
 	cc -g3 sbc2g.o ide.o libz80/libz80.o -o sbc2g
+
+tiny68k: tiny68k.o ide.o duart.o m68k/lib68k.a
+	cc -g3 tiny68k.o ide.o duart.o m68k/lib68k.a -o tiny68k
+
+tiny68k.o: tiny68k.c m68k/lib68k.a
+	$(CC) $(CFLAGS) -Im68k -c tiny68k.c
 
 z80mc:	z80mc.o sdcard.o libz80/libz80.o
 	cc -g3 z80mc.o sdcard.o libz80/libz80.o -o z80mc
