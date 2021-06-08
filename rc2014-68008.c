@@ -33,10 +33,15 @@
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* ROM low RAM high */
+static uint8_t mmu_sram[8 * 1024];
+static uint8_t ext_ram[1024 * 1024];	/* For now */
 
 static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
+static uint8_t bmmu = 0;
+
+static int usermode;
 
 static uint16_t tstate_steps = 200;
 
@@ -743,10 +748,56 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
+uint8_t *bmmu_translate(unsigned int addr, int wflag, int silent)
+{
+	if (bmmu == 0)
+		return ramrom + (addr & 0xFFFFF);
+	if (!(addr & 0x80000)) {
+		if (usermode) {
+			fprintf(stderr, "Low fault at 0x%06X\n", addr);
+			return NULL;
+		}
+		/* ROM */
+		if (wflag == 1 && addr < 0x10000)
+			return NULL;
+		/* Linear RAM */
+		return ramrom + addr;
+	}
+	/* MMU half */
+	if (usermode) {
+		uint16_t page = (addr & 0x7FFFF) >> 13;
+		/* No task bits yet */
+		addr &= 0xFFF;
+		addr |= (mmu_sram[page] & 0x3F) << 13;
+		/* We don't implement the fault bit yet */
+		if (addr & 0x80) {
+			if (!silent)
+				fprintf(stderr, "Fault at logical 0x%06X\n", addr);
+			return NULL;
+		}
+		if ((addr & 0x40) && wflag) {
+			if (!silent)
+				fprintf(stderr, "Write fault at logical 0x%06X\n", addr);
+			return NULL;
+		}
+		return ext_ram + addr;
+	}
+	/* MMU programming view */
+	if (wflag) {
+		/* Task bits to add here */
+		addr >>= 12;
+		addr &= 0x7F;
+		return mmu_sram + addr;
+	}
+	return NULL;
+}
+
 unsigned int cpu_read_byte_dasm(unsigned int addr)
 {
-	addr &= 0xFFFFF;
-	return ramrom[addr];
+	uint8_t *ptr = bmmu_translate(addr, 0, 0);
+	if (ptr)
+		return *ptr;
+	return 0xFF;
 }
 
 unsigned int cpu_read_word_dasm(unsigned int addr)
@@ -761,10 +812,16 @@ unsigned int cpu_read_long_dasm(unsigned int addr)
 
 static unsigned int do_cpu_read_byte(unsigned int addr)
 {
+	uint8_t *ptr;
 	addr &= 0xFFFFF;
+
 	if ((addr & 0xF0000) == 0x10000)
 		return mmio_read_68000(addr);
-	return ramrom[addr];
+
+	ptr = bmmu_translate(addr, 0, 0);
+	if (ptr)
+		return *ptr;
+	return 0xFF;
 }
 
 unsigned int cpu_read_byte(unsigned int addr)
@@ -791,14 +848,21 @@ unsigned int cpu_read_long(unsigned int addr)
 
 void cpu_write_byte(unsigned int addr, unsigned int value)
 {
+	uint8_t *ptr;
+
 	addr &= 0xFFFFF;
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %06X = %02X\n",
 			addr & 0xFFFFF, value);
 	if ((addr & 0xF0000) == 0x10000)
 		mmio_write_68000(addr, value);
-	else if (addr >= 0x80000)
-		ramrom[addr] = value;
+	else {
+		ptr = bmmu_translate(addr, 1, 0);
+		if (ptr)
+			*ptr = value;
+		else
+			fprintf(stderr, "Write failed.\n");
+	}
 }
 
 void cpu_write_word(unsigned int addr, unsigned int value)
@@ -835,6 +899,7 @@ void cpu_pulse_reset(void)
 
 void cpu_set_fc(int fc)
 {
+	usermode = !(fc & 4);
 }
 
 void system_process(void)
@@ -874,7 +939,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-68008: [-1] [-A] [-a] [-f] [-R] [-r rompath] [-i disk] [-p disk] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-68008: [-1] [-A] [-a] [-b] [-f] [-R] [-r rompath] [-i disk] [-p disk] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -886,7 +951,7 @@ int main(int argc, char *argv[])
 	char *rompath = "rc2014-68000.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "1Aad:fi:r:p:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabd:fi:r:p:Rw")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -928,6 +993,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 'b':
+			bmmu = 1;
 			break;
 		default:
 			usage();
