@@ -874,7 +874,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-c] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-68008: [-1] [-A] [-a] [-f] [-R] [-r rompath] [-i disk] [-p disk] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
