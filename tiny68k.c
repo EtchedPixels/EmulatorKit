@@ -357,7 +357,7 @@ void cpu_set_fc(int fc)
 
 void usage(void)
 {
-	fprintf(stderr, "tiny68k [-0][-1][-2][-e][-r].\n");
+	fprintf(stderr, "tiny68k [-0][-1][-2][-e][-R][-r rompath][-i idepath][-d debug].\n");
 	exit(1);
 }
 
