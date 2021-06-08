@@ -400,3 +400,36 @@ dd if=cf-image of=my.cf bs=512 seek=2 conv=notrunc
 
 In other words the IDE disk format has a 1K header that holds
 meta-data and the virtual identify block.
+
+## Tiny68K
+
+A 16MB 68000 platform with IDE CF disk adapter. Also emulates T68KRC with
+far less RAM and an RC2014 bus interface.
+
+## To get actual hardware see
+
+## For ROM images see
+
+## Usage
+
+Options
+- -0		68000
+- -1		68010
+- -2		68020
+- -e		68EC020
+- -R		RC2014 variant (less RAM, RC2014 bus)
+- -f		Fast mode (run flat out)
+- -i path	Use this file for IDE disk
+- -r path	Use this file for serial flash ROM image
+
+To build a disk image
+
+./makedisk 1 my.cf
+
+dd if=cf-image of=my.cf bs=512 seek=2 conv=notrunc
+
+In other words the IDE disk format has a 1K header that holds
+meta-data and the virtual identify block.
+
+Note that both native and emulated disk images are byte swapped on this
+platform.
