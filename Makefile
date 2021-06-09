@@ -47,8 +47,8 @@ lib65816/config.h: lib65c816/src/lib65816.a
 rc2014-65c816-mini.o: rc2014-65c816-mini.c lib65816/config.h
 	$(CC) $(CFLAGS) -Ilib65c816 -c rc2014-65c816-mini.c
 
-rc2014-6800: rc2014-6800.o 6800.o ide.o acia.o
-	cc -g3 rc2014-6800.o ide.o acia.o 6800.o -o rc2014-6800
+rc2014-6800: rc2014-6800.o 6800.o ide.o acia.o 16x50.o
+	cc -g3 rc2014-6800.o ide.o acia.o 6800.o 16x50.o -o rc2014-6800
 
 rc2014-6809: rc2014-6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o
 	cc -g3 rc2014-6809.o ide.o ppide.o w5100.o rtc_bitbang.o e6809.o -o rc2014-6809
