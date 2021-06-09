@@ -1,9 +1,11 @@
-/*
+	/*
  *	6808 CPU
  *	ACIA at $FEA0/A1
  *	IDE at $FE10-$FE17 no high or control access (mirrored at $FE90-97)
  *	32K fixed low, banked high memory
  *	32K ROM (can be banked out)
+ *
+ *	Optional 512K banked RAM instead
  */
 
 #include <stdio.h>
@@ -19,12 +21,14 @@
 #include "6800.h"
 #include "ide.h"
 #include "acia.h"
+#include "16x50.h"
 
-static uint8_t ram[4][32768];
-static uint8_t rom[32768];
+static uint8_t ramrom[1024 * 1024];
 
-static uint8_t bankreg;
-
+static uint8_t banksel;
+static uint8_t bankreg[4];
+static unsigned int bank512;
+static unsigned int bankenable;
 static uint8_t fast = 0;
 
 /* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
@@ -37,7 +41,7 @@ static volatile int done;
 #define TRACE_IO	2
 #define TRACE_ROM	4
 #define TRACE_UNK	8
-#define TRACE_ACIA	16
+#define TRACE_UART	16
 #define TRACE_CPU	32
 #define TRACE_IRQ	64
 
@@ -45,9 +49,9 @@ static int trace = 0;
 
 struct m6800 cpu;
 struct acia *acia;
-struct wd17xx *wdfdc;
+struct uart16x50 *uart;
 
-int check_chario(void)
+unsigned int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -87,7 +91,14 @@ unsigned int next_char(void)
 
 void recalc_interrupts(void)
 {
-	if (acia_irq_pending(acia))
+	int pend;
+
+	if (acia)
+		pend = acia_irq_pending(acia);
+	else
+		pend = uart16x50_irq_pending(uart);
+
+	if (pend)
 		m6800_raise_interrupt(&cpu, IRQ_IRQ1);
 	else
 		m6800_clear_interrupt(&cpu, IRQ_IRQ1);
@@ -131,8 +142,10 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 
 static uint8_t m6800_do_ior(uint8_t addr)
 {
-	if (addr == 0xA0 || addr == 0xA1)
+	if (acia && (addr == 0xA0 || addr == 0xA1))
 		return acia_read(acia, addr & 1);
+	if (uart && (addr >= 0xC0 && addr <= 0xC7))
+		return uart16x50_read(uart, addr & 7);
 	if (ide && (addr >= 0x10 && addr <= 0x17))
 		return my_ide_read(addr & 7);
 	return 0xFF;
@@ -150,32 +163,63 @@ static void m6800_iow(uint8_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "IW %04X = %02X\n", addr, val);
-	if (addr >= 0xA0 && addr <= 0xA1)
+	if (acia && addr >= 0xA0 && addr <= 0xA1)
 		acia_write(acia, addr & 1, val);
 	else if (ide && addr >= 0x10 && addr <= 0x17) {
-		/* IDE at 0x8080 for now */
+		/* IDE at 0xFE10 for now */
 		my_ide_write(addr & 7, val);
 	} else if (addr == 0x38)
-		bankreg = val & 3;
+		banksel = val & 3;
+	else if (addr >= 0x78 && addr <= 0x7B)
+		bankreg[addr - 0x78] = val & 0x3F;
+	else if (addr >= 0x7C && addr <= 0x7F)
+		bankenable = val & 1;
+	else if (uart && addr >= 0xC0 && addr <= 0xC7)
+		uart16x50_write(uart, addr & 7, val);
 	else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown I/O write to 0x%02X of %02X\n",
 			addr, val);
 }
 
+static uint8_t *mmu_map(uint16_t addr, int write)
+{
+	unsigned int page;
+	if (bank512 == 0) {
+		/* Low 32K is fixed RAM bank */
+		if (addr < 0x8000)
+			return ramrom + addr + 0x18000;
+		/* Writes to banksel 0 (ROM) not allowed */
+		if (banksel == 0 && write)
+			return NULL;
+		/* 0 is ROM 1-3 RAM 32K chunks */
+		addr &= 0x7FFF;
+		return ramrom + addr + 0x8000 * banksel;
+	}
+	if (bankenable == 0) {
+		if (write)
+			return NULL;
+		return ramrom + (addr & 0x3FFF);
+	}
+	page = bankreg[addr >> 14];
+	if (page < 0x20 && write)
+		return NULL;
+	return ramrom + (addr & 0x3FFF) + (page << 14);
+}
+		
 uint8_t m6800_read_op(struct m6800 *cpu, uint16_t addr, int debug)
 {
 	uint8_t r;
+	uint8_t *ptr;
 	if (addr >= 0xFE00 && addr < 0xFF00) {
 		if (debug)
 			return 0xFF;
 		return m6800_ior(addr);
 	}
-	if (addr < 0x8000)
-		r = ram[0][addr];
-	else if (bankreg == 0)
-		r = rom[addr & 0x7FFF];
+	ptr = mmu_map(addr, 0);
+	if (ptr == NULL)
+		r = 0xFF;
 	else
-		r = ram[bankreg][addr & 0x7FFF];
+		r = *ptr;
 	if (!debug && (trace & TRACE_MEM))
 		fprintf(stderr, "R %04X = %02X\n", addr, r);
 	return r;
@@ -193,17 +237,19 @@ uint8_t m6800_read(struct m6800 *cpu, uint16_t addr)
 
 void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 {
-	if (addr < 0x8000)
-		ram[0][addr] = val;
-	else if (addr >= 0xFE00 && addr < 0xFF00)
+	uint8_t *ptr;
+	if (addr >= 0xFE00 && addr < 0xFF00)
 		m6800_iow(addr, val);
-	else if (bankreg == 0) {
-		if (trace & TRACE_MEM)
-			fprintf(stderr, "W: %04X (ROM) with %02X\n", addr, val);
-	} else {
-		if (trace & TRACE_MEM)
-			fprintf(stderr, "W: %04X = %02X\n", addr, val);
-		ram[bankreg][addr & 0x7FFF] = val;
+	else {
+		ptr = mmu_map(addr, 1);
+		if (ptr == NULL) {
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "W: %04X (ROM) with %02X\n", addr, val);
+		} else  {
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "W: %04X = %02X\n", addr, val);
+			*ptr = val;
+		}
 	}
 }
 
@@ -227,7 +273,7 @@ static void exit_cleanup(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"rc2014-6800: [-f] [-i path] [-R] [-r rompath] [-d debug]\n");
+		"rc2014-6800: [-1] [-b] [-f] [-i path] [-R] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -236,12 +282,22 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	int fd;
+	unsigned int uarttype = 0;		/* ACIA */
 	char *rompath = "rc2014-6800.rom";
 	char *idepath;
 	unsigned int cycles = 0;
+	unsigned int romsize = 32768;
 
-	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
+	while ((opt = getopt(argc, argv, "1bd:fi:r:")) != -1) {
 		switch (opt) {
+		case '1':
+			/* 1655x */
+			uarttype = 1;
+			break;
+		case 'b':
+			bank512 = 1;
+			romsize = 524288;
+			break;
 		case 'r':
 			rompath = optarg;
 			break;
@@ -267,7 +323,7 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, rom, 32768) != 32768) {
+	if (read(fd, ramrom, romsize) != romsize) {
 		fprintf(stderr, "rc2014-6800: short rom '%s'.\n",
 			rompath);
 		exit(EXIT_FAILURE);
@@ -311,11 +367,17 @@ int main(int argc, char *argv[])
 
 	m6800_reset(&cpu, CPU_6800, INTIO_NONE, 3);
 
-	acia = acia_create();
-
-	if (trace & TRACE_ACIA)
-		acia_trace(acia, 1);
-	acia_set_input(acia, 1);
+	if (uarttype == 0) {
+		acia = acia_create();
+		if (trace & TRACE_UART)
+			acia_trace(acia, 1);
+		acia_set_input(acia, 1);
+	} else {
+		uart = uart16x50_create();
+		if (trace & TRACE_UART)
+			uart16x50_trace(uart, 1);
+		uart16x50_set_input(uart, 1);
+	}
 
 	if (trace & TRACE_CPU)
 		cpu.debug = 1;
@@ -334,7 +396,10 @@ int main(int argc, char *argv[])
 		}
 		/* Drive the internal serial */
 		i = check_chario();
-		acia_timer(acia);
+		if (acia)
+			acia_timer(acia);
+		else
+			uart16x50_event(uart);
 		/* Do 5ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
