@@ -2794,7 +2794,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     case 0x9D:	/* JSR */
         m6800_push16(cpu, cpu->pc);
-        cpu->pc = data16;
+        cpu->pc = data8;
         /* No flags */
         return clocks;
     case 0x9E:	/* LDS */
