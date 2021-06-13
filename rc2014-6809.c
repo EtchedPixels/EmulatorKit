@@ -8,6 +8,7 @@
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
  *	RTC at $FE0C
  *	WizNET ethernet
+ *	6840 at 0x60
  *
  *	Alternate MMU option using highmmu on 8085/MMU card
  *
@@ -27,6 +28,8 @@
 #include <errno.h>
 #include "e6809.h"
 #include "ide.h"
+#include "16x50.h"
+#include "6840.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
 #include "w5100.h"
@@ -45,6 +48,8 @@ static uint8_t wiznet = 0;
 
 struct ppide *ppide;
 struct rtc *rtcdev;
+struct uart16x50 *uart;
+struct m6840 *ptm;
 
 /* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
    rate and get 115200 baud - which is pushing it admittedly! */
@@ -54,8 +59,8 @@ static uint16_t clockrate =  364/4;
 
 static uint8_t live_irq;
 
-#define IRQ_ACIA	4
-#define IRQ_16550A	5
+#define IRQ_16550A	1
+#define IRQ_PTM		2
 
 static nic_w5100_t *wiz;
 
@@ -68,14 +73,14 @@ static volatile int done;
 #define TRACE_PPIDE	16
 #define TRACE_512	32
 #define TRACE_RTC	64
-#define TRACE_ACIA	128
-#define TRACE_CPU	512
-#define TRACE_IRQ	1024
-#define TRACE_UART	2048
+#define TRACE_CPU	128
+#define TRACE_IRQ	256
+#define TRACE_UART	512
+#define TRACE_PTM	1024
 
 static int trace = 0;
 
-int check_chario(void)
+unsigned int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -123,6 +128,18 @@ static void int_set(unsigned int irq)
 	live_irq |= 1 << irq;
 }
 
+void recalc_interrupts(void)
+{
+	if (uart16x50_irq_pending(uart))
+		int_set(IRQ_16550A);
+	else
+		int_clear(IRQ_16550A);
+	if (m6840_irq_pending(ptm))
+		int_set(IRQ_PTM);
+	else
+		int_clear(IRQ_PTM);
+}
+
 static int ide = 0;
 struct ide_controller *ide0;
 
@@ -136,241 +153,17 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
-/* UART: very mimimal for the moment */
-
-struct uart16x50 {
-    uint8_t ier;
-    uint8_t iir;
-    uint8_t fcr;
-    uint8_t lcr;
-    uint8_t mcr;
-    uint8_t lsr;
-    uint8_t msr;
-    uint8_t scratch;
-    uint8_t ls;
-    uint8_t ms;
-    uint8_t dlab;
-    uint8_t irq;
-#define RXDA	1
-#define TEMT	2
-#define MODEM	8
-    uint8_t irqline;
-};
-
-static struct uart16x50 uart;
-
-static void uart_init(struct uart16x50 *uptr)
+/* Clock timer 2 off timer 1 */
+void m6840_output_change(struct m6840 *m, uint8_t outputs)
 {
-    uptr->dlab = 0;
+	static int old = 0;
+	if ((outputs ^ old) & 1) {
+		/* timer 1 high to low -> clock timer 2 */
+		if (!(outputs & 1))
+			m6840_external_clock(ptm, 2);
+	}
+	old = outputs;
 }
-
-/* Compute the interrupt indicator register from what is pending */
-static void uart_recalc_iir(struct uart16x50 *uptr)
-{
-    if (uptr->irq & RXDA)
-        uptr->iir = 0x04;
-    else if (uptr->irq & TEMT)
-        uptr->iir = 0x02;
-    else if (uptr->irq & MODEM)
-        uptr->iir = 0x00;
-    else {
-        uptr->iir = 0x01;	/* No interrupt */
-        uptr->irqline = 0;
-        int_clear(IRQ_16550A);
-        return;
-    }
-    /* Ok so we have an event, do we need to waggle the line */
-    if (uptr->irqline)
-        return;
-    uptr->irqline = uptr->irq;
-    int_set(IRQ_16550A);
-}
-
-/* Raise an interrupt source. Only has an effect if enabled in the ier */
-static void uart_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (uptr->irq & n)
-        return;
-    if (!(uptr->ier & n))
-        return;
-    uptr->irq |= n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (!(uptr->irq & n))
-        return;
-    uptr->irq &= ~n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_event(struct uart16x50 *uptr)
-{
-    uint8_t r = check_chario();
-    uint8_t old = uptr->lsr;
-    uint8_t dhigh;
-    if (r & 1)
-        uptr->lsr |= 0x01;	/* RX not empty */
-    if (r & 2)
-        uptr->lsr |= 0x60;	/* TX empty */
-    dhigh = (old ^ uptr->lsr);
-    dhigh &= uptr->lsr;		/* Changed high bits */
-    if (dhigh & 1)
-        uart_interrupt(uptr, RXDA);
-    if (dhigh & 0x2)
-        uart_interrupt(uptr, TEMT);
-}
-
-static void show_settings(struct uart16x50 *uptr)
-{
-    uint32_t baud;
-
-    if (!(trace & TRACE_UART))
-        return;
-
-    baud = uptr->ls + (uptr->ms << 8);
-    if (baud == 0)
-        baud = 1843200;
-    baud = 1843200 / baud;
-    baud /= 16;
-    fprintf(stderr, "[%d:%d",
-            baud, (uptr->lcr &3) + 5);
-    switch(uptr->lcr & 0x38) {
-        case 0x00:
-        case 0x10:
-        case 0x20:
-        case 0x30:
-            fprintf(stderr, "N");
-            break;
-        case 0x08:
-            fprintf(stderr, "O");
-            break;
-        case 0x18:
-            fprintf(stderr, "E");
-            break;
-        case 0x28:
-            fprintf(stderr, "M");
-            break;
-        case 0x38:
-            fprintf(stderr, "S");
-            break;
-    }
-    fprintf(stderr, "%d ",
-            (uptr->lcr & 4) ? 2 : 1);
-
-    if (uptr->lcr & 0x40)
-        fprintf(stderr, "break ");
-    if (uptr->lcr & 0x80)
-        fprintf(stderr, "dlab ");
-    if (uptr->mcr & 1)
-        fprintf(stderr, "DTR ");
-    if (uptr->mcr & 2)
-        fprintf(stderr, "RTS ");
-    if (uptr->mcr & 4)
-        fprintf(stderr, "OUT1 ");
-    if (uptr->mcr & 8)
-        fprintf(stderr, "OUT2 ");
-    if (uptr->mcr & 16)
-        fprintf(stderr, "LOOP ");
-    fprintf(stderr, "ier %02x]\n", uptr->ier);
-}
-
-static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
-{
-    switch(addr) {
-    case 0:	/* If dlab = 0, then write else LS*/
-        if (uptr->dlab == 0) {
-            if (uptr == &uart) {
-                putchar(val);
-                fflush(stdout);
-            }
-            uart_clear_interrupt(uptr, TEMT);
-            uart_interrupt(uptr, TEMT);
-        } else {
-            uptr->ls = val;
-            show_settings(uptr);
-        }
-        break;
-    case 1:	/* If dlab = 0, then IER */
-        if (uptr->dlab) {
-            uptr->ms= val;
-            show_settings(uptr);
-        }
-        else
-            uptr->ier = val;
-        break;
-    case 2:	/* FCR */
-        uptr->fcr = val & 0x9F;
-        break;
-    case 3:	/* LCR */
-        uptr->lcr = val;
-        uptr->dlab = (uptr->lcr & 0x80);
-        show_settings(uptr);
-        break;
-    case 4:	/* MCR */
-        uptr->mcr = val & 0x3F;
-        show_settings(uptr);
-        break;
-    case 5:	/* LSR (r/o) */
-        break;
-    case 6:	/* MSR (r/o) */
-        break;
-    case 7:	/* Scratch */
-        uptr->scratch = val;
-        break;
-    }
-}
-
-static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
-{
-    uint8_t r;
-
-    switch(addr) {
-    case 0:
-        /* receive buffer */
-        if (uptr == &uart && uptr->dlab == 0) {
-            uart_clear_interrupt(uptr, RXDA);
-            return next_char();
-        }
-        break;
-    case 1:
-        /* IER */
-        return uptr->ier;
-    case 2:
-        /* IIR */
-        return uptr->iir;
-    case 3:
-        /* LCR */
-        return uptr->lcr;
-    case 4:
-        /* mcr */
-        return uptr->mcr;
-    case 5:
-        /* lsr */
-        r = check_chario();
-        uptr->lsr = 0;
-        if (r & 1)
-             uptr->lsr |= 0x01;	/* Data ready */
-        if (r & 2)
-             uptr->lsr |= 0x60;	/* TX empty | holding empty */
-        /* Reading the LSR causes these bits to clear */
-        r = uptr->lsr;
-        uptr->lsr &= 0xF0;
-        return r;
-    case 6:
-        /* msr */
-        r = uptr->msr;
-        /* Reading clears the delta bits */
-        uptr->msr &= 0xF0;
-        uart_clear_interrupt(uptr, MODEM);
-        return r;
-    case 7:
-        return uptr->scratch;
-    }
-    return 0xFF;
-}
-
 
 uint8_t m6809_inport(uint8_t addr)
 {
@@ -384,10 +177,12 @@ uint8_t m6809_inport(uint8_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
+	if (addr >= 0x60 && addr <= 0x67)
+		return m6840_read(ptm, addr & 7);
 	if (addr == 0x0C && rtc)
 		return rtc_read(rtcdev);
 	if (addr >= 0xC0 && addr <= 0xC7)
-		return uart_read(&uart, addr & 7);
+		return uart16x50_read(uart, addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -412,8 +207,10 @@ void m6809_outport(uint8_t addr, uint8_t val)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
-	if (addr >= 0xC0 && addr <= 0xC7)
-		uart_write(&uart, addr & 7, val);
+	else if (addr >= 0x60 && addr < 0x68)
+		m6840_write(ptm, addr & 7, val);
+	else if (addr >= 0xC0 && addr <= 0xC7)
+		uart16x50_write(uart, addr & 7, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
@@ -532,7 +329,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-6303: [-b] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-6809: [-b] [-f] [-R] [-i idepath] [-I ppidepath] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -542,7 +339,7 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	int rom = 1;
-	char *rompath = "rc2014-6303.rom";
+	char *rompath = "rc2014-6809.rom";
 	char *idepath;
 	unsigned int cycles = 0;
 
@@ -589,7 +386,7 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
-		fprintf(stderr, "rc2014: no ROM\n");
+		fprintf(stderr, "rc2014-6809: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -649,7 +446,12 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	uart_init(&uart);
+	uart = uart16x50_create();
+	uart16x50_trace(uart, trace & TRACE_UART);
+	uart16x50_set_input(uart, 1);
+
+	ptm = m6840_create();
+	m6840_trace(ptm, trace & TRACE_PTM);
 
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
@@ -696,10 +498,11 @@ int main(int argc, char *argv[])
 		for (i = 0; i < 100; i++) {
 			while(cycles < clockrate)
 				cycles += e6809_sstep(live_irq, 0);
+			m6840_tick(ptm, cycles);
 			cycles -= clockrate;
 		}
 		/* Drive the  serial */
-		uart_event(&uart);
+		uart16x50_event(uart);
 		/* Wiznet timer */
 		if (wiznet)
 			w5100_process(wiz);

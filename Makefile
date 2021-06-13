@@ -2,9 +2,9 @@
 CFLAGS = -Wall -pedantic -g3 -Werror
 
 all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
-	rc2014-6800 rc2014-68008 rc2014-68hc11 rc2014-80c188 rc2014-8085 \
-	rc2014-z8 rbcv2 searle linc80 makedisk mbc2 smallz80 sbc2g z80mc \
-	simple80 flexbox tiny68k
+	rc2014-6800 rc2014-68008 rc2014-6809 rc2014-68hc11 rc2014-80c188 \
+	rc2014-8085 rc2014-z8 rbcv2 searle linc80 makedisk mbc2 smallz80 \
+	sbc2g z80mc simple80 flexbox tiny68k
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -50,8 +50,8 @@ rc2014-65c816-mini.o: rc2014-65c816-mini.c lib65816/config.h
 rc2014-6800: rc2014-6800.o 6800.o ide.o acia.o 16x50.o
 	cc -g3 rc2014-6800.o ide.o acia.o 6800.o 16x50.o -o rc2014-6800
 
-rc2014-6809: rc2014-6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o
-	cc -g3 rc2014-6809.o ide.o ppide.o w5100.o rtc_bitbang.o e6809.o -o rc2014-6809
+rc2014-6809: rc2014-6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o
+	cc -g3 rc2014-6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o e6809.o -o rc2014-6809
 
 rc2014-68hc11: rc2014-68hc11.o 68hc11.o ide.o w5100.o ppide.o rtc_bitbang.o sdcard.o
 	cc -g3 rc2014-68hc11.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o 68hc11.o -o rc2014-68hc11
