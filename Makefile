@@ -33,11 +33,11 @@ rc2014-1802: rc2014-1802.o 1802.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 rc2014-6303: rc2014-6303.o 6800.o ide.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-6303.o ide.o ppide.o rtc_bitbang.o w5100.o 6800.o -o rc2014-6303
 
-rc2014-6502: rc2014-6502.o 6502.o 6502dis.o ide.o w5100.o
-	cc -g3 rc2014-6502.o ide.o w5100.o 6502.o 6502dis.o -o rc2014-6502
+rc2014-6502: rc2014-6502.o 6502.o 6502dis.o ide.o 6522.o acia.o 16x50.o rtc_bitbang.o w5100.o
+	cc -g3 rc2014-6502.o ide.o 6522.o acia.o 16x50.o rtc_bitbang.o w5100.o 6502.o 6502dis.o -o rc2014-6502
 
-rc2014-65c816-mini: rc2014-65c816-mini.o ide.o w5100.o lib65c816/src/lib65816.a
-	cc -g3 rc2014-65c816-mini.o ide.o w5100.o lib65c816/src/lib65816.a -o rc2014-65c816-mini
+rc2014-65c816-mini: rc2014-65c816-mini.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o w5100.o lib65c816/src/lib65816.a
+	cc -g3 rc2014-65c816-mini.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o w5100.o lib65c816/src/lib65816.a -o rc2014-65c816-mini
 
 lib65c816/src/lib65816.a:
 	$(MAKE) --directory lib65c816 -j 1
