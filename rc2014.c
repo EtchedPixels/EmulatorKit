@@ -40,6 +40,8 @@
 #include "ppide.h"
 #include "rtc_bitbang.h"
 #include "sdcard.h"
+#include "tms9918a.h"
+#include "tms9918a_render.h"
 #include "w5100.h"
 #include "z80copro.h"
 #include "z80dma.h"
@@ -78,7 +80,7 @@ static uint8_t cpld_serial = 0;
 static uint8_t has_im2;
 static uint8_t has_16x50;
 static uint8_t has_copro;
-static uint8_t has_tms = 1;
+static uint8_t has_tms;
 static uint8_t is_z512;
 static uint8_t z512_control = 0;
 static struct ppide *ppide;
@@ -86,6 +88,8 @@ static struct sdcard *sdcard;
 static struct z80copro *copro;
 static FDC_PTR fdc;
 static FDRV_PTR drive_a, drive_b;
+static struct tms9918a *vdp;
+static struct tms9918a_renderer *vdprend;
 
 static uint16_t tstate_steps = 369;	/* RC2014 speed */
 
@@ -1918,22 +1922,6 @@ static void z84c15_write(uint8_t port, uint8_t val)
 	}
 }
 
-/* No emulation yet but it's useful to trace */
-
-static void tms9918a_write(uint8_t addr, uint8_t val)
-{
-	if (trace & TRACE_TMS9918A)
-		fprintf(stderr, "TMSW%c %02X\n", 'C' + addr, val);
-}
-
-static uint8_t tms9918a_read(uint8_t addr)
-{
-	uint8_t val = 0x78;
-	if (trace & TRACE_TMS9918A)
-		fprintf(stderr, "TMSR%c %02X\n", 'C' + addr, val);
-	return val;
-}
-
 static void fdc_log(int debuglevel, char *fmt, va_list ap)
 {
 	if ((trace & TRACE_FDC) || debuglevel == 0)
@@ -2106,8 +2094,8 @@ static uint8_t io_read_2014(uint16_t addr)
 	   an official CTC board at another address  */
 	if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		return ctc_read(addr & 3);
-	if ((addr == 0x98 || addr == 0x99) && has_tms) 
-		return tms9918a_read(addr & 1);
+	if ((addr == 0x98 || addr == 0x99) && vdp)
+		return tms9918a_read(vdp, addr & 1);
 	if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		return uart_read(&uart[0], addr & 7);
 	if (addr == 0x6D && is_z512)
@@ -2162,8 +2150,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		rtc_write(rtc, val);
 	else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		ctc_write(addr & 3, val);
-	else if ((addr == 0x98 || addr == 0x99) && has_tms)
-		tms9918a_write(addr & 1, val);
+	else if ((addr == 0x98 || addr == 0x99) && vdp)
+		tms9918a_write(vdp, addr & 1, val);
 	else if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
 		uart_write(&uart[0], addr & 7, val);
 	else if (addr == 0x6D && is_z512)
@@ -2574,7 +2562,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-a] [-A] [-b] [-c] [-f] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014: [-a] [-A] [-b] [-c] [-f] [- idepath] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -2603,7 +2591,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:uw8C:z")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:Tuw8C:z")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2785,6 +2773,9 @@ int main(int argc, char *argv[])
 		case 'z':
 			is_z512 = 1;
 			break;
+		case 'T':
+			has_tms = 1;
+			break;
 		default:
 			usage();
 		}
@@ -2946,7 +2937,11 @@ int main(int argc, char *argv[])
 		pio_reset();
 	if (has_16x50)
 		uart_init(&uart[0], indev == INDEV_16C550A ? 1: 0);
-
+	if (has_tms) {
+		vdp = tms9918a_create();
+		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
+		vdprend = tms9918a_renderer_create(vdp);
+	}
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
@@ -3098,6 +3093,11 @@ int main(int argc, char *argv[])
 		}
 		/* TODO: coprocessor int to main if we implement it */
 
+		/* FIXME: need to rework this loop to run at 60Hz */
+		if (vdp) {
+			tms9918a_rasterize(vdp);
+			tms9918a_render(vdprend);
+		}
 		if (wiznet)
 			w5100_process(wiz);
 		/* Do 5ms of I/O and delays */

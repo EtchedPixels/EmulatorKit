@@ -12,8 +12,11 @@ libz80/libz80.o:
 lib765/lib/lib765.a:
 	$(MAKE) --directory lib765/lib
 
-rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a
-	cc -g3 rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a -o rc2014
+rc2014:	rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a
+	cc -g3 rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a -o rc2014
+
+rc2014_sdl2: rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a
+	cc -g3 rc2014.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o libz80/libz80.o lib765/lib/lib765.a -o rc2014_sdl2 -lSDL2
 
 rbcv2:	rbcv2.o ide.o w5100.o libz80/libz80.o
 	cc -g3 rbcv2.o ide.o w5100.o libz80/libz80.o -o rbcv2
