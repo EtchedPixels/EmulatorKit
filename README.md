@@ -16,6 +16,8 @@ The emulation includes
 - CF adapter
 - DS1302 real time clock (time setting not supported)
 - CTC at 0x88
+- TMS9918A at 0x98
+- SD card wired to a Z80 PIO (eg gluino + SD)
 
 At this point in time the serial emulation is complete and sufficient to run
 the standard ROM environment with BASIC. This represents the basic
@@ -46,20 +48,40 @@ https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/
 ## Usage
 
 Options:
+- -1		Enable 16550A emulation at 0xA0
+- -8		Enable 6850 ACIA with narrow decode (80-87)
 - -a		enable 6850 ACIA with usual RC2014 wide decode (80-BF)
-- -A		enable 6850 ACIA with narrow decode (80-87)
+- -A		enable 6850 ACIA with narrow decode (A0-A7)
 - -b		512K ROM/512K RAM board
-- -c		CTC card present (not yet tested)
+- -c		CTC card
+- -C path	Z80 Copro (experimental)
 - -d n		Turn on debug flags
 - -e n		Execute ROM bank n (0-7) (not used with -b)
 - -f		Fast mode (run flat out)
 - -i path	Enable IDE and use this file
+- -I path	Enable PPIDE and use this file
 - -m board	Board type (z80 for default rc2014, easy-z80, sc108, sc114, z80sbc64, z80mb64, easyz80, micro80, zrcc, tinyz80, pdog128, pdog512)
 - -p		Pageable ROM (needed for CP/M with base set up)
 - -r path	Load the ROM image from this path
-- -s		Enable the SIO/2
 - -R		Enable the DS1302 RTC
-- -w		WizNET 5100 at 0x28-0x2B (works but buggy)
+- -s		Enable the SIO/2
+- -S path	SD card image
+- -T		Enable TMS9918A emulation (experimental)
+- -u		As -1
+- -w		WizNET 5100 at 0x28-0x2B
+- -z		System has Z80-512K style watchdog/clock control
+
+The following machine types are supported:
+
+- easyz80	S.Kiselev Easy Z80
+- micro80	Bill Shen's Z84C1516 baed system
+- sc108		Small Computer Central SC108
+- sc114		Small Computer Central SC114
+- tinyz80	S.Kiselev's business card Z80 SBC
+- z80		Standard RC2014 Z80 CPU card
+- z80sbc64	Bill Shen's z80-sbc64
+- z80sb64	Bill Shen's z80-mb64
+- zrcc		Bill Shen's ZRCC minimal system
 
 To build a disk image
 
@@ -131,8 +153,8 @@ Options:
 - -t		enable timer hack
 - -d n		set debug trace bits
 - -f		fast (run flat out)
-- -R		RAMFS ECB module (not yet tested
-- -w		WizNET 5100 at 0x28-0x2B (works but buggy)
+- -R		RAMFS ECB module (not yet tested)
+- -w		WizNET 5100 at 0x28-0x2B
 
 The sd card image is just a raw file of the blocks at this point.
 
@@ -221,7 +243,7 @@ Options:
 # RC2014 8085
 
 This is a model of the standard RC2014 system but fitted with the Etched
-Pixels 8085 processor card and optionally the 16550A uart interface.
+Pixels 80C85 processor card and optionally the 16550A uart interface.
 
 ## To build yourself an actual system
 https://hackaday.io/project/167859-80c85-and-mmu-for-rc2014-bp80
@@ -247,7 +269,7 @@ https://github.com/EtchedPixels/RC2014-ROM
 - -r path	Load the ROM image from this path
 - -s		Enable the SIO/2
 - -R		Enable the DS1302 RTC (clashes with 16550A UART)
-- -w		WizNET 5100 at 0x28-0x2B (works but buggy)
+- -w		WizNET 5100 at 0x28-0x2B
 
 # SmallZ80
 
@@ -390,7 +412,7 @@ Options:
 - -I path	Enable PPIDE and use this file
 - -r path	Load the ROM image from this path
 - -R		Enable the DS1302 RTC
-- -w		WizNET 5100 at 0x28-0x2B (works but buggy)
+- -w		WizNET 5100 at 0x28-0x2B
 
 To build a disk image
 
