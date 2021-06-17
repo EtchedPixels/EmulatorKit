@@ -234,7 +234,7 @@ static void tms9918a_rasterize_g1(struct tms9918a *vdp)
         }
         fp += 7 * 256;
     }
-//    tms9918a_raster_sprites(vdp);
+    tms9918a_raster_sprites(vdp);
 }
 
 /*
@@ -294,7 +294,8 @@ static void tms9918a_rasterize_g2(struct tms9918a *vdp)
 
     for (; y < 16; y++) {
         for (x = 0; x < 32; x++) {
-            tms9918a_raster_pattern_g2(vdp, *p++, pattern, colour, fp += 8);
+            tms9918a_raster_pattern_g2(vdp, *p++, pattern, colour, fp);
+            fp += 8;
         }
         fp += 7 * 256;
     }
@@ -308,11 +309,12 @@ static void tms9918a_rasterize_g2(struct tms9918a *vdp)
 
     for (; y < 24; y++) {
         for (x = 0; x < 32; x++) {
-            tms9918a_raster_pattern_g2(vdp, *p++, pattern, colour, fp += 8);
+            tms9918a_raster_pattern_g2(vdp, *p++, pattern, colour, fp);
+            fp += 8;
         }
         fp += 7 * 256;
     }
-    tms9918a_raster_sprites(vdp);
+//    tms9918a_raster_sprites(vdp);
 }
 
 /* Rasterize a 4 x 4 pixel block */
@@ -465,6 +467,7 @@ void tms9918a_rasterize(struct tms9918a *vdp)
             break;
         case 1:
             tms9918a_rasterize_g2(vdp);
+            break;
         case 2:
             tms9918a_rasterize_mc(vdp);
             break;
