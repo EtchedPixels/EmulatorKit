@@ -175,7 +175,7 @@ static void tms9918a_raster_sprites(struct tms9918a *vdp)
 /*
  *	G1 - colour data from a character tied colour map
  */
-static void tms9918a_raster_pattern_g1(struct tms9918a *vdp, int8_t code, uint8_t *pattern, uint8_t *colour, uint32_t *out)
+static void tms9918a_raster_pattern_g1(struct tms9918a *vdp, uint8_t code, uint8_t *pattern, uint8_t *colour, uint32_t *out)
 {
     unsigned int x,y;
     uint32_t foreground, background;
@@ -208,30 +208,33 @@ static void tms9918a_rasterize_g1(struct tms9918a *vdp)
     unsigned int x,y;
     uint8_t *p = vdp->framebuffer + ((vdp->reg[2] & 0x0F) << 10);
     uint8_t *pattern = vdp->framebuffer + ((vdp->reg[4] & 0x07) << 11);
-    uint8_t *colour = vdp->framebuffer + ((vdp->reg[3] & 0x80) << 6);
+    uint8_t *colour = vdp->framebuffer + (vdp->reg[3] << 6);
     uint32_t *fp = vdp->rasterbuffer;
 
     for (y = 0; y < 8; y++) {
         for (x = 0; x < 32; x++) {
-            tms9918a_raster_pattern_g1(vdp, *p++, pattern, colour, fp += 8);
+            tms9918a_raster_pattern_g1(vdp, *p++, pattern, colour, fp);
+            fp += 8;
         }
         fp += 7 * 256;
     }
 
     for (; y < 16; y++) {
         for (x = 0; x < 32; x++) {
-            tms9918a_raster_pattern_g1(vdp, *p++, pattern, colour, fp += 8);
+            tms9918a_raster_pattern_g1(vdp, *p++, pattern, colour, fp);
+            fp += 8;
         }
         fp += 7 * 256;
     }
 
     for (; y < 24; y++) {
         for (x = 0; x < 32; x++) {
-            tms9918a_raster_pattern_g1(vdp, *p++, pattern, colour, fp += 8);
+            tms9918a_raster_pattern_g1(vdp, *p++, pattern, colour, fp);
+            fp += 8;
         }
         fp += 7 * 256;
     }
-    tms9918a_raster_sprites(vdp);
+//    tms9918a_raster_sprites(vdp);
 }
 
 /*
@@ -263,12 +266,13 @@ static void tms9918a_raster_pattern_g2(struct tms9918a *vdp, uint8_t code, uint8
 
 /*
  *	768 characters, 768 patterns, two colours per character row
+ *	Patterns and colour must be on 0x2000 boundaries
  */
 static void tms9918a_rasterize_g2(struct tms9918a *vdp)
 {
     unsigned int x,y;
     uint8_t *p = vdp->framebuffer + ((vdp->reg[2] & 0x0F) << 10);
-    uint8_t *pattern = vdp->framebuffer + ((vdp->reg[4] & 0x07) << 11);
+    uint8_t *pattern = vdp->framebuffer + ((vdp->reg[4] & 0x04) << 11);
     uint8_t *colour = vdp->framebuffer + ((vdp->reg[3] & 0x80) << 6);
     uint32_t *fp = vdp->rasterbuffer;
 
@@ -277,7 +281,8 @@ static void tms9918a_rasterize_g2(struct tms9918a *vdp)
 
     for (y = 0; y < 8; y++) {
         for (x = 0; x < 32; x++) {
-            tms9918a_raster_pattern_g2(vdp, *p++, pattern, colour, fp += 8);
+            tms9918a_raster_pattern_g2(vdp, *p++, pattern, colour, fp);
+            fp += 8;
         }
         fp += 7 * 256;
     }
@@ -391,7 +396,7 @@ static void tms9918a_raster_pattern6(struct tms9918a *vdp, uint8_t code, uint8_t
         out += 250;	/* 256 bytes per row even when working in 240 pixel */
     }
 }
-    
+
 /*
  *	960 characters using 6bits of each pattern. No sprites, no colour
  *	tables. 8 pixels of border left and right
@@ -449,27 +454,29 @@ void tms9918a_rasterize(struct tms9918a *vdp)
     unsigned int mode = (vdp->reg[1] >> 2) & 0x06;
     mode |= (vdp->reg[0] & 0x02) >> 1;
 
-    if ((vdp->reg[1] & 0x40) == 0) { 
+    if ((vdp->reg[1] & 0x40) == 0)
         memset(vdp->rasterbuffer, 0, sizeof(vdp->rasterbuffer));
-        return;
+    else {
+        switch(mode) {
+        case 0:
+            tms9918a_rasterize_g1(vdp);
+            break;
+        case 1:
+            tms9918a_rasterize_g2(vdp);
+        case 2:
+            tms9918a_rasterize_mc(vdp);
+            break;
+        case 4:
+            tms9918a_rasterize_text(vdp);
+            break;
+        default:
+            /* There are things that happen for the invalid cases but address
+               them later maybe */
+               memset(vdp->rasterbuffer, 0, sizeof(vdp->rasterbuffer));
+        }
     }
-    switch(mode) {
-    case 0:
-        tms9918a_rasterize_g1(vdp);
-        break;
-    case 1:
-        tms9918a_rasterize_g2(vdp);
-    case 2:
-        tms9918a_rasterize_mc(vdp);
-        break;
-    case 4:
-        tms9918a_rasterize_text(vdp);
-        break;
-    default:
-        /* There are things that happen for the invalid cases but address
-           them later maybe */
-        memset(vdp->rasterbuffer, 0, sizeof(vdp->rasterbuffer));
-    }
+    if (vdp->trace)
+        fprintf(stderr, "vdp: frame done.\n");
     vdp->status |= 0x80;
 }
 
@@ -594,7 +601,9 @@ void tms9918a_trace(struct tms9918a *vdp, int onoff)
 
 int tms9918a_irq_pending(struct tms9918a *vdp)
 {
-    return vdp->status & 0x80;
+    if (vdp->reg[1] & 0x20)
+        return vdp->status & 0x80;
+    return 0;
 }
 
 uint32_t *tms9918a_get_raster(struct tms9918a *vdp)
