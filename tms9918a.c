@@ -364,8 +364,10 @@ static void tms9918a_rasterize_mc(struct tms9918a *vdp)
     uint32_t *fp = vdp->rasterbuffer;
 
     for (y = 0; y < 24; y++) {
-        for (x = 0; x < 32; x++)
-            tms9918a_raster_multi(vdp, *p++, pattern + ((y & 3) << 1), fp += 8);
+        for (x = 0; x < 32; x++) {
+            tms9918a_raster_multi(vdp, *p++, pattern + ((y & 3) << 1), fp);
+            fp += 8;
+        }
         fp += 7 * 256;
     }    
     tms9918a_raster_sprites(vdp);
