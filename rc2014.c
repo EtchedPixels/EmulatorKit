@@ -2056,7 +2056,7 @@ static void z512_write(uint8_t addr, uint8_t val)
 static void z512_write_wd(uint8_t addr, uint8_t val)
 {
 	/* 1.6 seconds */
-	z512_wdog = 1600;
+	z512_wdog = 3200;
 }
 
 static uint8_t io_read_2014(uint16_t addr)
@@ -2496,16 +2496,19 @@ static void poll_irq_event(void)
 		uart_check_irq(&uart[0]);
 		if (!live_irq) {
 			if (!sio2_check_im2(sio))
-        if (!sio2_check_im2(sio + 1))
-			    ctc_check_im2();
+			        if (!sio2_check_im2(sio + 1))
+					ctc_check_im2();
 		}
+		/* TMS9918A no IM2 handling */
 	} else {
 		if (acia)
 			acia_check_irq(acia);
 		uart_check_irq(&uart[0]);
 		if (!sio2_check_im2(sio))
-      sio2_check_im2(sio + 1);
+		      sio2_check_im2(sio + 1);
 		ctc_check_im2();
+		if (tms9918a_irq_pending(vdp))
+			Z80INT(&cpu_z80, 0xFF);
 	}
 }
 
@@ -3010,10 +3013,10 @@ int main(int argc, char *argv[])
 
 	pio_reset();
 
-	/* 5ms - it's a balance between nice behaviour and simulation
+	/* 2.5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
+	tc.tv_nsec = 2500000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -3042,12 +3045,12 @@ int main(int argc, char *argv[])
 	   is loaded though */
 
 	/* We run 7372000 t-states per second */
-	/* We run 369 cycles per I/O check, do that 100 times then poll the
-	   slow stuff and nap for 5ms. */
+	/* We run 369 cycles per I/O check, do that 50 times then poll the
+	   slow stuff and nap for 2.5ms to get 50Hz on the TMS99xx */
 	while (!done) {
 		int i;
 		/* 36400 T states for base RC2014 - varies for others */
-		for (i = 0; i < 100; i++) {
+		for (i = 0; i < 50; i++) {
 			int j;
 			for (j = 0; j < 10; j++) {
 				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/10);
@@ -3093,7 +3096,7 @@ int main(int argc, char *argv[])
 		}
 		/* TODO: coprocessor int to main if we implement it */
 
-		/* FIXME: need to rework this loop to run at 60Hz */
+		/* 50Hz which is near enough */
 		if (vdp) {
 			tms9918a_rasterize(vdp);
 			tms9918a_render(vdprend);
