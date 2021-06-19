@@ -20,16 +20,16 @@ struct zxkey {
 
 static SDL_Keycode zxkeys[] = {
   /* Rows low to high, then columns low to high */
-  /* ROW 0 (FEFF) */
-  SDLK_5, SDLK_t, SDLK_6, SDLK_g, SDLK_y, SDLK_v, SDLK_h, SDLK_b,
-  /* ROW 1 (FDFF */
-  SDLK_4, SDLK_r, SDLK_7, SDLK_f, SDLK_u, SDLK_c, SDLK_j, SDLK_n,
+  /* ROW 0 (EFFF) */
+  SDLK_1, SDLK_q, SDLK_0, SDLK_a, SDLK_p, SDLK_LSHIFT, SDLK_RETURN, SDLK_SPACE,
+  /* ROW 1 (F7FF */
+  SDLK_2, SDLK_w, SDLK_9, SDLK_s, SDLK_o, SDLK_z, SDLK_l, SDLK_RSHIFT,
   /* ROW 2 (FBFF) */
   SDLK_3, SDLK_e, SDLK_8, SDLK_d, SDLK_i, SDLK_x, SDLK_k, SDLK_m,
-  /* ROW 3 (F7FF */
-  SDLK_2, SDLK_w, SDLK_9, SDLK_s, SDLK_o, SDLK_z, SDLK_l, SDLK_RSHIFT,
-  /* ROW 4 (EFFF) */
-  SDLK_1, SDLK_q, SDLK_0, SDLK_a, SDLK_p, SDLK_LSHIFT, SDLK_RETURN, SDLK_SPACE
+  /* ROW 3 (FDFF */
+  SDLK_4, SDLK_r, SDLK_7, SDLK_f, SDLK_u, SDLK_c, SDLK_j, SDLK_n,
+  /* ROW 4 (FEFF) */
+  SDLK_5, SDLK_t, SDLK_6, SDLK_g, SDLK_y, SDLK_v, SDLK_h, SDLK_b
 };
 
 /* The ZXKey feeds the low 8bits of the address into the decode and returns

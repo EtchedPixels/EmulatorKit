@@ -13,7 +13,7 @@ extern struct zxkey *zxkey;
 void ui_event(void)
 {
 	SDL_Event ev;
-	if (SDL_PollEvent(&ev)) {
+	while (SDL_PollEvent(&ev)) {
 		switch(ev.type) {
 		case SDL_QUIT:
 			emulator_done = 1;

@@ -28,6 +28,7 @@ struct keymatrix {
     unsigned int size;
     SDL_Keycode *matrix;
     bool *status;
+    int trace;
 };
  
 /*
@@ -37,9 +38,10 @@ static int keymatrix_find(struct keymatrix *km, SDL_Keycode keycode)
 {
     SDL_Keycode *m = km->matrix;
     unsigned int n = 0;
-    while(n++ < km->size) {
+    while(n < km->size) {
         if (*m++ == keycode)
             return n;
+        n++;
     }
     return -1;
 
@@ -56,7 +58,11 @@ static bool keymatrix_event(struct keymatrix *km, SDL_Keysym *keysym, bool down)
     /* Not a key we emulate */
     if (n == -1)
         return false;
-    printf("Keysym %02x was mapped.\n", (unsigned int)keysym->sym);
+    if (km->trace)
+        fprintf(stderr, "Keysym %02x (%s) was mapped (%d, %d).\n",
+            (unsigned int)keysym->sym,
+            down ? "Down" : "Up",
+            n / km->cols, n % km->cols);
     km->status[n] = down;
     return true;
 }
@@ -131,5 +137,6 @@ void keymatrix_reset(struct keymatrix *km)
 
 void keymatrix_trace(struct keymatrix *km, int onoff)
 {
+    km->trace = onoff;
 }
 
