@@ -14,25 +14,25 @@
 static int sdl_live;
 
 static uint32_t vdp_ctab[16] = {
-    0x000000FF,		/* transparent (we render as black) */
-    0x000000FF,		/* black */
-    0x20C020FF,		/* green */
-    0x60D060FF,		/* light green */
+    0xFF000000,		/* transparent (we render as black) */
+    0xFF000000,		/* black */
+    0xFF20C020,		/* green */
+    0xFF60D060,		/* light green */
     
-    0x2020D0FF,		/* blue */
-    0x4060D0FF,		/* light blue */
-    0xA02020FF,		/* dark red */
-    0x40C0D0FF,		/* cyan */
+    0xFF2020D0,		/* blue */
+    0xFF4060D0,		/* light blue */
+    0xFFA02020,		/* dark red */
+    0xFF40C0D0,		/* cyan */
     
-    0xD02020FF,		/* red */
-    0xD06060FF,		/* light red */
-    0xC0C020FF,		/* dark yellow */
-    0xC0C080FF,		/* yellow */
+    0xFFD02020,		/* red */
+    0xFFD06060,		/* light red */
+    0xFFC0C020,		/* dark yellow */
+    0xFFC0C080,		/* yellow */
     
-    0x208020FF,		/* dark green */
-    0xC040A0FF,		/* magneta */
-    0xA0A0A0FF,		/* grey */
-    0xD0D0D0FF		/* white */
+    0xFF208020,		/* dark green */
+    0xFFC040A0,		/* magneta */
+    0xFFA0A0A0,		/* grey */
+    0xFFD0D0D0		/* white */
 };
 
 struct tms9918a_renderer {
