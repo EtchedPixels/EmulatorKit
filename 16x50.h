@@ -13,5 +13,4 @@ extern void uart16x50_set_input(struct uart16x50 *uart16x50, int port);
 /* Caller proviced */
 extern unsigned int next_char(void);
 extern unsigned int check_chario(void);
-extern void recalc_interrupts(void);
 

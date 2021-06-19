@@ -322,7 +322,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-c] [-f] [-i idepath] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-6502: [-1] [-A] [-a] [-f] [-i idepath] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -376,7 +376,7 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (input == 0) {
-		fprintf(stderr, "rc2014: no UART selected, defaulting to 16550A\n");
+		fprintf(stderr, "rc2014-6502: no UART selected, defaulting to 16550A\n");
 		input = 2;
 	}
 
@@ -386,7 +386,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, 524288) != 524288) {
-		fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
+		fprintf(stderr, "rc2014-6502: banked rom image should be 512K.\n");
 		exit(EXIT_FAILURE);
 	}
 	close(fd);

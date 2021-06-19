@@ -345,7 +345,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-6303: [-b] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-6303: [-b] [-B] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -402,7 +402,7 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
-		fprintf(stderr, "rc2014: no ROM\n");
+		fprintf(stderr, "rc2014-6303: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -413,7 +413,7 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		if (read(fd, ramrom + 32768, 32768) != 32768) {
-			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
+			fprintf(stderr, "rc2014-6303: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
 		close(fd);
@@ -426,7 +426,7 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		if (read(fd, ramrom, 524288) != 524288) {
-			fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
+			fprintf(stderr, "rc2014-6303: banked rom image should be 512K.\n");
 			exit(EXIT_FAILURE);
 		}
 		bankenable = 1;

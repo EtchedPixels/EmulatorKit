@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
@@ -31,6 +32,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+
 #include "system.h"
 #include "libz80/z80.h"
 #include "lib765/include/765.h"
@@ -45,6 +47,7 @@
 #include "w5100.h"
 #include "z80copro.h"
 #include "z80dma.h"
+#include "zxkey.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
@@ -91,6 +94,8 @@ static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 
+struct zxkey *zxkey;
+
 static uint16_t tstate_steps = 369;	/* RC2014 speed */
 
 /* IRQ source that is live in IM2 */
@@ -104,7 +109,7 @@ static Z80Context cpu_z80;
 
 static nic_w5100_t *wiz;
 
-static volatile int done;
+volatile int emulator_done;
 
 #define TRACE_MEM	0x000001
 #define TRACE_IO	0x000002
@@ -2068,6 +2073,9 @@ static uint8_t io_read_2014(uint16_t addr)
 	if ((addr & 0xFF) == 0xBA) {
 		return 0xCC;
 	}
+	if (zxkey && (addr & 0xFC) == 0xFC)
+		return zxkey_scan(zxkey, addr);
+
 	addr &= 0xFF;
 	if (addr >= 0x48 && addr < 0x50) 
 		return fdc_read(addr & 7);
@@ -2507,7 +2515,7 @@ static void poll_irq_event(void)
 		if (!sio2_check_im2(sio))
 		      sio2_check_im2(sio + 1);
 		ctc_check_im2();
-		if (tms9918a_irq_pending(vdp))
+		if (vdp && tms9918a_irq_pending(vdp))
 			Z80INT(&cpu_z80, 0xFF);
 	}
 }
@@ -2555,7 +2563,7 @@ static struct termios saved_term, term;
 static void cleanup(int sig)
 {
 	tcsetattr(0, TCSADRAIN, &saved_term);
-	done = 1;
+	emulator_done = 1;
 }
 
 static void exit_cleanup(void)
@@ -2594,7 +2602,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:Tuw8C:z")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:Tuw8C:Zz")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2773,8 +2781,11 @@ int main(int argc, char *argv[])
 			else
 				patha = optarg;
 			break;
-		case 'z':
+		case 'Z':
 			is_z512 = 1;
+			break;
+		case 'z':
+			zxkey = zxkey_create();
 			break;
 		case 'T':
 			has_tms = 1;
@@ -3047,7 +3058,7 @@ int main(int argc, char *argv[])
 	/* We run 7372000 t-states per second */
 	/* We run 369 cycles per I/O check, do that 50 times then poll the
 	   slow stuff and nap for 2.5ms to get 50Hz on the TMS99xx */
-	while (!done) {
+	while (!emulator_done) {
 		int i;
 		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 50; i++) {
@@ -3089,13 +3100,15 @@ int main(int argc, char *argv[])
 		if (is_z512 && (z512_control & 0x20)) {
 			if (z512_wdog <= 5) {
 				fprintf(stderr, "Watchdog reset.\n");
-				done = 1;
+				emulator_done = 1;
 				break;
 			}
 			z512_wdog -= 5;
 		}
 		/* TODO: coprocessor int to main if we implement it */
 
+		/* We want to run UI events before we rasterize */
+		ui_event();
 		/* 50Hz which is near enough */
 		if (vdp) {
 			tms9918a_rasterize(vdp);

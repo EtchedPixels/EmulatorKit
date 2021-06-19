@@ -12,3 +12,8 @@ extern unsigned int next_char(void);
 
 /* Interrupt helpers */
 extern void recalc_interrupts(void);
+
+/* GUI polling hook */
+extern void ui_event(void);
+
+extern volatile int emulator_done;
