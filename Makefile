@@ -68,8 +68,8 @@ m68k/lib68k.a:
 rc2014-68008.o: rc2014-68008.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c rc2014-68008.c
 
-rc2014-8085: rc2014-8085.o intel_8085_emulator.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
-	cc -g3 rc2014-8085.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o intel_8085_emulator.o -o rc2014-8085
+rc2014-8085: rc2014-8085.o intel_8085_emulator.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o 16x50.o
+	cc -g3 rc2014-8085.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o w5100.o intel_8085_emulator.o -o rc2014-8085
 
 rc2014-80c188: rc2014-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \
