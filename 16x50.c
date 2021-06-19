@@ -198,11 +198,15 @@ uint8_t uart16x50_read(struct uart16x50 *uptr, uint8_t addr)
             if (uptr->input)
                 return next_char();
             return 0xFF;
-        }
+        } else
+            return uptr->ls;
         break;
     case 1:
         /* IER */
-        return uptr->ier;
+        if (uptr->dlab == 0)
+            return uptr->ier;
+        else
+            return uptr->ms;
     case 2:
         /* IIR */
         return uptr->iir;
