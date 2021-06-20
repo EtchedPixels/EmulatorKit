@@ -1,13 +1,46 @@
 /*
- *	Amstrad NC100
+ *	Amstrad NC200
  *
  *	CMOS Z80 at 6MHz
- *	64K Internal RAM
- *	256K Internal ROM
+ *	128K Internal RAM
+ *	512K Internal ROM
  *	PCMCIA slot (type I only)
  *	TC8521AP/AM RTC
  *	µPD71051 UART (8251A)
  *	µPD4711A
+ *
+ *	The NC200 is a close relative of the NC100.
+ *
+ *	The differences on the I/O ports are
+ *	0x0x - the display is twice as big so A12 is taken from the video
+ *	       scan hardware not this port
+ *
+ *	0x10:
+ *	There is now twice as much RAM so another bit matters for paging RAM
+ *
+ *	0x30:
+ *	Unused bit 5 is now used for the disk interface
+ *
+ *	0x60: all re-arranged
+ *	6 = RTC int
+ *	5 = FDC
+ *	4 = Power off int (button)
+ *	3 = Key scan
+ *	2 = serial (RX | TX)
+ *	1 = unused
+ *	0 = printer ACK
+ *
+ *	0x70:
+ *	is TC in here ??
+ *	bit 2: 0 = backlight
+ *	bit 1: 0 = disk motor
+ *	bit 0: 0 = power on/off
+ *
+ *	0xA0:
+ *	bit 0 is now a battery good indicator (0 = good enough for disk)
+ *	bit 1 and 3 are no longer used it seems
+ *
+ *		
  */
 
 #include <stdio.h>
@@ -28,42 +61,48 @@
 #include "keymatrix.h"
 
 #include "libz80/z80.h"
+#include "lib765/include/765.h"
 #include "z80dis.h"
 
 static SDL_Window *window;
 static SDL_Renderer *render;
 static SDL_Texture *texture;
-static uint32_t texturebits[480 * 64];
+static uint32_t texturebits[480 * 128];
+
+static FDC_PTR fdc;
+static FDRV_PTR drive;
 
 struct keymatrix *matrix;
 
-static uint8_t ram[65536];
-static uint8_t rom[262144];
+static uint8_t ram[131072];
+static uint8_t rom[524288];
 static uint8_t *pcmcia;			/* Battery backed usually */
 static uint32_t pcmcia_size;
 
 static Z80Context cpu_z80;
 static uint8_t irqmask = 0x00;
-static uint8_t irqstat = 0x0F;		/* Active low */
+static uint8_t irqstat = 0xFF;		/* Active low */
+#define IRQ_RTC			0x40	/* RTC alarm ? */
+#define IRQ_FDC			0x20	/* 765 */
+#define IRQ_POWER_OFF		0x10	/* Power off button */
 #define IRQ_TICK		0x08	/* 10ms tick */
-#define IRQ_ACK			0x04	/* Printer ACK */
-#define IRQ_TXR			0x02	/* UART TX ready */
-#define IRQ_RXR			0x01	/* UART RX ready */
-static uint8_t vidbase;		/* Top 4 bits of video fetch */
+#define IRQ_SERIAL		0x04	/* Serial */
+#define IRQ_ACK			0x01	/* Printer ACK */
+static uint8_t vidbase;		/* Top 3 bits of video fetch */
 static uint8_t baudmisc = 0xFF;
 static uint8_t pplatch;
 static uint8_t bankr[4];
 static uint8_t sound[4];
-/* These are mostly inverted signals */
+/* Mostly inverted - differ from NC100 */
 #define CSTAT_PRESENT		0x80
 #define CSTAT_WP		0x40
 #define CSTAT_5V		0x20
 #define CSTAT_CBLOW		0x10
-#define CSTAT_BLOW		0x08
 #define CSTAT_LBLOW		0x04
-#define CSTAT_LPBUSY		0x02
-#define CSTAT_LPACK		0x01
-static uint8_t cardstat = CSTAT_PRESENT | CSTAT_5V;
+#define CSTAT_BATGOOD		0x01	/* Low if can drive floppy */
+static uint8_t cardstat = CSTAT_PRESENT | CSTAT_CBLOW;
+static uint8_t pctrl;
+#define PCTRL_BACKLIGHT		0x04
 
 static uint8_t fast;
 volatile int emulator_done;
@@ -74,6 +113,7 @@ volatile int emulator_done;
 #define TRACE_CPU	0x000008
 #define TRACE_BANK	0x000010
 #define TRACE_KEY	0x000020
+#define TRACE_FDC	0x000040
 
 static int trace = 0;
 
@@ -87,9 +127,9 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	case 0x00:
 		if (write)
 			return NULL;
-		return &rom[((bank & 0x0F) << 14) + addr];
+		return &rom[((bank & 0x1F) << 14) + addr];
 	case 0x40:
-		return &ram[((bank & 3) << 14) + addr];
+		return &ram[((bank & 7) << 14) + addr];
 	case 0x80:
 		if (pcmcia == NULL)
 			return NULL;
@@ -139,7 +179,7 @@ uint8_t z80dis_byte(uint16_t addr)
 {
 	uint8_t *p = mmu(addr, 0);
 	if (p == NULL) {
-		fprintf(stderr, "??");
+		fprintf(stderr, "?? ");
 		return 0xFF;
 	}
 	fprintf(stderr, "%02X ", *p);
@@ -155,7 +195,7 @@ uint8_t z80dis_byte_quiet(uint16_t addr)
 	return *p;
 }
 
-static void nc100_trace(unsigned unused)
+static void nc200_trace(unsigned unused)
 {
 	static uint32_t lastpc = -1;
 	char buf[256];
@@ -219,21 +259,7 @@ unsigned int next_char(void)
 }
 
 /*
- *	Interrupt controller: not very clear how this is actually meant to
- *	work.
- *
- *	irqstat is 4 bits that clear when the IRQ source is present, writing
- *	0 back sets the bits allowing another event to occur.
- *
- *	irqmask is a 4 bit user writable mask. Set bits permit the interrupt
- *	to be a source.
- *
- *	There are four source bits
- *	3	key scan		cleared at source by reading B9
- *	2	printer ack
- *	1	tx ready from uart	}	cleared on uart
- *	0	rx ready from uart	}
- *
+ *	Interrupt controller.
  */
 
 static void raise_irq(uint8_t n)
@@ -244,121 +270,89 @@ static void raise_irq(uint8_t n)
 }
 
 /*
- *	Keyboard mapping
+ *	Keyboard mapping (Similar but not quite the same as the NC100)
  */
 
 static SDL_Keycode keyboard[] = {
-	SDLK_LSHIFT, SDLK_RSHIFT, 0, SDLK_LEFT, SDLK_RETURN, 0, 0, 0,
-	SDLK_LALT, SDLK_LCTRL, SDLK_ESCAPE, SDLK_SPACE, 0, 0, SDLK_5, 0,
-	SDLK_CAPSLOCK, SDLK_RALT, SDLK_1, SDLK_TAB, 0, 0, 0, 0,
+	SDLK_LSHIFT, SDLK_RSHIFT, SDLK_4, SDLK_LEFT, SDLK_RETURN, 0, 0, 0,
+	SDLK_LALT, SDLK_LCTRL, SDLK_ESCAPE, SDLK_SPACE, 0, 0, 0, SDLK_9,
+	SDLK_CAPSLOCK, SDLK_RALT, SDLK_1, SDLK_TAB, SDLK_5, 0, SDLK_6, 0,
 	SDLK_3, SDLK_2, SDLK_q, SDLK_w, SDLK_e, 0, SDLK_s, SDLK_d,
-	SDLK_4, 0, SDLK_z, SDLK_x, SDLK_a, 0, SDLK_r, SDLK_f,
+	SDLK_8, SDLK_7, SDLK_z, SDLK_x, SDLK_a, 0, SDLK_r, SDLK_f,
 	0, 0, SDLK_b, SDLK_v, SDLK_t, SDLK_y, SDLK_g, SDLK_c,
-	SDLK_6, SDLK_DOWN, SDLK_DELETE, SDLK_RIGHT, SDLK_HASH, SDLK_SLASH, SDLK_h, SDLK_n,
-	SDLK_EQUALS, SDLK_7, SDLK_BACKSLASH, SDLK_UP, 0, SDLK_u, SDLK_m, SDLK_k,
-	SDLK_8, SDLK_MINUS, SDLK_RIGHTBRACKET, SDLK_LEFTBRACKET,
+	0, SDLK_DOWN, SDLK_DELETE, SDLK_RIGHT, SDLK_HASH, SDLK_SLASH, SDLK_h, SDLK_n,
+	0, SDLK_EQUALS, SDLK_BACKSLASH, SDLK_UP, 0, SDLK_u, SDLK_m, SDLK_k,
+	0, SDLK_MINUS, SDLK_RIGHTBRACKET, SDLK_LEFTBRACKET,
 				SDLK_AT, SDLK_i, SDLK_j, SDLK_LESS,
-	SDLK_0, SDLK_9, SDLK_BACKSPACE, SDLK_p,
+	0, SDLK_0, SDLK_BACKSPACE, SDLK_p,
 				SDLK_COLON, SDLK_l, SDLK_o, SDLK_GREATER
 };
 
 /*
- *	Very hacky RTC (borrowed from nc100em). Needs fixing up
+ *	The NC200 has a rather conventional PC like RTC
+ *	It is interfaced on the usual A0 odd/even register/data scheme
  *
- *	The 8521 has 4 pages (0-3)
- *	Page 0: Time
- *	Page 1: Alarm
- *	Page 2: RAM (13 x 4bit)
- *	Page 3: RAM (13 x 4bit)
+ *	The NC200 uses it in binary mode, so we don't emulate BCD mode
+ *	Ditto with 12 hour
  */
 
 static uint8_t rtc_page;
-static uint8_t rtc_ram[26];
-static struct tm *rtc_tm;
+static uint8_t rtc_ram[64];
 
-static uint8_t tc8521_read(uint8_t addr)
+static uint8_t mc146818_read(uint8_t addr)
 {
-	uint8_t page;
+	time_t t = time(NULL);
+	struct tm *rtc_tm = localtime(&t);
 
-	addr &= 0x0F;
-	page = rtc_page & 0x03;
-	/* Read pack the page register we set (all banks) */
-	if (addr == 0x0D)
-		return 0xF0 | rtc_page;
-	/* Write only test and reset */
-	if (addr == 0x0E || addr == 0x0F)
-		return 0xF0;
-	/* Ok read is valid - deal with the page selected */
-	/* Pages 2 and 3 are the NVRAM */
-	if (page == 2)
-		return rtc_ram[addr];
-	if (page == 3)
-		return rtc_ram[addr + 13];
-	/* Page 0 is the time */
-	if (page == 0) {
-		if (rtc_tm == NULL)
-			return 0xF0;
-		switch(addr) {
+	/* Should never occur but don't crash if we are in nonsenseville */	
+	if (rtc_tm == NULL)
+		return 0xFF;
+
+	addr &= 1;
+	if (addr == 0)
+		return 0x00;		/* Not readable */
+	switch(rtc_page) {
 		case 0x00:
-			return (rtc_tm->tm_sec % 10) | 0xF0;
-		case 0x01:
-			return (rtc_tm->tm_sec / 10) | 0xF0;
+			return rtc_tm->tm_sec;
 		case 0x02:
-			return (rtc_tm->tm_min % 10) | 0xF0;
-		case 0x03:
-			return (rtc_tm->tm_min / 10) | 0xF0;
+			return rtc_tm->tm_min;
 		case 0x04:
-			return (rtc_tm->tm_hour % 10) | 0xF0;
-		case 0x05:
-			return (rtc_tm->tm_hour / 10) | 0xF0;
+			return rtc_tm->tm_hour;
 		case 0x06:
-			return rtc_tm->tm_wday | 0xF0;
+			return rtc_tm->tm_wday;
 		case 0x07:
-			return (rtc_tm->tm_mday % 10) | 0xF0;
+			return rtc_tm->tm_mday;
 		case 0x08:
-			return (rtc_tm->tm_mday / 10) | 0xF0;
+			return rtc_tm->tm_mon + 1;
 		case 0x09:
-			return ((rtc_tm->tm_mon + 1) % 10) | 0xF0;
+			return rtc_tm->tm_year - 90;
+		/* Hacks for control registers */
 		case 0x0A:
-			return ((rtc_tm->tm_mon + 1) / 10) | 0xF0;
+			return rtc_ram[rtc_page] & 0x7F;
 		case 0x0B:
-			return ((rtc_tm->tm_year - 90) % 10) | 0xF0;
+			return 4;
 		case 0x0C:
-			return ((rtc_tm->tm_year - 90) / 10) | 0xF0;
-		}
-	}
-	/* Ok page 1: Alarm and control (fake it) */
-	switch(addr) {
-	case 0x0A:
-		return 0xF1;		/* Hack for 24hr mode */
-	case 0x0B:
-		return (rtc_tm->tm_year & 3) | 0xF0;	/* Leap hack */
-	default:
-		return 0xF0;
+			return 0;
+		case 0x0D:
+			return 0x80;
+		default:
+			return rtc_ram[rtc_page];
 	}
 }
 
-static void tc8521_write(uint8_t addr, uint8_t val)
+/*
+ *	Very minimal write support. We don't actually change or honour
+ *	anything!
+ */
+static void mc146818_write(uint8_t addr, uint8_t val)
 {
-	time_t t;
-	addr &= 0x0F;
-	switch(addr) {
-	case 0x0D:/* Page : bit 3 is timer enable 2 alarm enable - we ignore */
-		rtc_page = val & 3;
-		time(&t);
-		rtc_tm = localtime(&t);
-		break;
-	case 0x0E:		/* Test */
-	case 0x0F:		/* Reset */
-		break;
-	default:
-		if (rtc_page == 2)
-			rtc_ram[addr] = val | 0xF0;
-		else if(rtc_page == 3)
-			rtc_ram[addr + 13] = val | 0xF0;
-		/* Ignore the other bits for now */
-		break;
+	addr &= 1;
+	if (addr == 0) {
+		rtc_page = val & 0x3F;
+		return;
 	}
+	if (rtc_page >= 0x0A || rtc_page == 0x01 || rtc_page == 0x03 || rtc_page == 0x05)
+		rtc_ram[rtc_page] = val;
 }
 
 /*
@@ -408,6 +402,38 @@ static void do_misc(uint8_t val)
 	baudmisc = val;
 }
 
+/*
+ *	Floppy disk interface
+ */
+
+static void fdc_log(int debuglevel, char *fmt, va_list ap)
+{
+	if ((trace & TRACE_FDC) || debuglevel == 0) {
+		vfprintf(stderr, fmt, ap);
+	}
+}
+
+static void fdc_isr(FDC_PTR fdc, int status)
+{
+	raise_irq(IRQ_FDC);
+}
+
+static void fdc_write(uint8_t addr, uint8_t val)
+{
+	if (addr == 1)
+		fdc_write_data(fdc, val);
+}
+
+static uint8_t fdc_read(uint8_t addr)
+{
+	uint8_t r;
+	if (addr == 0)
+		r = fdc_read_ctrl(fdc);
+	else
+		r = fdc_read_data(fdc);
+	return r;
+}
+
 static void dump_banks(void)
 {
 	unsigned int i;
@@ -435,6 +461,17 @@ static void dump_banks(void)
 	fprintf(stderr, "\n");
 }
 
+static void nc200_reset(void)
+{
+	irqmask = 0xFF;
+	irqstat = 0xFF;
+	bankr[0] = bankr[1] = bankr[2] = bankr[3] = 0;
+	vidbase = 0;
+	pplatch = 0;
+	/* ?? sound reset if we do sound */
+	Z80RESET(&cpu_z80);
+}
+
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	uint8_t dev = addr & 0xF0;
@@ -442,15 +479,16 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		fprintf(stderr, "=== OUT %02X, %02X\n", addr & 0xFF, val);
 	switch(dev) {
 	case 0x00:	/* Display control (W)*/
-		vidbase = val & 0xF0;
+		vidbase = val & 0xE0;
 		break;
 	case 0x10:	/* Memory management (RW) */
 		bankr[addr & 3] = val;
 		if (trace & TRACE_BANK)
 			dump_banks();
 		return;
-	case 0x20:	/* Card control (W) */
-		/* Not emulated - adds a wait state to the PCMCIA if bit 7 */
+	case 0x20:	/* Card control (W). Also FDC control */
+		fdc_set_motor(fdc, (val & 4) ? 0 : 1);
+		fdc_set_terminal_count(fdc, val & 1);
 		return;
 	case 0x30:	/* Baud generator (W) and misc */
 		/* 7 set 0 to to read PCMCIA attribute space */
@@ -470,8 +508,13 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		irqmask = val;
 		return;
 	case 0x70:	/* Power control */
-		if ((val & 1) == 0)
-			emulator_done = 1;
+		pctrl = val;
+		if ((val & 0x01) == 0) {
+			/* We don't quite the program in this case because
+			   the system uses self reset a lot to go back to
+			   main menu */
+			nc200_reset();
+		}
 		return;
 	case 0x80:	/* Unused */
 		break;
@@ -486,9 +529,10 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		i8251_write(addr, val);
 		return;
 	case 0xD0:	/* TC8521 (RW) */
-		tc8521_write(addr, val);
+		mc146818_write(addr, val);
 		return;
-	case 0xE0:	/* Unused */
+	case 0xE0:	/* Floppy controller */
+		fdc_write(addr & 1, val);
 		break;
 	case 0xF0:	/* Unused */
 		break;	
@@ -527,8 +571,9 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 	case 0xC0:	/* uPD71051 (RW) */
 		return i8251_read(addr);
 	case 0xD0:	/* TC8521 (RW) */
-		return tc8521_read(addr);
-	case 0xE0:	/* Unused */
+		return mc146818_read(addr);
+	case 0xE0:	/* Floppy */
+		return fdc_read(addr & 1);
 		break;
 	case 0xF0:	/* Unused */
 		break;	
@@ -545,20 +590,22 @@ uint8_t io_read(int unused, uint16_t addr)
 }
 
 /* We maybe shouldn't do it all every frame but who cares 8) */
-static void nc100_rasterize(void)
+static void nc200_rasterize(void)
 {
 	uint8_t *vscan = ram + (vidbase << 8);
 	uint32_t *tp = texturebits;
 	unsigned int y, x, b;
 	uint8_t bits;
-	for (y = 0; y < 64 ; y++) {
+	for (y = 0; y < 128 ; y++) {
 		for (x = 0; x < 60; x++) {
 			bits = *vscan++;
 			for (b = 0; b < 8; b++) {
 				if (bits & 0x80)
 					*tp++ = 0xFF333333;
+				else if (!(pctrl & PCTRL_BACKLIGHT))
+					*tp++ = 0xFFEEEEDD;
 				else
-					*tp++ = 0xFFCCCCBB;
+					*tp++ = 0xFFBBBBAA;
 				bits <<= 1;
 			}
 		}
@@ -566,13 +613,13 @@ static void nc100_rasterize(void)
 	}
 }
 
-static void nc100_render(void)
+static void nc200_render(void)
 {
 	SDL_Rect rect;
 	
 	rect.x = rect.y = 0;
 	rect.w = 480;
-	rect.h = 64;
+	rect.h = 128;
 
 	SDL_UpdateTexture(texture, NULL, texturebits, 480 * 4);
 	SDL_RenderClear(render);
@@ -585,8 +632,9 @@ static void ui_event(void)
 	SDL_Event ev;
 	while (SDL_PollEvent(&ev)) {
 		switch(ev.type) {
+		/* FIXME: should fake the  magic key combo ? */
 		case SDL_QUIT:
-			Z80NMI(&cpu_z80);
+			emulator_done = 1;
 			break;
 		case SDL_KEYDOWN:
 		case SDL_KEYUP:
@@ -611,7 +659,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "nc100: [-f] [-p pcmcia] [-r rompath] [-d debug]\n");
+	fprintf(stderr, "nc200: [-f] [-p pcmcia] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -620,11 +668,15 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	int fd;
-	char *rom_path = "nc100.rom";
+	char *rom_path = "nc200.rom";
 	char *pcmcia_path = NULL;
+	char *fd_path = NULL;
 
-	while ((opt = getopt(argc, argv, "p:r:d:f")) != -1) {
+	while ((opt = getopt(argc, argv, "p:r:d:fA:")) != -1) {
 		switch (opt) {
+		case 'A':
+			fd_path = optarg;
+			break;
 		case 'p':
 			pcmcia_path = optarg;
 			break;
@@ -650,15 +702,15 @@ int main(int argc, char *argv[])
 		perror(rom_path);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, rom, 262144) < 262144) {
-		fprintf(stderr, "nc100: short rom '%s'.\n", rom_path);
+	if (read(fd, rom, 524288) < 524288) {
+		fprintf(stderr, "nc200: short rom '%s'.\n", rom_path);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
-	fd = open("nc100.ram", O_RDONLY);
+	fd = open("nc200.ram", O_RDONLY);
 	if (fd != -1) {
-		read(fd, ram, 65536);
-		read(fd, rtc_ram, 26);
+		read(fd, ram, 131072);
+		read(fd, rtc_ram, 64);
 		close(fd);
 	}
 	if (pcmcia_path) {
@@ -670,50 +722,67 @@ int main(int argc, char *argv[])
 		}
 		size = lseek(fd, 0, SEEK_END);
 		if (size == -1) {
-			fprintf(stderr, "nc100: unable to get size of '%s'.\n", pcmcia_path);
+			fprintf(stderr, "nc200: unable to get size of '%s'.\n", pcmcia_path);
 			exit(EXIT_FAILURE);
 		}
 		pcmcia = mmap(0, size, PROT_READ|PROT_WRITE, MAP_SHARED,
 			fd, 0);
 		if (pcmcia == MAP_FAILED) {
-			fprintf(stderr, "nc100: unable to map PCMCIA card image '%s'.\n",
+			fprintf(stderr, "nc200: unable to map PCMCIA card image '%s'.\n",
 				pcmcia_path);
 			exit(EXIT_FAILURE);
 		}
 		cardstat &= ~CSTAT_PRESENT;
 		pcmcia_size = size;
-		fprintf(stderr, "nc100: mapped %dKB PCMCIA image.\n", pcmcia_size);
+		fprintf(stderr, "nc200: mapped %dKB PCMCIA image.\n", pcmcia_size);
 	}
 
 	matrix = keymatrix_create(10, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
+
+	fdc = fdc_new();
+
+	lib765_register_error_function(fdc_log);
+
+	drive = fd_newdsk();
+	if (fd_path)
+		fdd_setfilename(drive, fd_path);
+
+	fd_settype(drive, FD_35);
+	fd_setheads(drive, 2);
+	fd_setcyls(drive, 80);
+
+	fdc_reset(fdc);
+	fdc_setisr(fdc, fdc_isr);
+	fdc_setdrive(fdc, 0, drive);
+
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "nc100: unable to initialize SDL: %s\n",
+		fprintf(stderr, "nc200: unable to initialize SDL: %s\n",
 			SDL_GetError());
 		exit(1);
 	}
-	window = SDL_CreateWindow("NC100",
+	window = SDL_CreateWindow("NC200",
 			SDL_WINDOWPOS_UNDEFINED,
 			SDL_WINDOWPOS_UNDEFINED,
-			480, 64,
+			480, 128,
 			SDL_WINDOW_RESIZABLE);
 	if (window == NULL) {
-		fprintf(stderr, "nc100: unable to open window: %s\n",
+		fprintf(stderr, "nc200: unable to open window: %s\n",
 			SDL_GetError());
 		exit(1);
 	}
 	render = SDL_CreateRenderer(window, -1, 0);
 	if (render == NULL) {
-		fprintf(stderr, "nc100: unable to create renderer: %s\n",
+		fprintf(stderr, "nc200: unable to create renderer: %s\n",
 			SDL_GetError());
 		exit(1);
 	}
 	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888,
 		SDL_TEXTUREACCESS_STREAMING,
-		480, 64);
+		480, 128);
 	if (texture == NULL) {
-		fprintf(stderr, "nc100: unable to create texture: %s\n",
+		fprintf(stderr, "nc200: unable to create texture: %s\n",
 			SDL_GetError());
 		exit(1);
 	}
@@ -721,7 +790,7 @@ int main(int argc, char *argv[])
 	SDL_RenderClear(render);
 	SDL_RenderPresent(render);
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-	SDL_RenderSetLogicalSize(render, 480, 64);
+	SDL_RenderSetLogicalSize(render, 480, 128);
 
 	/* 10ms - it's a balance between nice behaviour and simulation
 	   smoothness */
@@ -749,7 +818,7 @@ int main(int argc, char *argv[])
 	cpu_z80.ioWrite = io_write;
 	cpu_z80.memRead = mem_read;
 	cpu_z80.memWrite = mem_write;
-	cpu_z80.trace = nc100_trace;
+	cpu_z80.trace = nc200_trace;
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
@@ -760,25 +829,28 @@ int main(int argc, char *argv[])
 		int i;
 		for (i = 0; i < 100; i++) {
 			Z80ExecuteTStates(&cpu_z80, 600);
+			fdc_tick(fdc);
 		}
 
 		/* We want to run UI events before we rasterize */
 		ui_event();
-		nc100_rasterize();
-		nc100_render();
+		nc200_rasterize();
+		nc200_render();
 		raise_irq(IRQ_TICK);
-		if ((~irqstat & irqmask) & 0x0F) {
+		if ((~irqstat & irqmask) & 0x0F)
 			Z80INT(&cpu_z80, 0xFF);
-		}
 		/* Do 5ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 	}
-	fd = open("nc100.ram", O_RDWR|O_CREAT, 0600);
+	fd = open("nc200.ram", O_RDWR|O_CREAT, 0600);
 	if (fd != -1) {
-		write(fd, ram, 65536);
-		write(fd, rtc_ram, 26);
+		write(fd, ram, 131072);
+		write(fd, rtc_ram, 64);
 		close(fd);
 	}
+	fd_eject(drive);
+	fdc_destroy(&fdc);
+	fd_destroy(&drive);
 	exit(0);
 }
