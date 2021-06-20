@@ -667,6 +667,8 @@ static void do_execute(Z80Context* ctx)
 	
 	byte opcode;
 	int offset = 0;
+	ctx->M1PC = ctx->PC;
+
 	do
 	{
 		if (ctx->exec_int_vector)
@@ -688,6 +690,8 @@ static void do_execute(Z80Context* ctx)
 		if (func != NULL)
 		{			
 			ctx->PC -= offset;
+			if (ctx->trace)
+				ctx->trace(ctx->memParam);
 			func(ctx);
 			ctx->PC += offset;
 			break;
@@ -880,6 +884,12 @@ void Z80INT (Z80Context* ctx, byte value)
 	ctx->int_vector = value;
 }
 
+/* Interrupt pin has been dropped - and since the interrupt is not edge
+   triggered this matters on some emulations */
+void Z80NOINT (Z80Context* ctx)
+{
+	ctx->int_req = 0;
+}
 
 void Z80NMI (Z80Context* ctx)
 {

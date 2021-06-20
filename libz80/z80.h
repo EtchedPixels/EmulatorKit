@@ -80,6 +80,7 @@ typedef struct
 	Z80Regs	R1;		/**< Main register set (R) */
 	Z80Regs R2;		/**< Alternate register set (R') */
 	ushort	PC;		/**< Program counter */
+	ushort	M1PC;		/** PC at beginning of instruction fetch */
 	byte	R;		/**< Refresh */
 	byte	I;
 	byte	IFF1;	/**< Interrupt Flipflop 1 */
@@ -129,6 +130,8 @@ typedef struct
 
 	byte exec_int_vector;
 
+	void (*trace)(unsigned int memparam);
+
 } Z80Context;
 
 
@@ -158,6 +161,11 @@ void Z80RESET (Z80Context* ctx);
  * @param value The value to read from the data bus
  */
 void Z80INT (Z80Context* ctx, byte value);
+/** Clears a pending hardware interrupt.
+ * On some platforms the interrupt line may be triggered and then set
+ * back before the CPU has interrupts enabled.
+ */
+void Z80NOINT(Z80Context* ctx);
 
 
 /** Generates a non-maskable interrupt. */
