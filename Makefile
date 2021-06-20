@@ -105,6 +105,12 @@ simple80: simple80.o ide.o libz80/libz80.o
 zsc: zsc.o ide.o libz80/libz80.o
 	cc -g3 zsc.o ide.o libz80/libz80.o -o zsc
 
+nc100: nc100.o keymatrix.o libz80/libz80.o z80dis.o
+	cc -g3 nc100.o keymatrix.o libz80/libz80.o z80dis.o -o nc100 -lSDL2
+
+nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
+	cc -g3 nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
+
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
 
