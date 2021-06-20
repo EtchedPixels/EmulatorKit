@@ -3095,6 +3095,7 @@ int main(int argc, char *argv[])
 					ctc_receive_pulse(1);
 				}
 			}
+			fdc_tick(fdc);
 		}
 
 		if (is_z512 && (z512_control & 0x20)) {
