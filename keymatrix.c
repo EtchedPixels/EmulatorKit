@@ -72,7 +72,7 @@ static bool keymatrix_event(struct keymatrix *km, SDL_Keysym *keysym, bool down)
  *	Returns up to 8bits of input according to the current state of
  *	the key matrix. Currently ignores ghosting.
  */
-uint8_t keymatrix_input(struct keymatrix *km, uint8_t scanbits)
+uint8_t keymatrix_input(struct keymatrix *km, uint16_t scanbits)
 {
     unsigned int row;
     unsigned int col;
