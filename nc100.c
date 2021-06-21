@@ -8,6 +8,13 @@
  *	TC8521AP/AM RTC
  *	µPD71051 UART (8251A)
  *	µPD4711A
+ *
+ *	Should also handle the NC150
+ *	512K internal ROM
+ *	(no emulation of the ranger serial floppy)
+ *
+ *	The current keyboard encoding is UK. Support for other mappings
+ *	can be added if someone needs them.
  */
 
 #include <stdio.h>
@@ -37,8 +44,10 @@ static uint32_t texturebits[480 * 64];
 
 struct keymatrix *matrix;
 
-static uint8_t ram[65536];
-static uint8_t rom[262144];
+static uint8_t ram[131072];
+static uint8_t rom[524288];
+static uint8_t rom_mask = 0x0F;
+static uint8_t ram_mask = 0x03;
 static uint8_t *pcmcia;			/* Battery backed usually */
 static uint32_t pcmcia_size;
 
@@ -81,15 +90,16 @@ static uint8_t *mmu(uint16_t addr, bool write)
 {
 	uint32_t pa;
 	uint16_t bank = bankr[addr >> 14];
+
 	addr &= 0x3FFF;
 
 	switch(bank & 0xC0) {
 	case 0x00:
 		if (write)
 			return NULL;
-		return &rom[((bank & 0x0F) << 14) + addr];
+		return &rom[((bank & rom_mask) << 14) + addr];
 	case 0x40:
-		return &ram[((bank & 3) << 14) + addr];
+		return &ram[((bank & ram_mask) << 14) + addr];
 	case 0x80:
 		if (pcmcia == NULL)
 			return NULL;
@@ -123,6 +133,7 @@ uint8_t mem_read(int unused, uint16_t addr)
 void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	uint8_t *p = mmu(addr, true);
+
 	if (p) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "%04X <- %02X\n", addr, val);
@@ -622,6 +633,7 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rom_path = "nc100.rom";
 	char *pcmcia_path = NULL;
+	int romsize;
 
 	while ((opt = getopt(argc, argv, "p:r:d:f")) != -1) {
 		switch (opt) {
@@ -650,8 +662,13 @@ int main(int argc, char *argv[])
 		perror(rom_path);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, rom, 262144) < 262144) {
-		fprintf(stderr, "nc100: short rom '%s'.\n", rom_path);
+	romsize = read(fd, rom, 524288);
+	if (romsize == 524288) {
+		/* NC150 style ROM so 512K ROM 128K RAM */
+		rom_mask = 0x1F;
+		ram_mask = 0x07;
+	} else if (romsize != 262144) {
+		fprintf(stderr, "nc100: invalid ROM size '%s'.\n", rom_path);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
