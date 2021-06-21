@@ -71,6 +71,7 @@ static uint32_t texturebits[480 * 128];
 
 static FDC_PTR fdc;
 static FDRV_PTR drive;
+static char *disk_path[4];
 
 struct keymatrix *matrix;
 
@@ -380,8 +381,6 @@ static void i8251_write(uint8_t addr, uint8_t val)
 static uint8_t keymatrix(uint8_t addr)
 {
 	addr &= 0x0F;
-	if (addr == 9)
-		irqstat |= IRQ_TICK;
 	if (addr <= 9)
 		return keymatrix_input(matrix, 1 << addr);
 	return 0xFF;
@@ -627,6 +626,15 @@ static void nc200_render(void)
 	SDL_RenderPresent(render);
 }
 
+static void swap_disk(int n)
+{
+	if (disk_path[n]) {
+		fprintf(stderr, "Swapping to disk '%s'\n", disk_path[n]);
+		fd_eject(drive);
+		fdd_setfilename(drive, disk_path[n]);
+	}
+}
+
 static void ui_event(void)
 {
 	SDL_Event ev;
@@ -636,8 +644,16 @@ static void ui_event(void)
 		case SDL_QUIT:
 			emulator_done = 1;
 			break;
-		case SDL_KEYDOWN:
 		case SDL_KEYUP:
+			if (ev.key.keysym.sym == SDLK_F1)
+				swap_disk(0);
+			if (ev.key.keysym.sym == SDLK_F2)
+				swap_disk(1);
+			if (ev.key.keysym.sym == SDLK_F3)
+				swap_disk(2);
+			if (ev.key.keysym.sym == SDLK_F4)
+				swap_disk(3);
+		case SDL_KEYDOWN:
 			keymatrix_SDL2event(matrix, &ev);
 			break;
 		}
@@ -659,7 +675,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "nc200: [-f] [-p pcmcia] [-r rompath] [-d debug]\n");
+	fprintf(stderr, "nc200: [-f] [-p pcmcia] [-r rompath] [-A diskpath] [-[1234] disk{n}] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -672,7 +688,7 @@ int main(int argc, char *argv[])
 	char *pcmcia_path = NULL;
 	char *fd_path = NULL;
 
-	while ((opt = getopt(argc, argv, "p:r:d:fA:")) != -1) {
+	while ((opt = getopt(argc, argv, "p:r:d:fA:1:2:3:4:")) != -1) {
 		switch (opt) {
 		case 'A':
 			fd_path = optarg;
@@ -689,6 +705,11 @@ int main(int argc, char *argv[])
 		case 'f':
 			fast = 1;
 			break;
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+			disk_path[opt - '1'] = optarg;
 			break;
 		default:
 			usage();
