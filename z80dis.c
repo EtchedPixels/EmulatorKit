@@ -94,7 +94,7 @@ static const char *opgrouped2[] = {
     "LD", "CP", "IN", "OUT"
 };
 
-static const char *reg8_offs(uint8_t r, int8_t offs)
+static const char *reg8_str(uint8_t r, uint8_t ro, int8_t offs)
 {
     static char tmpbuf[16];
     if (r == 6) {
@@ -103,25 +103,38 @@ static const char *reg8_offs(uint8_t r, int8_t offs)
                 snprintf(tmpbuf, 16, "(%s%d)", hlname, offs);
             else if (offs > 1)
                 snprintf(tmpbuf, 16, "(%s+%d)", hlname, offs);
-        }
-        sprintf(tmpbuf, "(%s)", hlname);
+        } else
+            sprintf(tmpbuf, "(%s)", hlname);
         return tmpbuf;
     }
-    if (r == 4  || r == 5) {
+    if ((r == 4  || r == 5) && ro != 6) {
         if (prefix == 0xFD)
             return r == 4 ? "IYh" : "IYl";
         if (prefix == 0xDD)
-            return r== 4 ? "IXh" : "IXl";
+            return r == 4 ? "IXh" : "IXl";
     }
     return rname[r];
+}
+
+static const char *reg8_offs(uint8_t r, int8_t offs)
+{
+    return reg8_str(r, 0, offs);
 }
 
 static const char *reg8(uint8_t r)
 {
     if (prefix && r == 6)
-        return reg8_offs(r, offs8());
+        return reg8_str(r, 0, offs8());
     else
-        return reg8_offs(r, 0);
+        return reg8_str(r, 0, 0);
+}
+
+static const char *reg8pair(uint8_t r, uint8_t ro)
+{
+    if (prefix && r == 6)
+        return reg8_str(r, ro, offs8());
+    else
+        return reg8_str(r, ro, 0);
 }
 
 static const char *rpair(uint8_t r)
@@ -152,9 +165,10 @@ void z80_disasm(char *buf, uint16_t addr)
     pc = addr;
 
     *buf = 0;
+    hlname = "HL";
+    prefix = 0;
     
 restart:
-    hlname = "HL";
     opcode = imm8();
     y = (opcode >> 3) & 7;
     z = opcode & 7;
@@ -269,7 +283,7 @@ restart:
             if (q == 0)
                 sprintf(buf, "LD %s,0x%04X", rpair(p), imm16());
             else
-                sprintf(buf, "ADD HL,%s", rpair(p));
+                sprintf(buf, "ADD %s,%s", hlname, rpair(p));
             return;
         case 0x02:
             /* Ugly .. needs work */
@@ -307,7 +321,7 @@ restart:
         }
         break;
     case 0x40:
-        sprintf(buf, "LD %s,%s", reg8(y), reg8(z));
+        sprintf(buf, "LD %s,%s", reg8pair(y,z), reg8pair(z,y));
         return;
     case 0x80:
         sprintf(buf, "%s A,%s", logic8[y], reg8(z));
