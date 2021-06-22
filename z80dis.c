@@ -103,6 +103,8 @@ static const char *reg8_str(uint8_t r, uint8_t ro, int8_t offs)
                 snprintf(tmpbuf, 16, "(%s%d)", hlname, offs);
             else if (offs > 1)
                 snprintf(tmpbuf, 16, "(%s+%d)", hlname, offs);
+            else
+                sprintf(tmpbuf, "(%s)", hlname);
         } else
             sprintf(tmpbuf, "(%s)", hlname);
         return tmpbuf;
