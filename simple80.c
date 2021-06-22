@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
@@ -42,6 +43,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "libz80/z80.h"
+#include "z80dis.h"
 #include "ide.h"
 
 static uint8_t ram[512 * 1024];
@@ -79,18 +81,15 @@ static volatile int done;
 #define TRACE_BANK	32
 #define TRACE_IRQ	64
 #define TRACE_CTC	128
+#define TRACE_CPU	256
 
 static int trace = 0;
 
 static void reti_event(void);
 
-static uint8_t mem_read(int unused, uint16_t addr)
+static uint8_t do_mem_read(uint16_t addr, bool debug)
 {
-	static uint8_t rstate;
 	uint8_t r;
-
-	if (trace & TRACE_MEM)
-		fprintf(stderr, "R");
 	if (romen) {
 		r = rom[addr];
 		if (r != ram[addr + 65536 * banknum] && ramen && ramen2)
@@ -103,6 +102,19 @@ static uint8_t mem_read(int unused, uint16_t addr)
 				cpu_z80.PC, addr);
 		r = 0xFF;
 	}
+	return r;
+}
+
+static uint8_t mem_read(int unused, uint16_t addr)
+{
+	static uint8_t rstate;
+	uint8_t r;
+
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R");
+
+	r = do_mem_read(addr, false);
+
 	if (trace & TRACE_MEM)
 		fprintf(stderr, " %04X <- %02X\n", addr, r);
 
@@ -172,6 +184,48 @@ static unsigned int next_char(void)
 	if (c == 0x0A)
 		c = '\r';
 	return c;
+}
+
+static unsigned int nbytes;
+
+uint8_t z80dis_byte(uint16_t addr)
+{
+	uint8_t r = do_mem_read(addr, true);
+	fprintf(stderr, "%02X ", r);
+	nbytes++;
+	return r;
+}
+
+uint8_t z80dis_byte_quiet(uint16_t addr)
+{
+	uint8_t r = do_mem_read(addr, true);
+	nbytes++;
+	return r;
+}
+
+static void simple80_trace(unsigned unused)
+{
+	static uint32_t lastpc = -1;
+	char buf[256];
+
+	if ((trace & TRACE_CPU) == 0)
+		return;
+	nbytes = 0;
+	/* Spot XXXR repeating instructions and squash the trace */
+	if (cpu_z80.M1PC == lastpc && z80dis_byte_quiet(lastpc) == 0xED &&
+		(z80dis_byte_quiet(lastpc + 1) & 0xF4) == 0xB0) {
+		return;
+	}
+	lastpc = cpu_z80.M1PC;
+	fprintf(stderr, "%04X: ", lastpc);
+	z80_disasm(buf, lastpc);
+	while(nbytes++ < 6)
+		fprintf(stderr, "   ");
+	fprintf(stderr, "%-16s ", buf);
+	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n",
+		cpu_z80.R1.br.A, cpu_z80.R1.br.F,
+		cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL,
+		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
 }
 
 static void recalc_interrupts(void)
@@ -978,10 +1032,8 @@ static uint8_t ctc_read(uint8_t channel)
 }
 
 
-static uint8_t io_read(int unused, uint16_t addr)
+static uint8_t do_io_read(int unused, uint16_t addr)
 {
-	if (trace & TRACE_IO)
-		fprintf(stderr, "read %04x\n", addr);
 	if (sioa15 && addr < 0x8000)
 		return sio2_read(addr & 3);
 	addr &= 0xFF;
@@ -998,10 +1050,19 @@ static uint8_t io_read(int unused, uint16_t addr)
 	return 0xFF;
 }
 
+static uint8_t io_read(int unused, uint16_t addr)
+{
+	uint8_t r;
+	r = do_io_read(unused, addr);
+	if (trace & TRACE_IO)
+		fprintf(stderr, "I/O Read %04x -> %02X\n", addr, r);
+	return r;
+}
+
 static void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %04x <- %02x\n", addr, val);
+		fprintf(stderr, "I/O Write %04x <- %02x\n", addr, val);
 	if (sioa15 && addr < 0x8000)
 		sio2_write(addr & 3, val);
 	addr &= 0xFF;
@@ -1160,6 +1221,7 @@ int main(int argc, char *argv[])
 	cpu_z80.ioWrite = io_write;
 	cpu_z80.memRead = mem_read;
 	cpu_z80.memWrite = mem_write;
+	cpu_z80.trace = simple80_trace;
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
