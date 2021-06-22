@@ -45,6 +45,7 @@
 #include "libz80/z80.h"
 #include "z80dis.h"
 #include "ide.h"
+#include "rtc_bitbang.h"
 
 static uint8_t ram[512 * 1024];
 static uint8_t rom[65536];
@@ -63,6 +64,7 @@ static unsigned int r16bug = 0;
 
 static Z80Context cpu_z80;
 static uint8_t int_recalc = 0;
+struct rtc *rtc;
 
 /* IRQ source that is live */
 static uint8_t live_irq;
@@ -630,207 +632,6 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 		ide_write8(ide0, addr, val);
 }
 
-/* Real time clock state machine and related state.
-
-   Give the host time and don't emulate time setting except for
-   the 24/12 hour setting.
-
- */
-static uint8_t rtcw;
-static uint8_t rtcst;
-static uint16_t rtcr;
-static uint8_t rtccnt;
-static uint8_t rtcstate;
-static uint8_t rtcreg;
-static uint8_t rtcram[32];
-static uint8_t rtcwp = 0x80;
-static uint8_t rtc24 = 1;
-static uint8_t rtcbp = 0;
-static uint8_t rtcbc = 0;
-static struct tm *rtc_tm;
-
-static uint8_t rtc_read(void)
-{
-	if (rtcst & 0x30)
-		return (rtcr & 0x01) ? 1 : 0;
-	return 0xFF;
-}
-
-static uint16_t rtcregread(uint8_t reg)
-{
-	uint8_t val, v;
-
-	switch (reg) {
-	case 0:
-		val = (rtc_tm->tm_sec % 10) + ((rtc_tm->tm_sec / 10) << 4);
-		break;
-	case 1:
-		val = (rtc_tm->tm_min % 10) + ((rtc_tm->tm_min / 10) << 4);
-		break;
-	case 2:
-		v = rtc_tm->tm_hour;
-		if (!rtc24) {
-			v %= 12;
-			v++;
-		}
-		val = (v % 10) + ((v / 10) << 4);
-		if (!rtc24) {
-			if (rtc_tm->tm_hour > 11)
-				val |= 0x20;
-			val |= 0x80;
-		}
-		break;
-	case 3:
-		val = (rtc_tm->tm_mday % 10) + ((rtc_tm->tm_mday / 10) << 4);
-		break;
-	case 4:
-		val = ((rtc_tm->tm_mon + 1) % 10) + (((rtc_tm->tm_mon + 1) / 10) << 4);
-		break;
-	case 5:
-		val = rtc_tm->tm_wday + 1;
-		break;
-	case 6:
-		v = rtc_tm->tm_year % 100;
-		val = (v % 10) + ((v / 10) << 4);
-		break;
-	case 7:
-		val = rtcwp ? 0x80 : 0x00;
-		break;
-	case 8:
-		val = 0;
-		break;
-	default:
-		val = 0xFF;
-		/* Check */
-		break;
-	}
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "RTCreg %d = %02X\n", reg, val);
-	return val;
-}
-
-static void rtcop(void)
-{
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "rtcbyte %02X\n", rtcw);
-	/* The emulated task asked us to write a byte, and has now provided
-	   the data byte to go with it */
-	if (rtcstate == 2) {
-		if (!rtcwp) {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC write %d as %d\n", rtcreg, rtcw);
-			/* We did a real write! */
-			/* Not yet tackled burst mode */
-			if (rtcreg != 0x3F && (rtcreg & 0x20))	/* NVRAM */
-				rtcram[rtcreg & 0x1F] = rtcw;
-			else if (rtcreg == 2)
-				rtc24 = rtcw & 0x80;
-			else if (rtcreg == 7)
-				rtcwp = rtcw & 0x80;
-		}
-		/* For now don't emulate writes to the time */
-		rtcstate = 0;
-	}
-	/* Check for broken requests */
-	if (!(rtcw & 0x80)) {
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtcw makes no sense %d\n", rtcw);
-		rtcstate = 0;
-		rtcr = 0x1FF;
-		return;
-	}
-	/* Clock burst ? : for now we only emulate time burst */
-	if (rtcw == 0xBF) {
-		rtcstate = 3;
-		rtcbp = 0;
-		rtcbc = 0;
-		rtcr = rtcregread(rtcbp++) << 1;
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtc command BF: burst clock read.\n");
-		return;
-	}
-	/* A write request */
-	if (!(rtcw & 0x01)) {
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtc write request, waiting byte 2.\n");
-		rtcstate = 2;
-		rtcreg = (rtcw >> 1) & 0x3F;
-		rtcr = 0x1FF;
-		return;
-	}
-	/* A read request */
-	rtcstate = 1;
-	if (rtcw & 0x40) {
-		/* RAM */
-		if (rtcw != 0xFE)
-			rtcr = rtcram[(rtcw >> 1) & 0x1F] << 1;
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n", (rtcw >> 1) & 0xFF, rtcr);
-		return;
-	}
-	/* Register read */
-	rtcr = rtcregread((rtcw >> 1) & 0x1F) << 1;
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "RTC read of time register %d is %d\n", (rtcw >> 1) & 0x1F, rtcr);
-}
-
-static void rtc_write(uint8_t val)
-{
-	uint8_t changed = val ^ rtcst;
-	uint8_t is_read;
-	/* Direction */
-	if ((trace & TRACE_RTC) && (changed & 0x20))
-		fprintf(stderr, "RTC direction now %s.\n", (val & 0x20) ? "read" : "write");
-	is_read = val & 0x20;
-	/* Clock */
-	if (changed & 0x40) {
-		/* The rising edge samples, the falling edge clocks receive */
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "RTC clock low.\n");
-		if (!(val & 0x40)) {
-			rtcr >>= 1;
-			/* Burst read of time */
-			rtcbc++;
-			if (rtcbc == 8 && rtcbp) {
-				rtcr = rtcregread(rtcbp++) << 1;
-				rtcbc = 0;
-			}
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "rtcr now %02X\n", rtcr);
-		} else {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC clock high.\n");
-			rtcw >>= 1;
-			if ((val & 0x30) == 0x10)
-				rtcw |= val & 0x80;
-			else
-				rtcw |= 0xFF;
-			rtccnt++;
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "rtcw now %02x (%d)\n", rtcw, rtccnt);
-			if (rtccnt == 8 && !is_read)
-				rtcop();
-		}
-	}
-	/* CE */
-	if (changed & 0x10) {
-		if (rtcst & 0x10) {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC CE dropped.\n");
-			rtccnt = 0;
-			rtcr = 0;
-			rtcw = 0;
-			rtcstate = 0;
-		} else {
-			/* Latch imaginary registers on rising edge */
-			time_t t = time(NULL);
-			rtc_tm = localtime(&t);
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC CE raised and latched time.\n");
-		}
-	}
-	rtcst = val;
-}
 
 
 /*
@@ -1042,7 +843,7 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 	if (ide && !(addr & 0x40) && (addr & 0x80))
 		return my_ide_read(addr & 7);
 	if ((addr & 0xF0) == 0xC0)
-		return rtc_read();
+		return rtc_read(rtc);
 	if ((addr & 0xF0) == 0xD0)
 		return ctc_read(addr & 3);
 	if (trace & TRACE_UNK)
@@ -1071,7 +872,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	else if (ide && !(addr & 0x40) && (addr & 0x80))
 		my_ide_write(addr & 7, val);
 	else if ((addr & 0xF0) == 0xC0)
-		rtc_write(val);
+		rtc_write(rtc,val);
 	else if ((addr & 0xF0) == 0xD0)
 		ctc_write(addr & 3, val);
 	else if (addr == 0xFD)
@@ -1192,6 +993,8 @@ int main(int argc, char *argv[])
 			ide_reset_begin(ide0);
 		}
 	}
+	rtc = rtc_create();
+	rtc_trace(rtc, trace & TRACE_RTC);
 
 	sio_reset();
 	ctc_init();

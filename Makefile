@@ -99,8 +99,8 @@ z80mc:	z80mc.o sdcard.o libz80/libz80.o
 flexbox: flexbox.o 6800.o acia.o ide.o
 	cc -g3 flexbox.o 6800.o acia.o ide.o -o flexbox
 
-simple80: simple80.o ide.o libz80/libz80.o
-	cc -g3 simple80.o ide.o libz80/libz80.o -o simple80
+simple80: simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o
+	cc -g3 simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o -o simple80
 
 zsc: zsc.o ide.o libz80/libz80.o
 	cc -g3 zsc.o ide.o libz80/libz80.o -o zsc
