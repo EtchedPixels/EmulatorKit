@@ -20,7 +20,8 @@ void ui_event(void)
 			break;
 		case SDL_KEYDOWN:
 		case SDL_KEYUP:
-			zxkey_SDL2event(zxkey, &ev);
+			if (zxkey)
+				zxkey_SDL2event(zxkey, &ev);
 			break;
 		}
 	}
