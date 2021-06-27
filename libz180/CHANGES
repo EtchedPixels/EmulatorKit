@@ -1,0 +1,87 @@
+Changes to version 2.1.0
+
+Created CHANGES
+Added ExecuteTStates
+Working interrupts in all modes:
+Test libz80 against the fuse test suite.
+Fix suspicious line in Makefile
+Track t states
+Increment R on every M (opcode fetch) cycle.
+All block instructions execute one iteration per call to Z80Execute.
+Simplify DJNZ.
+Z80Debug no longer affects R register
+OUTD and OTDR set all flags
+IND and INDR set all flags
+CPD sets F5
+LDD sets F5
+INIR per FUSE and Undoc. Z80 Documented
+LDI and LDIR per FUSE.
+INI sets H, C and P flags per the MSB of (HL) + BC + 1.
+CPI and CPD set F3 and F5
+LDI sets F5 to bit 1 of A + (HL).
+OUT (C),0 puts B on the upper half of the address bus
+RLD sets F3 and F5
+IN r,(C) sets F3 and F5
+Indexed bit operations set f5 and f3 per the msb of the effective address
+Compile with -ansi and -Wall, then fix all resulting warnings.
+Fixed negative displacements for undocumented shift/rotate/bit instructions
+Fixed negative displacements for indexed SLL/SRL/SLA/SRA
+Fixed negative displacements for indexed RLC/RRC/RL/RR
+Fixed negative displacements for indexed CP
+Fixed negative displacements for ADD/ADC/SUB/SBB
+Fixed negative displacements for LD (ii+d),n
+Fixed negative displacements for LD (ii+d),r
+Fixed negative displacements for LD r,(ii+d)
+Fix negative displacements for indexed SET and RES
+Fix negative displacements with indexed BIT
+Fix negative displacements with indexed AND, XOR and OR
+Fix negative displacements with indexed INC/DEC
+16-bit adds and subtracts no longer always use carry
+The BIT instruction always sets F3 and F5, not just when b=3 or b=5.
+8-bit adds set f3 and f5
+CCF sets flags F3 and F5
+SCF sets f3 and f5
+CPL sets f3 and f5
+8-bit increments and decrements set flags f3 and f5
+16-bit adds set flags f3 and f5
+Created .dir-locals.el to set emacs style & indentation
+Add generated test and util files to .gitignore files
+Merge with 2.0
+HALT does not increment pc until an interrupt occurs. NMI and INT unhalt the processor
+INDR sets the negative flag
+INIR sets negative flag
+IN r,(C) sets flags
+OUTD places B on the top half of the address bus
+OUT (C),r places B on the top half of the address bus
+OUT (n),A places B on the top half of the address bus
+OUTI places B on the top half of the address bus
+INI places B on the top half of the address bus
+IND places B on to the top half of the address bus
+IN r,(C) places B on the top half of the address bus
+IN A(n) places A on the top half of the address bus
+For all conditional jumps, calls and returns: Swapped sense of Z and NZ; and of PE and PO.
+RRD computes correct value and sets flags appropriately
+RLD computes correct value and sets flags appropriately
+SRA preserves bit 7
+Fix RLC m, RRC m, RL m, RR m.  They were doing a "rotate immediate," in effect.
+DEC ss and INC ss increment the proper register, and preserve flags.
+ADD IX,rr and ADD IY,rr set the flags propelry
+SBC HL,pp sets the flags properly
+ADC HL,pp and ADD HL,pp set the flags properly
+ADD HL,ss sets flags
+NEG sets flags properly
+Fix DAA instruction.  It had a segfault for some arguments, and generated incorrect results for many others.
+eight-bit decrements set half-carry properly
+Parity is set when even, not odd
+Subtraction now sets overflow flag properly
+Arithmetic operations set zero flag properly
+CPDR leaves HL pointer to the byte before the target, and BC set to the number of bytes not searched.
+CPI and CPIR bug fix: Preserve carry flag
+Fix CPIR: HL now points to the byte after the match, rather than to the match; BC now contains the number of bytes not searched, rather than the number of bytes not searched plus one.
+Fix all pops.  They were loading from (sp+1) and (sp+2) rather than (sp) and (sp + 1).
+Fix all pushes.  They were storing at (sp) and (sp-1) rather than (sp-1) and (sp-2).
+Fix LD dd,(nn) and LD HL,(nn), which were performing an immediate load instead of a direct load.
+Fix order-of-evaluation bug in LD (IX|IY)+d,n
+Reset clears the R and I registers.
+.gitignore: Ignore generated files
+libz80-1.99.1
