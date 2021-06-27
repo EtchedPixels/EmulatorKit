@@ -9,6 +9,9 @@ all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 libz80/libz80.o:
 	$(MAKE) --directory libz80
 
+libz180/libz180.o:
+	$(MAKE) --directory libz180
+
 lib765/lib/lib765.a:
 	$(MAKE) --directory lib765/lib
 
@@ -111,11 +114,16 @@ nc100: nc100.o keymatrix.o libz80/libz80.o z80dis.o
 nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
 	cc -g3 nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
 
+rc2014-z180:	rc2014-z180.o rc2014_noui.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o zxkey_none.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 rc2014-z180.o rc2014_noui.o zxkey_none.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o rc2014-z180
+
+
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
 
 clean:
 	$(MAKE) --directory libz80 clean && \
+	$(MAKE) --directory libz180 clean && \
 	$(MAKE) --directory lib765/lib clean && \
 	$(MAKE) --directory 80x86 clean && \
 	$(MAKE) --directory lib65c816 clean && \
