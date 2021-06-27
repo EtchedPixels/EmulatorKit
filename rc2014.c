@@ -3096,6 +3096,8 @@ int main(int argc, char *argv[])
 				}
 			}
 			fdc_tick(fdc);
+			/* We want to run UI events regularly it seems */
+			ui_event();
 		}
 
 		if (is_z512 && (z512_control & 0x20)) {
@@ -3108,8 +3110,6 @@ int main(int argc, char *argv[])
 		}
 		/* TODO: coprocessor int to main if we implement it */
 
-		/* We want to run UI events before we rasterize */
-		ui_event();
 		/* 50Hz which is near enough */
 		if (vdp) {
 			tms9918a_rasterize(vdp);
