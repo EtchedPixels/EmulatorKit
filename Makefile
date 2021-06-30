@@ -33,8 +33,8 @@ linc80:	linc80.o ide.o sdcard.o libz80/libz80.o
 mbc2:	mbc2.o ide.o libz80/libz80.o
 	cc -g3 mbc2.o libz80/libz80.o -o mbc2
 
-rc2014-1802: rc2014-1802.o 1802.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
-	cc -g3 rc2014-1802.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o 1802.o -o rc2014-1802
+rc2014-1802: rc2014-1802.o 1802.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o 16x50.o
+	cc -g3 rc2014-1802.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o w5100.o 1802.o -o rc2014-1802
 
 rc2014-6303: rc2014-6303.o 6800.o ide.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-6303.o ide.o ppide.o rtc_bitbang.o w5100.o 6800.o -o rc2014-6303
