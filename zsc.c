@@ -17,6 +17,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "libz80/z80.h"
+#include "acia.h"
 #include "ide.h"
 
 static uint8_t baseram[49152];
@@ -29,6 +30,7 @@ static uint8_t banknum = 0;
 static uint8_t wprotect = 0;
 
 static Z80Context cpu_z80;
+static struct acia *acia;
 
 static volatile int done;
 
@@ -82,7 +84,7 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 			cpu_z80.PC, addr, val);
 }
 
-static int check_chario(void)
+unsigned int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -106,7 +108,7 @@ static int check_chario(void)
 	return r;
 }
 
-static unsigned int next_char(void)
+unsigned int next_char(void)
 {
 	char c;
 	if (read(0, &c, 1) != 1) {
@@ -118,103 +120,8 @@ static unsigned int next_char(void)
 	return c;
 }
 
-static uint8_t acia_status = 2;
-static uint8_t acia_config;
-static uint8_t acia_char;
-static uint8_t acia_int = 0;
-
-static void acia_irq_compute(void)
+void recalc_interrupts(void)
 {
-	if (!acia_int && (acia_config & acia_status & 0x80)) {
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "ACIA interrupt.\n");
-		acia_int = 1;
-	}
-}
-
-static void acia_receive(void)
-{
-	uint8_t old_status = acia_status;
-	acia_status = old_status & 0x02;
-	if (old_status & 1)
-		acia_status |= 0x20;
-	acia_char = next_char();
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "ACIA rx.\n");
-	acia_status |= 0x81;	/* IRQ, and rx data full */
-}
-
-static void acia_transmit(void)
-{
-	if (!(acia_status & 2)) {
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "ACIA tx is clear.\n");
-		acia_status |= 0x82;	/* IRQ, and tx data empty */
-	}
-}
-
-static void acia_timer(void)
-{
-	int s = check_chario();
-	if (s & 1)
-		acia_receive();
-	if (s & 2)
-		acia_transmit();
-	if (s)
-		acia_irq_compute();
-}
-
-/* Very crude for initial testing ! */
-static uint8_t acia_read(uint8_t addr)
-{
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "acia_read %d ", addr);
-	switch (addr) {
-	case 0:
-		/* bits 7: irq pending, 6 parity error, 5 rx over
-		 * 4 framing error, 3 cts, 2 dcd, 1 tx empty, 0 rx full.
-		 * Bits are set on char arrival and cleared on next not by
-		 * user
-		 */
-		acia_status &= ~0x80;
-		acia_int = 0;
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "acia_status %d\n", acia_status);
-		return acia_status;
-	case 1:
-		acia_status &= ~0x81;	/* No IRQ, rx empty */
-		acia_int = 0;
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "acia_char %d\n", acia_char);
-		return acia_char;
-	default:
-		fprintf(stderr, "acia: bad addr.\n");
-		exit(1);
-	}
-}
-
-static void acia_write(uint16_t addr, uint8_t val)
-{
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "acia_write %d %d\n", addr, val);
-	switch (addr) {
-	case 0:
-		/* bit 7 enables interrupts, bits 5-6 are tx control
-		   bits 2-4 select the word size and 0-1 counter divider
-		   except 11 in them means reset */
-		acia_config = val;
-		if ((acia_config & 3) == 3) {
-			acia_status = 2;
-			acia_int = 0;
-		}
-		acia_irq_compute();
-		return;
-	case 1:
-		write(1, &val, 1);
-		/* Clear any existing int state and tx empty */
-		acia_status &= ~0x82;
-		break;
-	}
 }
 
 static int ide = 0;
@@ -241,7 +148,7 @@ static uint8_t io_read(int unused, uint16_t addr)
 		fprintf(stderr, "read %02x\n", addr);
 	addr &= 0xFF;
 	if (addr < 0x10)
-		return acia_read(addr & 3);
+		return acia_read(acia, addr & 3);
 	if (addr >= 0x80 && addr <= 0x87)
 		return my_ide_read(addr & 7);
 	if (addr == 0x10) {
@@ -260,7 +167,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	addr &= 0xFF;
 	if (addr < 0x10)
-		acia_write(addr & 3, val);
+		acia_write(acia, addr & 3, val);
 	else if (addr >= 0x80 && addr <= 0x87)
 		my_ide_write(addr & 7, val);
 	else if (addr == 0x10) {
@@ -336,7 +243,7 @@ int main(int argc, char *argv[])
 	}
 	l = read(fd, rom, 65536);
 	if (l < 16384) {
-		fprintf(stderr, "zxc: short rom '%s'.\n", rompath);
+		fprintf(stderr, "zsc: short rom '%s'.\n", rompath);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
@@ -393,8 +300,8 @@ int main(int argc, char *argv[])
 			/* We do 2000 tstates per ms */
 			for (i = 0; i < 5; i++) {
 				Z80ExecuteTStates(&cpu_z80, 2000);
-				acia_timer();
-				if (acia_int || timer_int)
+				acia_timer(acia);
+				if (acia_irq_pending(acia) || timer_int)
 					Z80INT(&cpu_z80, 0xFF);
 			}
 			/* Do 5ms of I/O and delays */

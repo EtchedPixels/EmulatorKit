@@ -105,8 +105,8 @@ flexbox: flexbox.o 6800.o acia.o ide.o
 simple80: simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o
 	cc -g3 simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o -o simple80
 
-zsc: zsc.o ide.o libz80/libz80.o
-	cc -g3 zsc.o ide.o libz80/libz80.o -o zsc
+zsc: zsc.o ide.o acia.o libz80/libz80.o
+	cc -g3 zsc.o acia.o ide.o libz80/libz80.o -o zsc
 
 nc100: nc100.o keymatrix.o libz80/libz80.o z80dis.o
 	cc -g3 nc100.o keymatrix.o libz80/libz80.o z80dis.o -o nc100 -lSDL2
