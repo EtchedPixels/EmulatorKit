@@ -62,8 +62,8 @@ rc2014-6809: rc2014-6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16
 rc2014-68hc11: rc2014-68hc11.o 68hc11.o ide.o w5100.o ppide.o rtc_bitbang.o sdcard.o
 	cc -g3 rc2014-68hc11.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o 68hc11.o -o rc2014-68hc11
 
-rc2014-68008: rc2014-68008.o ide.o w5100.o m68k/lib68k.a
-	cc -g3 rc2014-68008.o ide.o w5100.o ppide.o m68k/lib68k.a -o rc2014-68008
+rc2014-68008: rc2014-68008.o ide.o w5100.o 16x50.o acia.o rtc_bitbang.o m68k/lib68k.a
+	cc -g3 rc2014-68008.o ide.o w5100.o ppide.o 16x50.o acia.o rtc_bitbang.o m68k/lib68k.a -o rc2014-68008
 
 m68k/lib68k.a:
 	$(MAKE) --directory m68k
