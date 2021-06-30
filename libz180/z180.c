@@ -631,14 +631,13 @@ static byte doCP_HL(Z180Context * ctx)
  * http://www.worldofspectrum.org/faq/reference/z80reference.htm
  * and verified against the specification in the Zilog
  * Z80 Family CPU User Manual, rev. 04, Dec. 2004, pp. 166-167
- *
- * TODO - differs on Z180
  */	
 
 static void doDAA(Z180Context * ctx) {
   int correction_factor = 0x00;
   int carry = 0;
-  if(BR.A > 0x99 || GETFLAG(F_C)) {
+  /* Z180 differs (see AN006601-0201 Z180-QA) */
+  if(BR.A > 0x99 /*|| GETFLAG(F_C)*/) {
     correction_factor |= 0x60;
     carry = 1;
   }
