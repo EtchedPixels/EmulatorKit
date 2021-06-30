@@ -28,15 +28,17 @@
 #include <unistd.h>
 #include <errno.h>
 #include <m68k.h>
+#include "acia.h"
 #include "ide.h"
 #include "ppide.h"
+#include "rtc_bitbang.h"
+#include "16x50.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* ROM low RAM high */
 static uint8_t mmu_sram[8 * 1024];
 static uint8_t ext_ram[1024 * 1024];	/* For now */
 
-static uint8_t rtc = 0;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 static uint8_t bmmu = 0;
@@ -51,8 +53,12 @@ static uint16_t tstate_steps = 200;
 #define IRQ_16550A	2
 
 static nic_w5100_t *wiz;
-
+static struct acia *acia;
 static struct ppide *ppide;
+static struct rtc *rtc;
+static struct uart16x50 *uart;
+
+static unsigned acia_narrow;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
@@ -92,7 +98,7 @@ int cpu_irq_ack(int level)
 	return M68K_INT_ACK_AUTOVECTOR;
 }
 
-static int check_chario(void)
+unsigned int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -118,7 +124,7 @@ static int check_chario(void)
 	return r;
 }
 
-static unsigned int next_char(void)
+unsigned int next_char(void)
 {
 	char c;
 	if (read(0, &c, 1) != 1) {
@@ -130,345 +136,10 @@ static unsigned int next_char(void)
 	return c;
 }
 
-static uint8_t acia_status = 2;
-static uint8_t acia_config;
-static uint8_t acia_char;
-static uint8_t acia;
-static uint8_t acia_input;
-static uint8_t acia_inint = 0;
-static uint8_t acia_narrow;
-
-static void acia_irq_compute(void)
+/* We do this in the main loop so no helper needed */
+void recalc_interrupts(void)
 {
-	if (!acia_inint && acia_config && acia_status & 0x80) {
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "ACIA interrupt.\n");
-		acia_inint = 1;
-		add_irq(IRQ_ACIA);
-	}
-	if (acia_inint) {
-		remove_irq(IRQ_ACIA);
-		acia_inint = 0;
-	}
-}
-
-static void acia_receive(void)
-{
-	uint8_t old_status = acia_status;
-	acia_status = old_status & 0x02;
-	if (old_status & 1)
-		acia_status |= 0x20;
-	acia_char = next_char();
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "ACIA rx.\n");
-	acia_status |= 0x81;	/* IRQ, and rx data full */
-}
-
-static void acia_transmit(void)
-{
-	if (!(acia_status & 2)) {
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "ACIA tx is clear.\n");
-		acia_status |= 0x82;	/* IRQ, and tx data empty */
-	}
-}
-
-static void acia_timer(void)
-{
-	int s = check_chario();
-	if ((s & 1) && acia_input)
-		acia_receive();
-	if (s & 2)
-		acia_transmit();
-	if (s)
-		acia_irq_compute();
-}
-
-static uint8_t acia_read(uint8_t addr)
-{
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "acia_read %d ", addr);
-	switch (addr) {
-	case 0:
-		/* bits 7: irq pending, 6 parity error, 5 rx over
-		 * 4 framing error, 3 cts, 2 dcd, 1 tx empty, 0 rx full.
-		 * Bits are set on char arrival and cleared on next not by
-		 * user
-		 */
-		acia_status &= ~0x80;
-		acia_irq_compute();
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "acia_status %d\n", acia_status);
-		return acia_status;
-	case 1:
-		acia_status &= ~0x81;	/* No IRQ, rx empty */
-		acia_irq_compute();
-		if (trace & TRACE_ACIA)
-			fprintf(stderr, "acia_char %d\n", acia_char);
-		return acia_char;
-	default:
-		fprintf(stderr, "acia: bad addr.\n");
-		exit(1);
-	}
-}
-
-static void acia_write(uint16_t addr, uint8_t val)
-{
-	if (trace & TRACE_ACIA)
-		fprintf(stderr, "acia_write %d %d\n", addr, val);
-	switch (addr) {
-	case 0:
-		/* bit 7 enables interrupts, bits 5-6 are tx control
-		   bits 2-4 select the word size and 0-1 counter divider
-		   except 11 in them means reset */
-		acia_config = val;
-		if ((acia_config & 3) == 3)
-			acia_status = 2;
-		acia_irq_compute();
-		return;
-	case 1:
-		write(1, &val, 1);
-		/* Clear any existing int state and tx empty */
-		acia_status &= ~0x82;
-		break;
-	}
-}
-
-/* UART: very mimimal for the moment */
-
-struct uart16x50 {
-    uint8_t ier;
-    uint8_t iir;
-    uint8_t fcr;
-    uint8_t lcr;
-    uint8_t mcr;
-    uint8_t lsr;
-    uint8_t msr;
-    uint8_t scratch;
-    uint8_t ls;
-    uint8_t ms;
-    uint8_t dlab;
-    uint8_t irq;
-#define RXDA	1
-#define TEMT	2
-#define MODEM	8
-    uint8_t irqline;
-};
-
-static struct uart16x50 uart;
-static unsigned int uart_16550a;
-
-static void uart_init(struct uart16x50 *uptr)
-{
-    uptr->dlab = 0;
-}
-
-/* Compute the interrupt indicator register from what is pending */
-static void uart_recalc_iir(struct uart16x50 *uptr)
-{
-    if (uptr->irq & RXDA)
-        uptr->iir = 0x04;
-    else if (uptr->irq & TEMT)
-        uptr->iir = 0x02;
-    else if (uptr->irq & MODEM)
-        uptr->iir = 0x01;
-    else {
-        uptr->iir = 0x00;	/* No interrupt */
-        uptr->irqline = 0;
-        remove_irq(IRQ_16550A);
-        return;
-    }
-    /* Ok so we have an event, do we need to waggle the line */
-    if (uptr->irqline)
-        return;
-    uptr->irqline = uptr->irq;
-    add_irq(IRQ_16550A);
-}
-
-/* Raise an interrupt source. Only has an effect if enabled in the ier */
-static void uart_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (uptr->irq & n)
-        return;
-    if (!(uptr->ier & n))
-        return;
-    uptr->irq |= n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (!(uptr->irq & n))
-        return;
-    uptr->irq &= ~n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_event(struct uart16x50 *uptr)
-{
-    uint8_t r = check_chario();
-    if (r & 1)
-        uptr->lsr |= 0x01;	/* RX not empty */
-    if (r & 2)
-        uptr->lsr |= 0x60;	/* TX empty */
-
-    if (r & 1)
-        uart_interrupt(uptr, RXDA);
-    if (r & 0x2)
-        uart_interrupt(uptr, TEMT);
-}
-
-static void show_settings(struct uart16x50 *uptr)
-{
-    uint32_t baud;
-
-    if (!(trace & TRACE_UART))
-        return;
-
-    baud = uptr->ls + (uptr->ms << 8);
-    if (baud == 0)
-        baud = 1843200;
-    baud = 1843200 / baud;
-    baud /= 16;
-    fprintf(stderr, "[%d:%d",
-            baud, (uptr->lcr &3) + 5);
-    switch(uptr->lcr & 0x38) {
-        case 0x00:
-        case 0x10:
-        case 0x20:
-        case 0x30:
-            fprintf(stderr, "N");
-            break;
-        case 0x08:
-            fprintf(stderr, "O");
-            break;
-        case 0x18:
-            fprintf(stderr, "E");
-            break;
-        case 0x28:
-            fprintf(stderr, "M");
-            break;
-        case 0x38:
-            fprintf(stderr, "S");
-            break;
-    }
-    fprintf(stderr, "%d ",
-            (uptr->lcr & 4) ? 2 : 1);
-
-    if (uptr->lcr & 0x40)
-        fprintf(stderr, "break ");
-    if (uptr->lcr & 0x80)
-        fprintf(stderr, "dlab ");
-    if (uptr->mcr & 1)
-        fprintf(stderr, "DTR ");
-    if (uptr->mcr & 2)
-        fprintf(stderr, "RTS ");
-    if (uptr->mcr & 4)
-        fprintf(stderr, "OUT1 ");
-    if (uptr->mcr & 8)
-        fprintf(stderr, "OUT2 ");
-    if (uptr->mcr & 16)
-        fprintf(stderr, "LOOP ");
-    fprintf(stderr, "ier %02x]\n", uptr->ier);
-}
-
-static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
-{
-    switch(addr) {
-    case 0:	/* If dlab = 0, then write else LS*/
-        if (uptr->dlab == 0) {
-            if (uptr == &uart) {
-                putchar(val);
-                fflush(stdout);
-            }
-            uart_clear_interrupt(uptr, TEMT);
-            uart_interrupt(uptr, TEMT);
-        } else {
-            uptr->ls = val;
-            show_settings(uptr);
-        }
-        break;
-    case 1:	/* If dlab = 0, then IER */
-        if (uptr->dlab) {
-            uptr->ms = val;
-            show_settings(uptr);
-        }
-        else
-            uptr->ier = val;
-        break;
-    case 2:	/* FCR */
-        uptr->fcr = val & 0x9F;
-        break;
-    case 3:	/* LCR */
-        uptr->lcr = val;
-        uptr->dlab = (uptr->lcr & 0x80);
-        show_settings(uptr);
-        break;
-    case 4:	/* MCR */
-        uptr->mcr = val & 0x3F;
-        show_settings(uptr);
-        break;
-    case 5:	/* LSR (r/o) */
-        break;
-    case 6:	/* MSR (r/o) */
-        break;
-    case 7:	/* Scratch */
-        uptr->scratch = val;
-        break;
-    }
-}
-
-static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
-{
-    uint8_t r;
-
-    switch(addr) {
-    case 0:
-        /* receive buffer */
-        if (uptr == &uart && uptr->dlab == 0) {
-            uart_clear_interrupt(uptr, RXDA);
-            return next_char();
-        }
-        return uptr->ls;
-        break;
-    case 1:
-        /* IER */
-        if (uptr->dlab)
-	        return uptr->ms;
-        return uptr->ier;
-    case 2:
-        /* IIR */
-        return uptr->iir;
-    case 3:
-        /* LCR */
-        return uptr->lcr;
-    case 4:
-        /* mcr */
-        return uptr->mcr;
-    case 5:
-        /* lsr */
-        r = check_chario();
-        uptr->lsr = 0;
-        if (r & 1)
-             uptr->lsr |= 0x01;	/* Data ready */
-        if (r & 2)
-             uptr->lsr |= 0x60;	/* TX empty | holding empty */
-        /* Reading the LSR causes these bits to clear */
-        r = uptr->lsr;
-        uptr->lsr &= 0xF0;
-        return r;
-    case 6:
-        /* msr */
-        r = uptr->msr;
-        /* Reading clears the delta bits */
-        uptr->msr &= 0xF0;
-        uart_clear_interrupt(uptr, MODEM);
-        return r;
-    case 7:
-        return uptr->scratch;
-    }
-    return 0xFF;
-}
+} 
 
 static int ide = 0;
 struct ide_controller *ide0;
@@ -483,215 +154,13 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
-/* Real time clock state machine and related state.
-
-   Give the host time and don't emulate time setting except for
-   the 24/12 hour setting.
-   
- */
-static uint8_t rtcw;
-static uint8_t rtcst;
-static uint16_t rtcr;
-static uint8_t rtccnt;
-static uint8_t rtcstate;
-static uint8_t rtcreg;
-static uint8_t rtcram[32];
-static uint8_t rtcwp = 0x80;
-static uint8_t rtc24 = 1;
-static uint8_t rtcbp = 0;
-static uint8_t rtcbc = 0;
-static struct tm *rtc_tm;
-
-static uint8_t rtc_read(void)
-{
-	if (rtcst & 0x30)
-		return (rtcr & 0x01) ? 1 : 0;
-	return 0xFF;
-}
-
-static uint16_t rtcregread(uint8_t reg)
-{
-	uint8_t val, v;
-
-	switch (reg) {
-	case 0:
-		val = (rtc_tm->tm_sec % 10) + ((rtc_tm->tm_sec / 10) << 4);
-		break;
-	case 1:
-		val = (rtc_tm->tm_min % 10) + ((rtc_tm->tm_min / 10) << 4);
-		break;
-	case 2:
-		v = rtc_tm->tm_hour;
-		if (!rtc24) {
-			v %= 12;
-			v++;
-		}
-		val = (v % 10) + ((v / 10) << 4);
-		if (!rtc24) {
-			if (rtc_tm->tm_hour > 11)
-				val |= 0x20;
-			val |= 0x80;
-		}
-		break;
-	case 3:
-		val = (rtc_tm->tm_mday % 10) + ((rtc_tm->tm_mday / 10) << 4);
-		break;
-	case 4:
-		val = ((rtc_tm->tm_mon + 1) % 10) + (((rtc_tm->tm_mon + 1) / 10) << 4);
-		break;
-	case 5:
-		val = rtc_tm->tm_wday + 1;
-		break;
-	case 6:
-		v = rtc_tm->tm_year % 100;
-		val = (v % 10) + ((v / 10) << 4);
-		break;
-	case 7:
-		val = rtcwp ? 0x80 : 0x00;
-		break;
-	case 8:
-		val = 0;
-		break;
-	default:
-		val = 0xFF;
-		/* Check */
-		break;
-	}
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "RTCreg %d = %02X\n", reg, val);
-	return val;
-}
-
-static void rtcop(void)
-{
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "rtcbyte %02X\n", rtcw);
-	/* The emulated task asked us to write a byte, and has now provided
-	   the data byte to go with it */
-	if (rtcstate == 2) {
-		if (!rtcwp) {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC write %d as %d\n", rtcreg, rtcw);
-			/* We did a real write! */
-			/* Not yet tackled burst mode */
-			if (rtcreg != 0x3F && (rtcreg & 0x20))	/* NVRAM */
-				rtcram[rtcreg & 0x1F] = rtcw;
-			else if (rtcreg == 2)
-				rtc24 = rtcw & 0x80;
-			else if (rtcreg == 7)
-				rtcwp = rtcw & 0x80;
-		}
-		/* For now don't emulate writes to the time */
-		rtcstate = 0;
-	}
-	/* Check for broken requests */
-	if (!(rtcw & 0x80)) {
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtcw makes no sense %d\n", rtcw);
-		rtcstate = 0;
-		rtcr = 0x1FF;
-		return;
-	}
-	/* Clock burst ? : for now we only emulate time burst */
-	if (rtcw == 0xBF) {
-		rtcstate = 3;
-		rtcbp = 0;
-		rtcbc = 0;
-		rtcr = rtcregread(rtcbp++) << 1;
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtc command BF: burst clock read.\n");
-		return;
-	}
-	/* A write request */
-	if (!(rtcw & 0x01)) {
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "rtc write request, waiting byte 2.\n");
-		rtcstate = 2;
-		rtcreg = (rtcw >> 1) & 0x3F;
-		rtcr = 0x1FF;
-		return;
-	}
-	/* A read request */
-	rtcstate = 1;
-	if (rtcw & 0x40) {
-		/* RAM */
-		if (rtcw != 0xFE)
-			rtcr = rtcram[(rtcw >> 1) & 0x1F] << 1;
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n", (rtcw >> 1) & 0xFF, rtcr);
-		return;
-	}
-	/* Register read */
-	rtcr = rtcregread((rtcw >> 1) & 0x1F) << 1;
-	if (trace & TRACE_RTC)
-		fprintf(stderr, "RTC read of time register %d is %d\n", (rtcw >> 1) & 0x1F, rtcr);
-}
-
-static void rtc_write(uint8_t val)
-{
-	uint8_t changed = val ^ rtcst;
-	uint8_t is_read;
-	/* Direction */
-	if ((trace & TRACE_RTC) && (changed & 0x20))
-		fprintf(stderr, "RTC direction now %s.\n", (val & 0x20) ? "read" : "write");
-	is_read = val & 0x20;
-	/* Clock */
-	if (changed & 0x40) {
-		/* The rising edge samples, the falling edge clocks receive */
-		if (trace & TRACE_RTC)
-			fprintf(stderr, "RTC clock low.\n");
-		if (!(val & 0x40)) {
-			rtcr >>= 1;
-			/* Burst read of time */
-			rtcbc++;
-			if (rtcbc == 8 && rtcbp) {
-				rtcr = rtcregread(rtcbp++) << 1;
-				rtcbc = 0;
-			}
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "rtcr now %02X\n", rtcr);
-		} else {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC clock high.\n");
-			rtcw >>= 1;
-			if ((val & 0x30) == 0x10)
-				rtcw |= val & 0x80;
-			else
-				rtcw |= 0xFF;
-			rtccnt++;
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "rtcw now %02x (%d)\n", rtcw, rtccnt);
-			if (rtccnt == 8 && !is_read)
-				rtcop();
-		}
-	}
-	/* CE */
-	if (changed & 0x10) {
-		if (rtcst & 0x10) {
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC CE dropped.\n");
-			rtccnt = 0;
-			rtcr = 0;
-			rtcw = 0;
-			rtcstate = 0;
-		} else {
-			/* Latch imaginary registers on rising edge */
-			time_t t = time(NULL);
-			rtc_tm = localtime(&t);
-			if (trace & TRACE_RTC)
-				fprintf(stderr, "RTC CE raised and latched time.\n");
-		}
-	}
-	rtcst = val;
-}
-
 static uint8_t do_mmio_read_68000(uint16_t addr)
 {
 	addr &= 0xFF;
 	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
-		return acia_read(addr & 1);
+		return acia_read(acia, addr & 1);
 	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
-		return acia_read(addr & 1);
+		return acia_read(acia, addr & 1);
 	if ((addr >= 0x10 && addr <= 0x17) && ide)
 		return my_ide_read(addr & 7);
 	if ((addr >= 0x20 && addr <= 0x27) && ppide)
@@ -699,9 +168,9 @@ static uint8_t do_mmio_read_68000(uint16_t addr)
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0x0C && rtc)
-		return rtc_read();
-	if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
-		return uart_read(&uart, addr & 0x0F);
+		return rtc_read(rtc);
+	if (addr >= 0xC0 && addr <= 0xCF && uart)
+		return uart16x50_read(uart, addr & 0x0F);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -724,9 +193,9 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 		fprintf(stderr, "write %04x <- %02x\n", addr, val);
 	addr &= 0xFF;
 	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow)
-		acia_write(addr & 1, val);
+		acia_write(acia, addr & 1, val);
 	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
-		acia_write(addr & 1, val);
+		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide)
 		my_ide_write(addr & 7, val);
 	else if ((addr >= 0x20 && addr <= 0x27) && ppide)
@@ -734,9 +203,9 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	else if (addr == 0x0C && rtc)
-		rtc_write(val);
-	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
-		uart_write(&uart, addr & 0x0F, val);
+		rtc_write(rtc, val);
+	else if (addr >= 0xC0 && addr <= 0xCF && uart)
+		uart16x50_write(uart, addr & 0x0F, val);
 	else if (addr == 0x00) {
 		printf("trace set to %d\n", val);
 		trace = val;
@@ -911,9 +380,9 @@ void system_process(void)
 	tc.tv_sec = 0;
 	tc.tv_nsec = 5000000L;
 	if (acia)
-		acia_timer();
-	if (uart_16550a)
-		uart_event(&uart);
+		acia_timer(acia);
+	if (uart)
+		uart16x50_event(uart);
 	if (n++ == 100) {
 		n = 0;
 		if (wiznet)
@@ -921,6 +390,18 @@ void system_process(void)
 		/* Do 5ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+	}
+	if (acia) {
+		if (acia_irq_pending(acia))
+			add_irq(IRQ_ACIA);
+		else
+			remove_irq(IRQ_ACIA);
+	}
+	if (uart) {
+		if (uart16x50_irq_pending(uart))
+			add_irq(IRQ_16550A);
+		else
+			remove_irq(IRQ_16550A);
 	}
 }
 
@@ -950,24 +431,25 @@ int main(int argc, char *argv[])
 	int ppi = 0;
 	char *rompath = "rc2014-68000.rom";
 	char *idepath;
+	int has_rtc = 0;
+	int has_acia = 0;
+	int has_16550a = 0;
 
 	while ((opt = getopt(argc, argv, "1Aabd:fi:r:p:Rw")) != -1) {
 		switch (opt) {
 		case '1':
-			uart_16550a = 1;
-			acia = 0;
+			has_16550a = 1;
+			has_acia = 0;
 			break;
 		case 'a':
-			acia = 1;
-			acia_input = 1;
+			has_acia = 1;
 			acia_narrow = 0;
-			uart_16550a = 0;
+			has_16550a = 0;
 			break;
 		case 'A':
-			acia = 1;
+			has_acia = 1;
 			acia_narrow = 1;
-			acia_input = 1;
-			uart_16550a = 0;
+			has_16550a = 0;
 			break;
 		case 'r':
 			rompath = optarg;
@@ -989,7 +471,7 @@ int main(int argc, char *argv[])
 			fast = 1;
 			break;
 		case 'R':
-			rtc = 1;
+			has_rtc = 1;
 			break;
 		case 'w':
 			wiznet = 1;
@@ -1004,9 +486,9 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	if (acia == 0 && uart_16550a == 0) {
+	if (has_acia == 0 && has_16550a == 0) {
 		fprintf(stderr, "rc2014: no UART selected, defaulting to 16550A\n");
-		uart_16550a = 1;
+		has_16550a = 1;
 	}
 
 	fd = open(rompath, O_RDONLY);
@@ -1047,13 +529,23 @@ int main(int argc, char *argv[])
 		if (trace & TRACE_PPIDE)
 			ppide_trace(ppide, 1);
 	}
-
-	if (uart_16550a)
-		uart_init(&uart);
-
+	if (has_rtc) {
+		rtc = rtc_create();
+		rtc_trace(rtc, trace & TRACE_RTC);
+	}
+	if (has_16550a) {
+		uart = uart16x50_create();
+		uart16x50_set_input(uart, 1);
+		uart16x50_trace(uart, trace & TRACE_UART);
+	}
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
+	}
+	if (has_acia) {
+		acia = acia_create();
+		acia_set_input(acia, 1);
+		acia_trace(acia, trace & TRACE_ACIA);
 	}
 
 	if (tcgetattr(0, &term) == 0) {
