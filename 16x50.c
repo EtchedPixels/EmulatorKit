@@ -241,6 +241,14 @@ uint8_t uart16x50_read(struct uart16x50 *uptr, uint8_t addr)
     return 0xFF;
 }
 
+/* Model the external timer on DSR mod */
+void uart16x50_dsr_timer(struct uart16x50 *uart16x50)
+{
+    uart16x50->msr ^= 0x20;	/* DSR toggles */
+    uart16x50->msr |= 0x02;	/* DSR delta */
+    uart16x50_interrupt(uart16x50, MODEM);
+}
+
 void uart16x50_set_input(struct uart16x50 *uart16x50, int port)
 {
 	uart16x50->input = port;
