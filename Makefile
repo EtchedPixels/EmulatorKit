@@ -21,6 +21,9 @@ rc2014:	rc2014.o rc2014_noui.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms99
 rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o libz80/libz80.o lib765/lib/lib765.a
 	cc -g3 rc2014.o rc2014_sdlui.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o libz80/libz80.o lib765/lib/lib765.a -o rc2014_sdl2 -lSDL2
 
+rb-mbc:	rb-mbc.o 16x50.o ide.o rtc_bitbang.o z80dis.o libz80/libz80.o
+	cc -g3 rb-mbc.o 16x50.o ide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
+
 rbcv2:	rbcv2.o ide.o rtc_bitbang.o w5100.o libz80/libz80.o
 	cc -g3 rbcv2.o ide.o rtc_bitbang.o w5100.o libz80/libz80.o -o rbcv2
 
