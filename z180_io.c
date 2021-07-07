@@ -782,7 +782,9 @@ static unsigned int z180_dma_0(struct z180_io *io, unsigned int cycles)
     } while(--io->bcr0);
     /* DMA finished - stop engine and flag */
     io->dstat &= ~0x40;
-    return cycles - used;
+    if (cycles >= used)
+        return cycles - used;
+    return 0;
 }
 
 static unsigned int z180_dma_1(struct z180_io *io, unsigned int cycles)
@@ -831,7 +833,9 @@ static unsigned int z180_dma_1(struct z180_io *io, unsigned int cycles)
         used += cost;
     } while(--io->bcr1);
     io->dstat &= 0x80;
-    return cycles - used;
+    if (cycles >= used)
+        return cycles - used;
+    return 0;
 }
 
 /* Run the DMA engines */
