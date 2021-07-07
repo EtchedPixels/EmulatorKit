@@ -20,7 +20,13 @@ struct z180_asci {
     bool input;
     bool irq;
 };
- 
+
+struct z180_prt {
+    uint16_t tmdr;
+    uint16_t rldr;
+    uint8_t latch;
+};
+
 struct z180_io {
     /* CSIO */
     uint8_t cntr;
@@ -38,6 +44,10 @@ struct z180_io {
     uint8_t il;
     /* Serial ports */
     struct z180_asci asci[2];
+    /* Programmable timer */
+    struct z180_prt prt[2];
+    uint8_t tcr;
+    uint8_t frc;
 
     /* CPU internal context */
     Z180Context *cpu;
@@ -154,12 +164,24 @@ static void z180_next_interrupt(struct z180_io *io)
         return;
     }
     /* Check for internal interrupts in priority order */
+    if ((io->tcr & 0x41) == 0x41) {
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x04);
+            io->irq = 1;
+        }
+        return;
+    }
+    if ((io->tcr & 0x82) == 0x82) {
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x06);
+            io->irq = 1;
+        }
+        return;
+    }
     /* TODO
-        - PRT 0
-        - PRT 1
         - DMA 0
         - DMA 1 */
-    if ((io->cntr & 0x8C0) == 0xC0) {
+    if ((io->cntr & 0xC0) == 0xC0) {
         if (io->irq == 0) {
             Z180INT_IM2(io->cpu, io->il | 0x0C);
             io->irq = 1;
@@ -275,7 +297,6 @@ static void z180_asci_event(struct z180_io *io, struct z180_asci *asci)
     if (asci->input && (r & 1)) {
         asci->stat |= 0x80;
         asci->rdr = next_char();
-        printf("Read byte %02X\n", asci->rdr);
     }
     z180_asci_recalc(io, asci);
 }
@@ -287,6 +308,23 @@ static void z180_csio_begin(struct z180_io *io, uint8_t val)
     io->cntr |= 0x80;
     io->cntr &= ~0x30;
     z180_next_interrupt(io);
+}
+
+static void z180_prt_event(struct z180_io *io, struct z180_prt *prt, unsigned int clocks, unsigned int shift)
+{
+    /* Disabled */
+    if (!(io->tcr & (1 << shift)))
+        return;
+
+    /* Not yet overflowed */
+    if (clocks < prt->tmdr) {
+        prt->tmdr -= clocks;
+        return;
+    }
+    clocks -= prt->tmdr;
+    clocks %= prt->rldr + 1;	/* Handle multiple reloads being missed */
+    prt->tmdr = prt->rldr - clocks;	/* Set up with what is left */
+    io->tcr |= 0x40 << shift;    
 }
 
 bool z180_iospace(struct z180_io *io, uint16_t addr)
@@ -321,6 +359,37 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
         io->cntr &= 0x7F;
         z180_next_interrupt(io);
         return io->trdr_r;
+    /* Timers */
+    case 0x0C:
+        io->prt[0].latch = io->prt[0].tmdr >> 8;
+        io->tcr &= 0x40;
+        z180_next_interrupt(io);
+        return io->prt[0].tmdr;
+    case 0x0D:
+        io->tcr &= 0x40;
+        z180_next_interrupt(io);
+        return io->prt[0].latch;
+    case 0x0E:
+        return io->prt[0].rldr;
+    case 0x0F:
+        return io->prt[0].rldr >> 8;
+    case 0x10:
+        return io->tcr;
+    case 0x14:
+        io->prt[1].latch = io->prt[1].tmdr >> 8;
+        io->tcr &= 0x80;
+        z180_next_interrupt(io);
+        return io->prt[1].tmdr;
+    case 0x15:
+        io->tcr &= 0x80;
+        z180_next_interrupt(io);
+        return io->prt[1].latch;
+    case 0x16:
+        return io->prt[1].rldr;
+    case 0x17:
+        return io->prt[1].rldr >> 8;
+    case 0x18:
+        return io->frc;
     /* IL */
     case 0x33:
         return io->il;
@@ -390,6 +459,44 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
         io->trdr_w = val;
         z180_next_interrupt(io);
         break;
+    /* Timers */
+    case 0x0C:
+        io->prt[0].tmdr &= 0xFF00;
+        io->prt[0].tmdr |= val;
+        break;
+    case 0x0D:
+        io->prt[0].tmdr &= 0x00FF;
+        io->prt[0].tmdr |= val << 8;
+        break;
+    case 0x0E:
+        io->prt[0].rldr &= 0xFF00;
+        io->prt[0].rldr |= val;
+        break;
+    case 0x0F:
+        io->prt[0].rldr &= 0x00FF;
+        io->prt[0].rldr |= val << 8;
+        break;
+    case 0x10:
+        io->tcr = val;
+        break;
+    case 0x14:
+        io->prt[1].tmdr &= 0xFF00;
+        io->prt[1].tmdr |= val;
+        break;
+    case 0x15:
+        io->prt[1].tmdr &= 0x00FF;
+        io->prt[1].tmdr |= val << 8;
+        break;
+    case 0x16:
+        io->prt[1].rldr &= 0xFF00;
+        io->prt[1].rldr |= val;
+        break;
+    case 0x17:
+        io->prt[1].rldr &= 0x00FF;
+        io->prt[1].rldr |= val << 8;
+        break;
+    case 0x18:
+        break;
     /* IL */
     case 0x33:
         io->il = val & 0xE0;
@@ -441,10 +548,21 @@ uint32_t z180_mmu_translate(struct z180_io *io, uint16_t addr)
     return addr + (io->bbr << 12);
 }
 
-void z180_event(struct z180_io *io)
+void z180_event(struct z180_io *io, unsigned int clocks)
 {
+    static unsigned int clockmod = 0;
+
     z180_asci_event(io, io->asci);
-    z180_asci_event(io, io->asci+1);
+    z180_asci_event(io, io->asci + 1);
+
+    /* Divide by 20 */
+    clockmod += clocks;
+    if (clockmod > 20) {
+        io->frc += clockmod / 20;
+        z180_prt_event(io, io->prt, clockmod / 20, 0);
+        z180_prt_event(io, io->prt + 1, clockmod / 20, 1);
+        clockmod %= 20;
+    }
 }
 
 struct z180_io *z180_create(Z180Context *cpu)

@@ -466,8 +466,11 @@ uint8_t io_read(int unused, uint16_t addr)
 
 static void poll_irq_event(void)
 {
+	/* Only one external interrupting device is present */
 	if (vdp && tms9918a_irq_pending(vdp))
-		Z180INT(&cpu_z180, 0xFF);
+		z180_interrupt(io, 0, 0xFF, 1);
+	else
+		z180_interrupt(io, 0, 0, 0);
 }
 
 static void reti_event(void)
@@ -696,15 +699,16 @@ int main(int argc, char *argv[])
 	   slow stuff and nap for 2.5ms to get 50Hz on the TMS99xx */
 	while (!emulator_done) {
 		int i;
-		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 50; i++) {
 			int j;
-			for (j = 0; j < 10; j++)
+			/* We need to tidy this so it returns the tstates consumed */
+			for (j = 0; j < 10; j++) {
 				Z180ExecuteTStates(&cpu_z180, (tstate_steps + 5)/10);
+				z180_event(io, (tstate_steps + 5)/10);
+			}
 			fdc_tick(fdc);
 			/* We want to run UI events regularly it seems */
 			ui_event();
-			z180_event(io);
 		}
 
 		/* 50Hz which is near enough */
