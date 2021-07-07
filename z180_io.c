@@ -132,22 +132,25 @@ static void z180_next_interrupt(struct z180_io *io)
 {
     uint8_t live = io->irqpend & io->itc & 7;
 
-    if (io->irq)
-        return;
-
     if (live & 1) {	/* IRQ is highest */
-        Z180INT(io->cpu, io->vector);
-        io->irq = 1;
+        if (io->irq == 0) {
+            Z180INT(io->cpu, io->vector);
+            io->irq = 1;
+        }
         return;
     }
     if (live & 2) {
-        Z180INT_IM2(io->cpu, io->il | 0x00);
-        io->irq = 1;
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x00);
+            io->irq = 1;
+        }
         return;
     }
     if (live & 4) {
-        Z180INT_IM2(io->cpu, io->il | 0x02);
-        io->irq = 1;
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x02);
+            io->irq = 1;
+        }
         return;
     }
     /* Check for internal interrupts in priority order */
@@ -157,20 +160,27 @@ static void z180_next_interrupt(struct z180_io *io)
         - DMA 0
         - DMA 1 */
     if ((io->cntr & 0x8C0) == 0xC0) {
-        Z180INT_IM2(io->cpu, io->il | 0x0C);
-        io->irq = 1;
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x0C);
+            io->irq = 1;
+        }
         return;
     }
     if (io->asci[0].irq) {
-        Z180INT_IM2(io->cpu, io->il | 0x0E);
-        io->irq = 1;
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x0E);
+            io->irq = 1;
+        }
         return;
     }
     if (io->asci[1].irq) {
-        Z180INT_IM2(io->cpu, io->il | 0x10);
-        io->irq = 1;
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x10);
+            io->irq = 1;
+        }
         return;
     }
+    io->irq = 0;
     Z180NOINT(io->cpu);
 }
 
@@ -190,14 +200,18 @@ void z180_interrupt(struct z180_io *io, uint8_t pin, uint8_t vec, bool on)
     
 void z180_reti(struct z180_io *io)
 {
-    io->irq = 0;
     z180_next_interrupt(io);
 }
     
 static void z180_asci_recalc(struct z180_io *io, struct z180_asci *asci)
 {
     asci->irq = 0;
-    /* TODO check for interrupt cases */
+    /* We don't check the error bits as we don't have any emulated errors */
+    if ((asci->stat & 0x88) == 0x88)
+        asci->irq = 1;
+    if ((asci->stat & 0x03) == 0x03)
+        asci->irq = 1;
+    z180_next_interrupt(io);
 }
 
 static uint8_t z180_asci_read(struct z180_io *io, uint8_t addr)
@@ -263,6 +277,7 @@ static void z180_asci_event(struct z180_io *io, struct z180_asci *asci)
         asci->rdr = next_char();
         printf("Read byte %02X\n", asci->rdr);
     }
+    z180_asci_recalc(io, asci);
 }
 
 static void z180_csio_begin(struct z180_io *io, uint8_t val)
@@ -296,6 +311,8 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
     case 0x05:
     case 0x06:
     case 0x07:
+    case 0x08:
+    case 0x09:
         return z180_asci_read(io, addr);
     /* CSIO */
     case 0x0A:
