@@ -32,8 +32,9 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include "libz80/z80.h"
+#include "16x50.h"
 #include "ide.h"
-#include  "16x50.h"
+#include "ppide.h"
 #include "rtc_bitbang.h"
 #include "z80dis.h"
 
@@ -49,7 +50,7 @@ static uint8_t fast;
 static uint8_t ide;
 static uint8_t timer_hack;
 
-static struct ide_controller *ide0;
+static struct ppide *ppide;
 static Z80Context cpu_z80;
 static struct rtc *rtc;
 static struct uart16x50 *uart;
@@ -216,85 +217,13 @@ unsigned int next_char(void)
     return c;
 }
 
-/*
- *	Emulate PPIDE. It's not a particularly good emulation of the actual
- *	port behaviour if misprogrammed but should be accurate for correct
- *	use of the device.
- */
-static uint8_t pioreg[4];
-
-static void pio_write(uint8_t addr, uint8_t val)
-{
-    /* Compute all the deltas */
-    uint8_t changed = pioreg[addr] ^ val;
-    uint8_t dhigh = val & changed;
-    uint8_t dlow = ~val & changed;
-    uint16_t d;
-
-    switch(addr) {
-        case 0:	/* Port A data */
-        case 1:	/* Port B data */
-            pioreg[addr] = val;
-            if (trace & TRACE_PPIDE)
-                fprintf(stderr, "Data now %04X\n", (((uint16_t)pioreg[1]) << 8) | pioreg[0]);
-            break;
-        case 2:	/* Port C - address/control lines */
-            pioreg[addr] = val;
-            if (!ide0)
-                return;
-            if (val & 0x80) {
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "ide in reset.\n");
-                ide_reset_begin(ide0);
-                return;
-            }
-            if ((trace & TRACE_PPIDE) && (dlow & 0x80))
-                fprintf(stderr, "ide exits reset.\n");
-
-            /* This register is effectively the bus to the IDE device
-               bits 0-2 are A0-A2, bit 3 is CS0 bit 4 is CS1 bit 5 is W
-               bit 6 is R bit 7 is reset */
-            d = val & 0x07;
-            /* Altstatus and friends */
-            if (val & 0x10)
-                d += 2;
-            if (dlow & 0x20) {
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "write edge: %02X = %04X\n", d,
-                        ((uint16_t)pioreg[1] << 8) | pioreg[0]);
-                ide_write16(ide0, d, ((uint16_t)pioreg[1] << 8) | pioreg[0]);
-            } else if (dhigh & 0x40) {
-                /* Prime the data ports on the rising edge */
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "read edge: %02X = ", d);
-                d = ide_read16(ide0, d);
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "%04X\n", d);
-                pioreg[0] = d;
-                pioreg[1] = d >> 8;
-            }
-            break;
-        case 3: /* Control register */
-            /* We could check the direction bits but we don't */
-            pioreg[addr] = val;
-            break;
-    }
-}
-
-static uint8_t pio_read(uint8_t addr)
-{
-    if (trace & TRACE_PPIDE)
-        fprintf(stderr, "ide read %d:%02X\n", addr, pioreg[addr]);
-    return pioreg[addr];
-}
-
 static uint8_t io_read(int unused, uint16_t addr)
 {
     if (trace & TRACE_IO)
         fprintf(stderr, "read %02x\n", addr);
     addr &= 0xFF;
     if (addr >= 0x60 && addr <= 0x67) 	/* Aliased */
-        return pio_read(addr & 3);
+        return ppide_read(ppide, addr & 3);
     if (addr >= 0x68 && addr < 0x70)
         return uart16x50_read(uart, addr & 7);
     if (addr >= 0x70 && addr <= 0x77)
@@ -310,7 +239,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         fprintf(stderr, "write %02x <- %02x\n", addr & 0xFF, val);
     addr &= 0xFF;
     if (addr >= 0x60 && addr <= 0x67)	/* Aliased */
-        pio_write(addr & 3, val);
+        ppide_write(ppide, addr & 3, val);
     else if (addr >= 0x68 && addr < 0x70)
         uart16x50_write(uart, addr & 7, val);
     else if (addr >= 0x70 && addr <= 0x77)
@@ -405,24 +334,20 @@ int main(int argc, char *argv[])
     close(fd);
 
     if (ide) {
-        ide0 = ide_allocate("cf");
-        if (ide0) {
-            fd = open(idepath[0], O_RDWR);
-            if (fd == -1) {
-                perror(idepath[0]);
-                ide = 0;
-            } else if (ide_attach(ide0, 0, fd) == 0) {
-                ide = 1;
-                ide_reset_begin(ide0);
-            }
-            if (idepath[1]) {
-                fd = open(idepath[1], O_RDWR);
-                if (fd == -1)
-                    perror(idepath[1]);
-                ide_attach(ide0, 1, fd);
-            }
-        } else
+        ppide = ppide_create("cf");
+        fd = open(idepath[0], O_RDWR);
+        if (fd == -1) {
+            perror(idepath[0]);
             ide = 0;
+        } else if (ppide_attach(ppide, 0, fd) == 0)
+            ide = 1;
+        if (idepath[1]) {
+            fd = open(idepath[1], O_RDWR);
+            if (fd == -1)
+                perror(idepath[1]);
+            else
+                ppide_attach(ppide, 1, fd);
+        }
     }
 
     rtc = rtc_create();
