@@ -695,7 +695,6 @@ static void do_execute(Z180Context* ctx)
 		func = entries[opcode].func;
 		if (func != NULL)
 		{			
-			fprintf(stderr, "%02X has func\n", opcode);
 			ctx->PC -= offset;
 			if (ctx->trace)
 				ctx->trace(ctx->memParam);
@@ -705,7 +704,6 @@ static void do_execute(Z180Context* ctx)
 		}
 		else if (entries[opcode].table != NULL)
 		{
-			fprintf(stderr, "%02X has table\n", opcode);
 			current = entries[opcode].table;
 			entries = current->entries;
 			offset = current->opcode_offset;
