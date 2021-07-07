@@ -49,6 +49,19 @@ struct z180_io {
     uint8_t tcr;
     uint8_t frc;
 
+    /* DMA engine */
+    uint32_t sar0;
+    uint32_t dar0;
+    uint16_t bcr0;
+
+    uint32_t mar1;
+    uint16_t iar1;
+    uint16_t bcr1;
+
+    uint8_t dstat;
+    uint8_t dmode;
+    uint8_t dcntl;
+
     /* CPU internal context */
     Z180Context *cpu;
     /* Internal IRQ management */
@@ -390,6 +403,43 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
         return io->prt[1].rldr >> 8;
     case 0x18:
         return io->frc;
+    /* DMA */
+    case 0x20:
+        return io->sar0;
+    case 0x21:
+        return io->sar0 >> 8;
+    case 0x22:
+        return io->sar0 >> 16;
+    case 0x23:
+        return io->dar0;
+    case 0x24:
+        return io->dar0 >> 8;
+    case 0x25:
+        return io->dar0 >> 16;
+    case 0x26:
+        return io->bcr0;
+    case 0x27:
+        return io->bcr0 >> 8;
+    case 0x28:
+        return io->mar1;
+    case 0x29:
+        return io->mar1 >> 8;
+    case 0x2A:
+        return io->mar1 >> 16;
+    case 0x2B:
+        return io->iar1;
+    case 0x2C:
+        return io->iar1 >> 8;
+    case 0x2E:
+        return io->bcr1;
+    case 0x2F:
+        return io->bcr1 >> 8;
+    case 0x30:
+        return io->dstat & 0xCD;
+    case 0x31:
+        return io->dmode;
+    case 0x32:
+        return io->dcntl;
     /* IL */
     case 0x33:
         return io->il;
@@ -497,6 +547,78 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
         break;
     case 0x18:
         break;
+    /* DMA */
+    case 0x20:
+        io->sar0 &= 0xFFF00;
+        io->sar0 |= val;
+        break;
+    case 0x21:
+        io->sar0 &= 0xF00FF;
+        io->sar0 |= val << 8;
+        break;
+    case 0x22:
+        io->sar0 &= 0xFFFF;
+        io->sar0 |= (val & 0x0F) << 16;
+        break;
+    case 0x23:
+        io->dar0 &= 0xFFF00;
+        io->dar0 |= val;
+        break;
+    case 0x24:
+        io->dar0 &= 0xF00FF;
+        io->dar0 |= val << 8;
+        break;
+    case 0x25:
+        io->dar0 &= 0xFFFF;
+        io->dar0 |= (val & 0x0F) << 16;
+        break;
+    case 0x26:
+        io->bcr0 &= 0xFF00;
+        io->bcr0 |= val;
+        break;
+    case 0x27:
+        io->bcr0 &= 0x00FF;
+        io->bcr0 |= val << 8;
+        break;
+    case 0x28:
+        io->mar1 &= 0xFFF00;
+        io->mar1 |= val;
+        break;
+    case 0x29:
+        io->mar1 &= 0xF00FF;
+        io->mar1 |= val << 8;
+        break;
+    case 0x2A:
+        io->mar1 &= 0xFFFF;
+        io->mar1 |= (val & 0x0F) << 16;
+        break;
+    case 0x2B:
+        io->iar1 &= 0xFF00;
+        io->iar1 |= val;
+        break;
+    case 0x2C:
+        io->iar1 &= 0x00FF;
+        io->iar1 |= val << 8;
+        break;
+    case 0x2E:
+        io->bcr1 &= 0xFF00;
+        io->bcr1 |= val;
+        break;
+    case 0x2F:
+        io->bcr1 &= 0x00FF;
+        io->bcr1 |= val << 8;
+        break;
+    case 0x30:
+        /* TODO this isn't sufficient - need to model the rules */
+        io->dstat &= 0x03;
+        io->dstat |= val & ~3;
+        break;
+    case 0x31:
+        io->dmode = val;
+        break;
+    case 0x32:
+        io->dcntl = val;
+        break;
     /* IL */
     case 0x33:
         io->il = val & 0xE0;
@@ -581,6 +703,7 @@ struct z180_io *z180_create(Z180Context *cpu)
     io->cntr = 7;
     io->asci[0].stat = 0x02;
     io->asci[1].stat = 0x02;
+    io->dstat = 0x30;
     io->cpu = cpu;
     return io;
 }
