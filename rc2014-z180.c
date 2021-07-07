@@ -55,7 +55,7 @@ static struct tms9918a_renderer *vdprend;
 struct zxkey *zxkey;
 static struct z180_io *io;
 
-static uint16_t tstate_steps = 922;	/* 18.432MHz */
+static uint16_t tstate_steps = 92;	/* 18.432MHz */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
@@ -104,6 +104,16 @@ static void mem_write0(uint16_t addr, uint8_t val)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W: %04X[%06X] <- %02X\n", addr, pa, val);
 	ramrom[pa] = val;
+}
+
+uint8_t z180_phys_read(int unused, uint32_t addr)
+{
+	return ramrom[addr];
+}
+
+void z180_phys_write(int unused, uint32_t addr, uint8_t val)
+{
+	ramrom[addr] = val;
 }
 
 uint8_t mem_read(int unused, uint16_t addr)
@@ -703,8 +713,10 @@ int main(int argc, char *argv[])
 			int j;
 			/* We need to tidy this so it returns the tstates consumed */
 			for (j = 0; j < 10; j++) {
-				Z180ExecuteTStates(&cpu_z180, (tstate_steps + 5)/10);
-				z180_event(io, (tstate_steps + 5)/10);
+				unsigned int clocks = z180_dma(io, tstate_steps);
+				if (clocks)
+					Z180ExecuteTStates(&cpu_z180, clocks);
+				z180_event(io, tstate_steps);
 			}
 			fdc_tick(fdc);
 			/* We want to run UI events regularly it seems */

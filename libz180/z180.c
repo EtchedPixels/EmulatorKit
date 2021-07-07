@@ -672,6 +672,7 @@ static void do_execute(Z180Context* ctx)
 	Z180OpcodeFunc func;
 	
 	byte opcode;
+	unsigned long opdebug = 0;
 	int offset = 0;
 	ctx->M1PC = ctx->PC;
 
@@ -709,10 +710,16 @@ static void do_execute(Z180Context* ctx)
 			offset = current->opcode_offset;
 			if (offset > 0)
 				DECR;
+			opdebug <<= 8;
+			opdebug |= opcode;
 		}
 		else
 		{
-			fprintf(stderr, "UFO %02X?\n", opcode);
+			opdebug  <<= 8;
+			opdebug |= opcode;
+			fprintf(stderr, "UFO %04X %lX?\n", ctx->M1PC, opdebug);
+			if (ctx->trace)
+				ctx->trace(ctx->memParam);
 			if (ctx->PC - ctx->M1PC > 2) {
 				ctx->tstates += 4;
 				ctx->UFO = 1;

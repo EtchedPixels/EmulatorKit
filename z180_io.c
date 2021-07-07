@@ -191,9 +191,20 @@ static void z180_next_interrupt(struct z180_io *io)
         }
         return;
     }
-    /* TODO
-        - DMA 0
-        - DMA 1 */
+    if ((io->dstat & 0x44) == 0x04) {
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x08);
+            io->irq = 1;
+        }
+        return;
+    }
+    if ((io->dstat & 0x88) == 0x08) {
+        if (io->irq == 0) {
+            Z180INT_IM2(io->cpu, io->il | 0x08);
+            io->irq = 1;
+        }
+        return;
+    }
     if ((io->cntr & 0xC0) == 0xC0) {
         if (io->irq == 0) {
             Z180INT_IM2(io->cpu, io->il | 0x0C);
@@ -435,7 +446,7 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
     case 0x2F:
         return io->bcr1 >> 8;
     case 0x30:
-        return io->dstat & 0xCD;
+        return io->dstat | 0x30;
     case 0x31:
         return io->dmode;
     case 0x32:
@@ -609,9 +620,22 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
         io->bcr1 |= val << 8;
         break;
     case 0x30:
-        /* TODO this isn't sufficient - need to model the rules */
-        io->dstat &= 0x03;
-        io->dstat |= val & ~3;
+        /* bits 3,2 are the DIE bits and work normally */
+        io->dstat &= ~0x0C;
+        io->dstat |= val & 0x0C;
+        /* To enable a channel you must write 1 to the DE bit and 0 to the
+           DWE bit */
+        if ((val & 0xA0) == 0x80)
+            io->dstat |= 0x81;
+        if ((val & 0x50) == 0x40)
+            io->dstat |= 0x41;
+        /* To disable a channel you must write 0 to the DE bit and 0 to the
+           DWE bit */
+        if ((val & 0xA0) == 0x00)
+            io->dstat &= ~0x80;
+        if ((val & 0x50) == 0x00)
+            io->dstat &= ~0x40;
+        fprintf(stderr, "DSTAT To %02X with write %02X\n", io->dstat, val);
         break;
     case 0x31:
         io->dmode = val;
@@ -687,6 +711,144 @@ void z180_event(struct z180_io *io, unsigned int clocks)
     }
 }
 
+/*
+ *	DMA engine
+ *	We model transfers between memory and I/O space
+ *
+ *	We do yet not model
+ *	DMA driven internal I/O (ASCI, CSIO etc)
+ *	DMA toggles
+ *	DREQ0/1 being high
+ *	NMI halting DMA
+ *
+ *	We currently run bursts of CPU then DMA so don't properly match
+ *	the DMA cycle steal effect
+ */
+
+static unsigned int z180_dma_0(struct z180_io *io, unsigned int cycles)
+{
+    unsigned int cost = 6;	/* Cost of each transfer */
+    unsigned int usable = cycles;
+    unsigned int used = 0;
+    uint8_t byte;
+
+    /* TODO: model wait states */
+
+    if (!(io->dmode & 2)) {
+        /* Each DMA costs us our DMA cost + one machine cycle */
+        usable =  cycles/(cost + 3);
+        usable *= cost;
+    }
+
+    do {
+        if (used >= usable)
+            return cycles - usable;
+
+        /* Fetch a byte */
+        /* TODO: when sar0/dar0 crosses a 64K boundary add 4 clocks */
+        switch(io->dmode & 0x0C) {
+        case 0x00:
+            byte = z180_phys_read(io->cpu->ioParam, io->sar0++);
+            io->sar0 &= 0xFFFFF;
+            break;
+        case 0x04:
+            byte = z180_phys_read(io->cpu->ioParam, io->sar0--);
+            io->sar0 &= 0xFFFFF;
+            break;
+        case 0x08:
+            byte = z180_phys_read(io->cpu->ioParam, io->sar0);
+            break;
+        case 0x0C:
+            byte = io->cpu->ioRead(io->cpu->ioParam, io->sar0);
+            break;
+        }
+        /* Store the byte */
+        switch(io->dmode & 0x30) {
+        case 0x00:
+            z180_phys_write(io->cpu->ioParam, io->dar0++, byte);
+            io->dar0 &= 0xFFFFF;
+            break;
+        case 0x10:
+            z180_phys_write(io->cpu->ioParam, io->dar0++, byte);
+            io->dar0 &= 0xFFFFF;
+            break;
+        case 0x20:
+            z180_phys_write(io->cpu->ioParam, io->dar0, byte);
+            break;
+        case 0x30:
+            io->cpu->ioWrite(io->cpu->ioParam, io->dar0, byte);
+        }
+        used += cost;
+    } while(--io->bcr0);
+    /* DMA finished - stop engine and flag */
+    io->dstat &= ~0x40;
+    return cycles - used;
+}
+
+static unsigned int z180_dma_1(struct z180_io *io, unsigned int cycles)
+{
+    unsigned int cost = 6;	/* Cost of each transfer */
+    unsigned int usable = cycles;
+    unsigned int used = 0;
+    uint8_t byte;
+
+    /* TODO: model wait states */
+
+
+    /* TODO: when mar1 crosses a 64K boundary add 4 clocks */
+    do {
+        if (used >= usable)
+            return cycles - usable;
+        /* Fetch a byte */
+        switch(io->dcntl & 0x03) {
+        case 0x00:
+            byte = z180_phys_read(io->cpu->ioParam, io->mar1++);
+            io->mar1 &= 0xFFFFF;
+            break;
+        case 0x01:
+            byte = z180_phys_read(io->cpu->ioParam, io->mar1--);
+            io->mar1 &= 0xFFFFF;
+            break;
+        case 0x02:
+        case 0x03:
+            byte = io->cpu->ioRead(io->cpu->ioParam, io->iar1);
+            break;
+        }
+        /* Store the byte */
+        switch(io->dmode & 0x03) {
+        case 0x00:
+        case 0x01:
+            io->cpu->ioWrite(io->cpu->ioParam, io->iar1, byte);
+            break;
+        case 0x02:
+            z180_phys_write(io->cpu->ioParam, io->mar1++, byte);
+            io->mar1 &= 0xFFFFF;
+            break;
+        case 0x03:
+            z180_phys_write(io->cpu->ioParam, io->mar1--, byte);
+            io->mar1 &= 0xFFFFF;
+        }
+        used += cost;
+    } while(--io->bcr1);
+    io->dstat &= 0x80;
+    return cycles - used;
+}
+
+/* Run the DMA engines */
+unsigned int z180_dma(struct z180_io *io, unsigned int cycles)
+{
+    /* Engines off */
+    if (!(io->dstat & 1))
+        return cycles;
+
+    /* Channel enables */
+    if (io->dstat & 0x40)
+        cycles = z180_dma_0(io, cycles);
+    if (io->dstat & 0x80)
+        cycles = z180_dma_1(io, cycles);
+    return cycles;
+}
+
 struct z180_io *z180_create(Z180Context *cpu)
 {
     struct z180_io *io = malloc(sizeof(struct z180_io));
@@ -704,6 +866,7 @@ struct z180_io *z180_create(Z180Context *cpu)
     io->asci[0].stat = 0x02;
     io->asci[1].stat = 0x02;
     io->dstat = 0x30;
+    io->dcntl = 0xF0;	/* Manual disagrees with itself here */
     io->cpu = cpu;
     return io;
 }
