@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "libz180/z180.h"
 #include "z180_io.h"
 
 struct z180_asci {
@@ -34,8 +35,16 @@ struct z180_io {
     /* I/O base etc */
     uint8_t icr;
     uint8_t itc;
+    uint8_t il;
     /* Serial ports */
     struct z180_asci asci[2];
+
+    /* CPU internal context */
+    Z180Context *cpu;
+    /* Internal IRQ management */
+    uint8_t irq;
+    uint8_t irqpend;
+    uint8_t vector;
 
     int trace;
 };
@@ -63,8 +72,8 @@ static const char *regnames[64] = {
     "TCR",
     /* Unused = 0x11 */
     "RES 11H",
-    "RES 12H",
-    "RES 13H",
+    "ECR0",		/* S180/L180 only */
+    "ECR1",		/*   ""    ""     */
     /* Timer = 0x14 */
     "TMDR1L",
     "TMDR1H",
@@ -74,12 +83,12 @@ static const char *regnames[64] = {
     "FRC",
     /* Unused 0x19->0x1F */
     "RES 19H",
-    "RES 1AH",
-    "RES 1BH",
-    "RES 1CH",
-    "RES 1DH",
-    "RES 1EH",
-    "RES 1FH",
+    "TCL0",		/* S180/L180 only */
+    "TCH0",    		/*   ""    ""     */
+    "TCL1",    		/*   ""    ""     */
+    "TCH1",		/*   ""    ""     */
+    "CMR",		/*   ""    ""     */
+    "CCR",		/*   ""    ""     */
     /* 0x20 DMAC */
     "SAR0L",
     "SAR0H",
@@ -118,7 +127,72 @@ static const char *regnames[64] = {
     "ICR"
 };
 
+
+static void z180_next_interrupt(struct z180_io *io)
+{
+    uint8_t live = io->irqpend & io->itc & 7;
+
+    if (io->irq)
+        return;
+
+    if (live & 1) {	/* IRQ is highest */
+        Z180INT(io->cpu, io->vector);
+        io->irq = 1;
+        return;
+    }
+    if (live & 2) {
+        Z180INT_IM2(io->cpu, io->il | 0x00);
+        io->irq = 1;
+        return;
+    }
+    if (live & 4) {
+        Z180INT_IM2(io->cpu, io->il | 0x02);
+        io->irq = 1;
+        return;
+    }
+    /* Check for internal interrupts in priority order */
+    /* TODO
+        - PRT 0
+        - PRT 1
+        - DMA 0
+        - DMA 1 */
+    if ((io->cntr & 0x8C0) == 0xC0) {
+        Z180INT_IM2(io->cpu, io->il | 0x0C);
+        io->irq = 1;
+        return;
+    }
+    if (io->asci[0].irq) {
+        Z180INT_IM2(io->cpu, io->il | 0x0E);
+        io->irq = 1;
+        return;
+    }
+    if (io->asci[1].irq) {
+        Z180INT_IM2(io->cpu, io->il | 0x10);
+        io->irq = 1;
+        return;
+    }
+    Z180NOINT(io->cpu);
+}
+
+void z180_interrupt(struct z180_io *io, uint8_t pin, uint8_t vec, bool on)
+{
+    io->irqpend &= ~(1 << pin);
+    if (on)
+        io->irqpend |= (1 << pin);
+
+    /* Pin 0 is the INT0 line which acts like a Z80 */
+    if (pin == 0)
+        io->vector = vec;
+
+    if (io->irq == 0)
+        z180_next_interrupt(io);
+}
     
+void z180_reti(struct z180_io *io)
+{
+    io->irq = 0;
+    z180_next_interrupt(io);
+}
     
 static void z180_asci_recalc(struct z180_io *io, struct z180_asci *asci)
 {
@@ -187,13 +261,17 @@ static void z180_asci_event(struct z180_io *io, struct z180_asci *asci)
     if (asci->input && (r & 1)) {
         asci->stat |= 0x80;
         asci->rdr = next_char();
+        printf("Read byte %02X\n", asci->rdr);
     }
 }
 
-static void z180_csio_begin(struct z180_io *io)
+static void z180_csio_begin(struct z180_io *io, uint8_t val)
 {
     /* We should time this but for now just do a quick instant hack TODO */
-    io->trdr_r = z180_csio_write(io, io->trdr_w);
+    io->trdr_r = z180_csio_write(io, val);
+    io->cntr |= 0x80;
+    io->cntr &= ~0x30;
+    z180_next_interrupt(io);
 }
 
 bool z180_iospace(struct z180_io *io, uint16_t addr)
@@ -223,7 +301,12 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
     case 0x0A:
         return io->cntr;
     case 0x0B:
+        io->cntr &= 0x7F;
+        z180_next_interrupt(io);
         return io->trdr_r;
+    /* IL */
+    case 0x33:
+        return io->il;
     /* ITC: TODO - UFO bits from CPU core emulation */
     case 0x34:
         return io->itc;
@@ -280,11 +363,19 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
     case 0x0A:
         delta = io->cntr ^ val;
         io->cntr = val;
-        if (io->cntr & delta & 0x20)	/* Set the RE bit */
-            z180_csio_begin(io);
+        if (io->cntr & delta & 0x10)	/* Set the TE bit */
+            z180_csio_begin(io, io->trdr_w);
+        else if (io->cntr & delta & 0x20)	/* Set the RE bit */
+            z180_csio_begin(io, 0xFF);
         break;
     case 0x0B:
+        io->cntr &= 0x7F;
         io->trdr_w = val;
+        z180_next_interrupt(io);
+        break;
+    /* IL */
+    case 0x33:
+        io->il = val & 0xE0;
         break;
     /* ITC */
     case 0x34:
@@ -293,6 +384,7 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
         io->itc |= val & 0x07;
         if (!(val & 0x80))
             io->itc &= 0x7F;
+        z180_next_interrupt(io);
         break;
     /* Refresh */
     case 0x36:
@@ -338,7 +430,7 @@ void z180_event(struct z180_io *io)
     z180_asci_event(io, io->asci+1);
 }
 
-struct z180_io *z180_create(void)
+struct z180_io *z180_create(Z180Context *cpu)
 {
     struct z180_io *io = malloc(sizeof(struct z180_io));
     if (io == NULL) {
@@ -354,6 +446,7 @@ struct z180_io *z180_create(void)
     io->cntr = 7;
     io->asci[0].stat = 0x02;
     io->asci[1].stat = 0x02;
+    io->cpu = cpu;
     return io;
 }
 

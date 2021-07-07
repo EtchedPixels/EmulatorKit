@@ -164,6 +164,14 @@ void Z180RESET (Z180Context* ctx);
  * @param value The value to read from the data bus
  */
 void Z180INT (Z180Context* ctx, byte value);
+
+/** Generates a hardware interrupt on a Z180 style pin where the source
+ * is identifier by low vector bits and IM2 always used
+ *
+ * @param value The value to read from the data bus
+ */
+void Z180INT_IM2(Z180Context* ctx, byte value);
+
 /** Clears a pending hardware interrupt.
  * On some platforms the interrupt line may be triggered and then set
  * back before the CPU has interrupts enabled.

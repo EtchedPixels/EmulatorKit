@@ -614,7 +614,7 @@ int main(int argc, char *argv[])
 			sd_trace(sdcard, 1);
 	}
 
-	io = z180_create();
+	io = z180_create(&cpu_z180);
 	z180_set_input(io, 0, 1);
 	z180_trace(io, trace & TRACE_CPU_IO);
 

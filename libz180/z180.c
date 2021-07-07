@@ -752,28 +752,33 @@ static void do_nmi(Z180Context* ctx)
 
 static void do_int(Z180Context* ctx)
 {
+    unsigned int mode = ctx->int_req;
     unhalt(ctx);
 	ctx->IFF1 = 0;
 	ctx->IFF2 = 0;
 	ctx->int_req = 0;
+
+    if (ctx->IM == 2 || mode == 2)
+    {
+        doPush(ctx, ctx->PC);
+		ushort vector_address = (ctx->I << 8) | ctx->int_vector;
+		ctx->PC = read16(ctx, vector_address);
+		ctx->tstates += 7;
+	return;
+    }
     if (ctx->IM == 0)
     {
 		ctx->exec_int_vector = 1;
 		do_execute(ctx);
 		ctx->exec_int_vector = 0;
+		return;
     }
     else if (ctx->IM == 1)
     {
         doPush(ctx, ctx->PC);
         ctx->PC = 0x0038;
 		ctx->tstates += 7;
-    }
-    else if (ctx->IM == 2)
-    {
-        doPush(ctx, ctx->PC);
-		ushort vector_address = (ctx->I << 8) | ctx->int_vector;
-		ctx->PC = read16(ctx, vector_address);
-		ctx->tstates += 7;
+	return;
     }
 }
 
@@ -895,6 +900,12 @@ void Z180RESET (Z180Context* ctx)
 void Z180INT (Z180Context* ctx, byte value)
 {
 	ctx->int_req = 1;
+	ctx->int_vector = value;
+}
+
+void Z180INT_IM2 (Z180Context* ctx, byte value)
+{
+	ctx->int_req = 2;
 	ctx->int_vector = value;
 }
 
