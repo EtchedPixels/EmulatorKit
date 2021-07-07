@@ -55,7 +55,7 @@ static struct tms9918a_renderer *vdprend;
 struct zxkey *zxkey;
 static struct z180_io *io;
 
-static uint16_t tstate_steps = 369;	/* RC2014 speed */
+static uint16_t tstate_steps = 922;	/* 18.432MHz */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
