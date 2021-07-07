@@ -661,7 +661,7 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 	}
 }
 
-int check_chario(void)
+unsigned int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
