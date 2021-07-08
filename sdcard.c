@@ -36,18 +36,31 @@ static const uint8_t sd_csd[17] = {
 	0x16, 0x40, 0x00, 0x00
 };
 
+static const uint8_t sd_cid[] = {
+	0xFE,	/* Sync byte */
+	0x02,	/* Toshiba */
+	'T','S',
+	'R','C','E','M','U',
+	1,
+	0xAA,0x55,0xAA,0x55,
+	0x00, 0x14,
+	0xFF	/* should be a checksum */
+};
+
 static uint8_t sd_process_command(struct sdcard *c)
 {
+	c->sd_stuff = 2 + (rand() & 7);
 	if (c->sd_ext) {
 		c->sd_ext = 0;
+		if (c->debug)
+			fprintf(stderr, "%s: Extended command %x\n", c->sd_name, c->sd_cmd[0]);
 		switch(c->sd_cmd[0]) {
 		default:
-			return 0xFF;
+			return 0x7F;
 		}
 	}
 	if (c->debug)
 		fprintf(stderr, "%s: Command received %x\n", c->sd_name, c->sd_cmd[0]);
-	c->sd_stuff = 2 + (rand() & 7);
 	switch(c->sd_cmd[0]) {
 	case 0x40+0:		/* CMD 0 */
 		return 0x01;	/* Just respond 0x01 */
@@ -55,6 +68,12 @@ static uint8_t sd_process_command(struct sdcard *c)
 		return 0x00;	/* Immediately indicate we did */
 	case 0x40+9:		/* CMD 9 - read the CSD */
 		memcpy(c->sd_out,sd_csd, 17);
+		c->sd_outlen = 17;
+		c->sd_outp = 0;
+		c->sd_mode = 2;
+		return 0x00;
+	case 0x40+10:		/* CMD10 - read the CID */
+		memcpy(c->sd_out, sd_cid, 17);
 		c->sd_outlen = 17;
 		c->sd_outp = 0;
 		c->sd_mode = 2;
@@ -90,9 +109,12 @@ static uint8_t sd_process_command(struct sdcard *c)
 		c->sd_inp = 0;
 		c->sd_mode = 4;	/* Send a pad then go to mode 3 */
 		return 0x00;	/* The expected OK */
+#if 0
+	/* We can't turn this on until we support the needed base commands */
 	case 0x40+55:
 		c->sd_ext = 1;
 		return 0x01;
+#endif
 	default:
 		return 0x7F;
 	}
