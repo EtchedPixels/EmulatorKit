@@ -279,7 +279,7 @@ uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 
 	r = bitrev[sd_spi_in(sdcard, bitrev[bits])];
 	if (trace & TRACE_SPI)
-		fprintf(stderr,	"[SPI %02X:%02X]\n", bitrev[bits], r);
+		fprintf(stderr,	"[SPI %02X:%02X]\n", bitrev[bits], bitrev[r]);
 	return r;
 }
 
@@ -723,10 +723,10 @@ int main(int argc, char *argv[])
 	fdc_setdrive(fdc, 0, drive_a);
 	fdc_setdrive(fdc, 1, drive_b);
 
-	/* 2.5ms - it's a balance between nice behaviour and simulation
+	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 2500000L;
+	tc.tv_nsec = 20000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -760,6 +760,8 @@ int main(int argc, char *argv[])
 		unsigned int i, j;
 		/* We have to run the DMA engine and Z180 in step per
 		   instruction otherwise we will mess up on stalling DMA */
+
+		/* Do an emulated 20ms of work (368640 clocks) */
 		for (i = 0; i < 50; i++) {
 			for (j = 0; j < 10; j++) {
 				while (states < tstate_steps) {
@@ -784,7 +786,7 @@ int main(int argc, char *argv[])
 		}
 		if (wiznet)
 			w5100_process(wiz);
-		/* Do 2.5ms of I/O and delays */
+		/* Do 20ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 		if (int_recalc) {
