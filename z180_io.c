@@ -48,6 +48,8 @@ struct z180_io {
     struct z180_prt prt[2];
     uint8_t tcr;
     uint8_t frc;
+    /* Internal state used for clock divide by 20 */
+    unsigned int clockmod;
 
     /* DMA engine */
     uint32_t sar0;
@@ -180,14 +182,14 @@ static void z180_next_interrupt(struct z180_io *io)
         return;
     }
     /* Check for internal interrupts in priority order */
-    if ((io->tcr & 0x41) == 0x41) {
+    if ((io->tcr & 0x50) == 0x50) {
         if (io->irq == 0) {
             Z180INT_IM2(io->cpu, io->il | 0x04);
             io->irq = 1;
         }
         return;
     }
-    if ((io->tcr & 0x82) == 0x82) {
+    if ((io->tcr & 0xA0) == 0xA0) {
         if (io->irq == 0) {
             Z180INT_IM2(io->cpu, io->il | 0x06);
             io->irq = 1;
@@ -344,12 +346,11 @@ static void z180_prt_event(struct z180_io *io, struct z180_prt *prt, unsigned in
         return;
 
     /* Not yet overflowed */
-    if (clocks < prt->tmdr) {
+    if (prt->tmdr > clocks) {
         prt->tmdr -= clocks;
         return;
     }
-    clocks -= prt->tmdr;
-    clocks %= prt->rldr + 1;	/* Handle multiple reloads being missed */
+    clocks -= prt->tmdr;	/* Cycles after the overflow */
     prt->tmdr = prt->rldr - clocks;	/* Set up with what is left */
     io->tcr |= 0x40 << shift;    
 }
@@ -389,11 +390,11 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
     /* Timers */
     case 0x0C:
         io->prt[0].latch = io->prt[0].tmdr >> 8;
-        io->tcr &= 0x40;
+        io->tcr &= ~0x40;
         z180_next_interrupt(io);
         return io->prt[0].tmdr;
     case 0x0D:
-        io->tcr &= 0x40;
+        io->tcr &= ~0x40;
         z180_next_interrupt(io);
         return io->prt[0].latch;
     case 0x0E:
@@ -404,11 +405,11 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
         return io->tcr;
     case 0x14:
         io->prt[1].latch = io->prt[1].tmdr >> 8;
-        io->tcr &= 0x80;
+        io->tcr &= ~0x80;
         z180_next_interrupt(io);
         return io->prt[1].tmdr;
     case 0x15:
-        io->tcr &= 0x80;
+        io->tcr &= ~0x80;
         z180_next_interrupt(io);
         return io->prt[1].latch;
     case 0x16:
@@ -702,18 +703,16 @@ uint32_t z180_mmu_translate(struct z180_io *io, uint16_t addr)
 
 void z180_event(struct z180_io *io, unsigned int clocks)
 {
-    static unsigned int clockmod = 0;
-
     z180_asci_event(io, io->asci);
     z180_asci_event(io, io->asci + 1);
 
     /* Divide by 20 */
-    clockmod += clocks;
-    if (clockmod > 20) {
-        io->frc += clockmod / 20;
-        z180_prt_event(io, io->prt, clockmod / 20, 0);
-        z180_prt_event(io, io->prt + 1, clockmod / 20, 1);
-        clockmod %= 20;
+    io->clockmod += clocks;
+    if (io->clockmod > 20) {
+        io->frc += io->clockmod / 20;
+        z180_prt_event(io, io->prt, io->clockmod / 20, 0);
+        z180_prt_event(io, io->prt + 1, io->clockmod / 20, 1);
+        io->clockmod %= 20;
     }
 }
 

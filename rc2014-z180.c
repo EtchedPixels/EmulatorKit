@@ -55,7 +55,7 @@ static struct tms9918a_renderer *vdprend;
 struct zxkey *zxkey;
 static struct z180_io *io;
 
-static uint16_t tstate_steps = 92;	/* 18.432MHz */
+static uint16_t tstate_steps = 737;	/* 18.432MHz */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
@@ -709,7 +709,7 @@ int main(int argc, char *argv[])
 	while (!emulator_done) {
 		int states = 0;
 		unsigned int i, j;
-		/* We have to run the DMA engine and Z180 in step pewr
+		/* We have to run the DMA engine and Z180 in step per
 		   instruction otherwise we will mess up on stalling DMA */
 		for (i = 0; i < 50; i++) {
 			for (j = 0; j < 10; j++) {
@@ -735,7 +735,7 @@ int main(int argc, char *argv[])
 		}
 		if (wiznet)
 			w5100_process(wiz);
-		/* Do 5ms of I/O and delays */
+		/* Do 2.5ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 		if (int_recalc) {
