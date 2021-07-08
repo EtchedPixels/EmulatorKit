@@ -790,8 +790,9 @@ static void do_int(Z180Context* ctx)
 }
 
 
-void Z180Execute (Z180Context* ctx)
+unsigned Z180Execute (Z180Context* ctx)
 {
+	ctx->tstates = 0;
 	if (ctx->nmi_req)
 		do_nmi(ctx);
 	else if (ctx->int_req && !ctx->defer_int && ctx->IFF1)
@@ -801,17 +802,8 @@ void Z180Execute (Z180Context* ctx)
 		ctx->defer_int = 0;
 		do_execute(ctx);
 	}
-}
-
-
-unsigned Z180ExecuteTStates(Z180Context* ctx, unsigned tstates)
-{
-	ctx->tstates = 0;
-	while (ctx->tstates < tstates)
-		Z180Execute(ctx);
 	return ctx->tstates;
 }
-
 
 void Z180Debug (Z180Context* ctx, char* dump, char* decode)
 {

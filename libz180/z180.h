@@ -139,12 +139,7 @@ typedef struct
 
 
 /** Execute the next instruction. */
-void Z180Execute (Z180Context* ctx);
-
-/** Execute enough instructions to use at least tstates cycles.
- * Returns the number of tstates actually executed.  Note: Resets
- * ctx->tstates.*/
-unsigned Z180ExecuteTStates(Z180Context* ctx, unsigned tstates);
+unsigned Z180Execute (Z180Context* ctx);
 
 /** Decode the next instruction to be executed.
  * dump and decode can be NULL if such information is not needed
