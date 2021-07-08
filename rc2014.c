@@ -96,7 +96,7 @@ static struct tms9918a_renderer *vdprend;
 
 struct zxkey *zxkey;
 
-static uint16_t tstate_steps = 369;	/* RC2014 speed */
+static uint16_t tstate_steps = 294;	/* RC2014 speed */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
@@ -2686,7 +2686,7 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_Z80SBC64;
 				bankreg[0] = 3;
 				/* Triple RC2014 rate */
-				tstate_steps = 369 * 3;
+				tstate_steps = 294 * 3;
 			} else if (strcmp(optarg, "easyz80") == 0) {
 				bank512 = 1;
 				cpuboard = CPUBOARD_EASYZ80;
@@ -2697,7 +2697,7 @@ int main(int argc, char *argv[])
 				sio2 = 1;
 				sio2_input = 1;
 				has_im2 = 1;
-				tstate_steps = 500;
+				tstate_steps = 400;
 			} else if (strcmp(optarg, "sc121") == 0) {
 				switchrom = 0;
 				bank512 = 0;
@@ -2725,7 +2725,7 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_ZRCC;
 				bankreg[0] = 3;
 				/* 22MHz CPU */
-				tstate_steps = 369 * 3;
+				tstate_steps = 294 * 3;
 			} else if (strcmp(optarg, "tinyz80") == 0) {
 				bank512 = 1;
 				cpuboard = CPUBOARD_TINYZ80;
@@ -3003,7 +3003,7 @@ int main(int argc, char *argv[])
 		}
 		close(eprom_fd);
 		/* Assume same speed as main processor */
-		copro->tstates = (tstate_steps + 5) / 10;
+		copro->tstates = tstate_steps;
 		z80copro_trace(copro, (trace >> 17) & 3);
 	}
 
@@ -3027,7 +3027,7 @@ int main(int argc, char *argv[])
 	/* 2.5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 2500000L;
+	tc.tv_nsec = 20000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -3057,14 +3057,14 @@ int main(int argc, char *argv[])
 
 	/* We run 7372000 t-states per second */
 	/* We run 369 cycles per I/O check, do that 50 times then poll the
-	   slow stuff and nap for 2.5ms to get 50Hz on the TMS99xx */
+	   slow stuff and nap for 20ms to get 50Hz on the TMS99xx */
 	while (!emulator_done) {
 		int i;
 		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 50; i++) {
 			int j;
 			for (j = 0; j < 10; j++) {
-				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/10);
+				Z80ExecuteTStates(&cpu_z80, tstate_steps);
 				if (copro)
 					z80copro_run(copro);
 			}
@@ -3117,7 +3117,7 @@ int main(int argc, char *argv[])
 		}
 		if (wiznet)
 			w5100_process(wiz);
-		/* Do 5ms of I/O and delays */
+		/* Do 20ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 		if (int_recalc) {
