@@ -108,12 +108,14 @@ static void mem_write0(uint16_t addr, uint8_t val)
 
 uint8_t z180_phys_read(int unused, uint32_t addr)
 {
-	return ramrom[addr];
+	return ramrom[addr & 0xFFFFF];
 }
 
 void z180_phys_write(int unused, uint32_t addr, uint8_t val)
 {
-	ramrom[addr] = val;
+	addr &= 0xFFFFF;
+	if (addr >= 0x80000)
+		ramrom[addr] = val;
 }
 
 uint8_t mem_read(int unused, uint16_t addr)
@@ -704,19 +706,22 @@ int main(int argc, char *argv[])
 	   matched with that. The scheme here works fine except when the host
 	   is loaded though */
 
-	/* We run 7372000 t-states per second */
-	/* We run 369 cycles per I/O check, do that 50 times then poll the
-	   slow stuff and nap for 2.5ms to get 50Hz on the TMS99xx */
 	while (!emulator_done) {
-		int i;
+		int states = 0;
+		unsigned int i, j;
+		/* We have to run the DMA engine and Z180 in step pewr
+		   instruction otherwise we will mess up on stalling DMA */
 		for (i = 0; i < 50; i++) {
-			int j;
-			/* We need to tidy this so it returns the tstates consumed */
 			for (j = 0; j < 10; j++) {
-				unsigned int clocks = z180_dma(io, tstate_steps);
-				if (clocks)
-					Z180ExecuteTStates(&cpu_z180, clocks);
-				z180_event(io, tstate_steps);
+				while (states < tstate_steps) {
+					unsigned int used;
+					used = z180_dma(io);
+					if (used == 0)
+						used = Z180Execute(&cpu_z180);
+					states += used;
+				}
+				z180_event(io, states);
+				states -= tstate_steps;
 			}
 			fdc_tick(fdc);
 			/* We want to run UI events regularly it seems */
