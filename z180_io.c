@@ -17,6 +17,8 @@ struct z180_asci {
     uint8_t stat;
     uint8_t cntla;
     uint8_t cntlb;
+    uint16_t tc;
+    uint8_t ecr;
     bool input;
     bool irq;
 };
@@ -63,6 +65,10 @@ struct z180_io {
     uint8_t dstat;
     uint8_t dmode;
     uint8_t dcntl;
+
+    /* CPU control */
+    uint8_t ccr;
+    uint8_t cmr;
 
     /* Internal used for steal mode */
     uint8_t dma_state0;
@@ -403,6 +409,10 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
         return io->prt[0].rldr >> 8;
     case 0x10:
         return io->tcr;
+    case 0x12:
+        return io->asci[0].ecr;
+    case 0x13:
+        return io->asci[1].ecr;
     case 0x14:
         io->prt[1].latch = io->prt[1].tmdr >> 8;
         io->tcr &= ~0x80;
@@ -418,6 +428,18 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
         return io->prt[1].rldr >> 8;
     case 0x18:
         return io->frc;
+    case 0x1A:
+        return io->asci[0].tc;
+    case 0x1B:
+        return io->asci[0].tc >> 8;
+    case 0x1C:
+        return io->asci[1].tc;
+    case 0x1D:
+        return io->asci[1].tc >> 8;
+    case 0x1E:
+        return io->cmr | 0x7F;
+    case 0x1F:
+        return io->ccr;
     /* DMA */
     case 0x20:
         return io->sar0;
@@ -544,6 +566,12 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
     case 0x10:
         io->tcr = val;
         break;
+    case 0x12:
+        io->asci[0].ecr = val;
+        break;
+    case 0x13:
+        io->asci[1].ecr = val;
+        break;
     case 0x14:
         io->prt[1].tmdr &= 0xFF00;
         io->prt[1].tmdr |= val;
@@ -561,6 +589,28 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
         io->prt[1].rldr |= val << 8;
         break;
     case 0x18:
+        break;
+    case 0x1A:
+        io->asci[0].tc &= 0xFF00;
+        io->asci[0].tc |= val;
+        return;
+    case 0x1B:
+        io->asci[0].tc &= 0x00FF;
+        io->asci[0].tc |= val << 8;
+        return;
+    case 0x1C:
+        io->asci[1].tc &= 0xFF00;
+        io->asci[1].tc |= val;
+        return;
+    case 0x1D:
+        io->asci[1].tc &= 0x00FF;
+        io->asci[1].tc |= val << 8;
+        return;
+    case 0x1E:
+        io->cmr = val & 0x80;
+        break;
+    case 0x1F:
+        io->ccr = val;
         break;
     /* DMA */
     case 0x20:
