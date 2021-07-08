@@ -279,7 +279,7 @@ uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 
 	r = bitrev[sd_spi_in(sdcard, bitrev[bits])];
 	if (trace & TRACE_SPI)
-		fprintf(stderr,	"[SPI %02X:%02X]\n", bits, r);
+		fprintf(stderr,	"[SPI %02X:%02X]\n", bitrev[bits], r);
 	return r;
 }
 
@@ -399,6 +399,34 @@ static void diag_write(uint8_t val)
 	write(1, x, 12);
 }
 
+/* The RTC is on this port but the other bits also do magic
+	7: RTC DOUT
+	6: RTC SCLK
+	5: RTC \WE
+	4: RTC \CE
+	3: SD CS2
+	2: SD CS1
+	1: Flash select (not used)
+	0: SCL (I2C) */
+
+static void sysio_write(uint8_t val)
+{
+	static uint8_t sysio = 0xFF;
+	uint8_t delta = val ^ sysio;
+	if (sdcard && (delta & 4)) {
+		if (trace & TRACE_SPI)
+			fprintf(stderr, "[SPI CS %sed]\n",
+				(val & 4) ? "rais" : "lower");
+		if (val & 4)
+			sd_spi_raise_cs(sdcard);
+		else
+			sd_spi_lower_cs(sdcard);
+	}
+	sysio = val;
+	/* We don't have anything on the second emulated SPI nor on the
+	   I2C */
+}
+
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -451,8 +479,10 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
-	else if (addr == 0x0C && rtc)
+	else if (addr == 0x0C && rtc) {
 		rtc_write(rtc, val);
+		sysio_write(val);
+	}
 	else if (addr == 0x0D)
 		diag_write(val);
 	else if ((addr == 0x98 || addr == 0x99) && vdp)
