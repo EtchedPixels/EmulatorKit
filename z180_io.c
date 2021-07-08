@@ -62,6 +62,9 @@ struct z180_io {
     uint8_t dmode;
     uint8_t dcntl;
 
+    /* Internal used for steal mode */
+    uint8_t dma_state0;
+
     /* CPU internal context */
     Z180Context *cpu;
     /* Internal IRQ management */
@@ -627,15 +630,18 @@ void z180_write(struct z180_io *io, uint8_t addr, uint8_t val)
            DWE bit */
         if ((val & 0xA0) == 0x80)
             io->dstat |= 0x81;
-        if ((val & 0x50) == 0x40)
+        if ((val & 0x50) == 0x40) {
             io->dstat |= 0x41;
+            if (io->trace)
+                fprintf(stderr, "DMA0 begin mode %02X from %X to %X for %X\n",
+                    io->dmode, io->sar0, io->dar0, io->bcr0);
+        }
         /* To disable a channel you must write 0 to the DE bit and 0 to the
            DWE bit */
         if ((val & 0xA0) == 0x00)
             io->dstat &= ~0x80;
         if ((val & 0x50) == 0x00)
             io->dstat &= ~0x40;
-        fprintf(stderr, "DSTAT To %02X with write %02X\n", io->dstat, val);
         break;
     case 0x31:
         io->dmode = val;
@@ -721,136 +727,128 @@ void z180_event(struct z180_io *io, unsigned int clocks)
  *	DREQ0/1 being high
  *	NMI halting DMA
  *
- *	We currently run bursts of CPU then DMA so don't properly match
- *	the DMA cycle steal effect
+ *	Our cycle stealing isn't quite correct
  */
 
-static unsigned int z180_dma_0(struct z180_io *io, unsigned int cycles)
+static unsigned int z180_dma_0(struct z180_io *io)
 {
     unsigned int cost = 6;	/* Cost of each transfer */
-    unsigned int usable = cycles;
-    unsigned int used = 0;
     uint8_t byte;
 
     /* TODO: model wait states */
 
+    /* We do a DMA then the CPU gets a go. Really we interleave with each
+       machine cycle but this will do for now */
     if (!(io->dmode & 2)) {
-        /* Each DMA costs us our DMA cost + one machine cycle */
-        usable =  cycles/(cost + 3);
-        usable *= cost;
+        io->dma_state0++;
+        if (io->dma_state0 & 1)
+            return 0;
     }
 
-    do {
-        if (used >= usable)
-            return cycles - usable;
+    /* Fetch a byte */
+    /* TODO: when sar0/dar0 crosses a 64K boundary add 4 clocks */
+    switch(io->dmode & 0x0C) {
+    case 0x00:
+        byte = z180_phys_read(io->cpu->ioParam, io->sar0++);
+        io->sar0 &= 0xFFFFF;
+        break;
+    case 0x04:
+        byte = z180_phys_read(io->cpu->ioParam, io->sar0--);
+        io->sar0 &= 0xFFFFF;
+        break;
+    case 0x08:
+        byte = z180_phys_read(io->cpu->ioParam, io->sar0);
+        break;
+    case 0x0C:
+        byte = io->cpu->ioRead(io->cpu->ioParam, io->sar0);
+        break;
+    }
+    /* Store the byte */
+    switch(io->dmode & 0x30) {
+    case 0x00:
+        z180_phys_write(io->cpu->ioParam, io->dar0++, byte);
+        io->dar0 &= 0xFFFFF;
+        break;
+    case 0x10:
+        z180_phys_write(io->cpu->ioParam, io->dar0--, byte);
+        io->dar0 &= 0xFFFFF;
+        break;
+    case 0x20:
+        z180_phys_write(io->cpu->ioParam, io->dar0, byte);
+        break;
+    case 0x30:
+        io->cpu->ioWrite(io->cpu->ioParam, io->dar0, byte);
+    }
 
-        /* Fetch a byte */
-        /* TODO: when sar0/dar0 crosses a 64K boundary add 4 clocks */
-        switch(io->dmode & 0x0C) {
-        case 0x00:
-            byte = z180_phys_read(io->cpu->ioParam, io->sar0++);
-            io->sar0 &= 0xFFFFF;
-            break;
-        case 0x04:
-            byte = z180_phys_read(io->cpu->ioParam, io->sar0--);
-            io->sar0 &= 0xFFFFF;
-            break;
-        case 0x08:
-            byte = z180_phys_read(io->cpu->ioParam, io->sar0);
-            break;
-        case 0x0C:
-            byte = io->cpu->ioRead(io->cpu->ioParam, io->sar0);
-            break;
-        }
-        /* Store the byte */
-        switch(io->dmode & 0x30) {
-        case 0x00:
-            z180_phys_write(io->cpu->ioParam, io->dar0++, byte);
-            io->dar0 &= 0xFFFFF;
-            break;
-        case 0x10:
-            z180_phys_write(io->cpu->ioParam, io->dar0++, byte);
-            io->dar0 &= 0xFFFFF;
-            break;
-        case 0x20:
-            z180_phys_write(io->cpu->ioParam, io->dar0, byte);
-            break;
-        case 0x30:
-            io->cpu->ioWrite(io->cpu->ioParam, io->dar0, byte);
-        }
-        used += cost;
-    } while(--io->bcr0);
+    if (--io->bcr0)
+        return cost;
     /* DMA finished - stop engine and flag */
     io->dstat &= ~0x40;
-    if (cycles >= used)
-        return cycles - used;
-    return 0;
+    if (io->trace)
+        fprintf(stderr, "DMA0 complete.\n");
+    return cost;
 }
 
-static unsigned int z180_dma_1(struct z180_io *io, unsigned int cycles)
+static unsigned int z180_dma_1(struct z180_io *io)
 {
     unsigned int cost = 6;	/* Cost of each transfer */
-    unsigned int usable = cycles;
-    unsigned int used = 0;
     uint8_t byte;
 
     /* TODO: model wait states */
 
 
     /* TODO: when mar1 crosses a 64K boundary add 4 clocks */
-    do {
-        if (used >= usable)
-            return cycles - usable;
-        /* Fetch a byte */
-        switch(io->dcntl & 0x03) {
-        case 0x00:
-            byte = z180_phys_read(io->cpu->ioParam, io->mar1++);
-            io->mar1 &= 0xFFFFF;
-            break;
-        case 0x01:
-            byte = z180_phys_read(io->cpu->ioParam, io->mar1--);
-            io->mar1 &= 0xFFFFF;
-            break;
-        case 0x02:
-        case 0x03:
-            byte = io->cpu->ioRead(io->cpu->ioParam, io->iar1);
-            break;
-        }
-        /* Store the byte */
-        switch(io->dmode & 0x03) {
-        case 0x00:
-        case 0x01:
-            io->cpu->ioWrite(io->cpu->ioParam, io->iar1, byte);
-            break;
-        case 0x02:
-            z180_phys_write(io->cpu->ioParam, io->mar1++, byte);
-            io->mar1 &= 0xFFFFF;
-            break;
-        case 0x03:
-            z180_phys_write(io->cpu->ioParam, io->mar1--, byte);
-            io->mar1 &= 0xFFFFF;
-        }
-        used += cost;
-    } while(--io->bcr1);
-    io->dstat &= 0x80;
-    if (cycles >= used)
-        return cycles - used;
-    return 0;
+
+    /* Fetch a byte */
+    switch(io->dcntl & 0x03) {
+    case 0x00:
+        byte = z180_phys_read(io->cpu->ioParam, io->mar1++);
+        io->mar1 &= 0xFFFFF;
+        break;
+    case 0x01:
+        byte = z180_phys_read(io->cpu->ioParam, io->mar1--);
+        io->mar1 &= 0xFFFFF;
+        break;
+    case 0x02:
+    case 0x03:
+        byte = io->cpu->ioRead(io->cpu->ioParam, io->iar1);
+        break;
+    }
+    /* Store the byte */
+    switch(io->dmode & 0x03) {
+    case 0x00:
+    case 0x01:
+        io->cpu->ioWrite(io->cpu->ioParam, io->iar1, byte);
+        break;
+    case 0x02:
+        z180_phys_write(io->cpu->ioParam, io->mar1++, byte);
+        io->mar1 &= 0xFFFFF;
+        break;
+    case 0x03:
+        z180_phys_write(io->cpu->ioParam, io->mar1--, byte);
+        io->mar1 &= 0xFFFFF;
+    }
+    if (--io->bcr1)
+        return cost;
+    io->dstat &= ~0x80;
+    if (io->trace)
+        fprintf(stderr, "DMA1 complete.\n");
+    return cost;
 }
 
 /* Run the DMA engines */
-unsigned int z180_dma(struct z180_io *io, unsigned int cycles)
+unsigned int z180_dma(struct z180_io *io)
 {
     /* Engines off */
     if (!(io->dstat & 1))
-        return cycles;
+        return 0;
 
     /* Channel enables */
     if (io->dstat & 0x40)
-        cycles = z180_dma_0(io, cycles);
+        return z180_dma_0(io);
     if (io->dstat & 0x80)
-        cycles = z180_dma_1(io, cycles);
-    return cycles;
+        return z180_dma_1(io);
+    return 0;
 }
 
 struct z180_io *z180_create(Z180Context *cpu)
