@@ -46,6 +46,7 @@ static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
 static uint8_t wiznet = 0;
 static uint8_t has_tms;
+static uint8_t leds;
 static struct ppide *ppide;
 static struct sdcard *sdcard;
 static FDC_PTR fdc;
@@ -384,6 +385,19 @@ static uint8_t fdc_read(uint8_t addr)
 	return val;
 }
 
+static void diag_write(uint8_t val)
+{
+	uint8_t x[12];
+	unsigned int i;
+	if (leds == 0)
+		return;
+
+	memcpy(x, "\n[--------]\n", 12);
+	for (i = 0; i < 8; i++)
+		if (val & (1 << i))
+			x[i + 2] = '@';
+	write(1, x, 12);
+}
 
 static uint8_t io_read_2014(uint16_t addr)
 {
@@ -439,6 +453,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		nic_w5100_write(wiz, addr & 3, val);
 	else if (addr == 0x0C && rtc)
 		rtc_write(rtc, val);
+	else if (addr == 0x0D)
+		diag_write(val);
 	else if ((addr == 0x98 || addr == 0x99) && vdp)
 		tms9918a_write(vdp, addr & 1, val);
 	else if (addr == 0xFD) {
@@ -526,7 +542,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "cd:fF:i:I:r:sRS:Twz")) != -1) {
+	while ((opt = getopt(argc, argv, "cd:fF:i:I:lr:sRS:Twz")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -545,6 +561,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'd':
 			trace = atoi(optarg);
+			break;
+		case 'l':
+			leds = 1;
 			break;
 		case 'f':
 			fast = 1;
