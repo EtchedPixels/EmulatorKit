@@ -14,7 +14,6 @@
  *
  *	General stuff to tackle
  *	Interrupt jumper (ECB v 16x50)
- *	16x50 interrupts	(partly done)
  *	ECB and timer via UART interrupt hack (timer done)
  *	DS1302 burst mode for memory
  *	Do we care about DS1302 writes ?
@@ -39,8 +38,10 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include "libz80/z80.h"
-#include "ide.h"
+#include "16x50.h"
+#include "ppide.h"
 #include "propio.h"
+#include "ramf.h"
 #include "rtc_bitbang.h"
 #include "w5100.h"
 
@@ -51,7 +52,7 @@ static uint8_t rombank;
 static uint8_t rambank;
 
 static uint8_t ide;
-static struct ide_controller *ide0;
+static struct ppide *ppi0;
 static struct propio *propio;
 static uint8_t timerhack;
 static uint8_t fast;
@@ -61,6 +62,8 @@ static Z80Context cpu_z80;
 
 static nic_w5100_t *wiz;
 static struct rtc *rtc;
+static struct uart16x50 *uart[5];
+static struct ramf *ramf;
 
 static volatile int done;
 
@@ -152,390 +155,6 @@ unsigned int next_char(void)
     return c;
 }
 
-/*
- *	Emulate PPIDE. It's not a particularly good emulation of the actual
- *	port behaviour if misprogrammed but should be accurate for correct
- *	use of the device.
- */
-static uint8_t pioreg[4];
-
-static void pio_write(uint8_t addr, uint8_t val)
-{
-    /* Compute all the deltas */
-    uint8_t changed = pioreg[addr] ^ val;
-    uint8_t dhigh = val & changed;
-    uint8_t dlow = ~val & changed;
-    uint16_t d;
-
-    switch(addr) {
-        case 0:	/* Port A data */
-        case 1:	/* Port B data */
-            pioreg[addr] = val;
-            if (trace & TRACE_PPIDE)
-                fprintf(stderr, "Data now %04X\n", (((uint16_t)pioreg[1]) << 8) | pioreg[0]);
-            break;
-        case 2:	/* Port C - address/control lines */
-            pioreg[addr] = val;
-            if (!ide0)
-                return;
-            if (val & 0x80) {
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "ide in reset.\n");
-                ide_reset_begin(ide0);
-                return;
-            }
-            if ((trace & TRACE_PPIDE) && (dlow & 0x80))
-                fprintf(stderr, "ide exits reset.\n");
-
-            /* This register is effectively the bus to the IDE device
-               bits 0-2 are A0-A2, bit 3 is CS0 bit 4 is CS1 bit 5 is W
-               bit 6 is R bit 7 is reset */
-            d = val & 0x07;
-            /* Altstatus and friends */
-            if (val & 0x10)
-                d += 2;
-            if (dlow & 0x20) {
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "write edge: %02X = %04X\n", d,
-                        ((uint16_t)pioreg[1] << 8) | pioreg[0]);
-                ide_write16(ide0, d, ((uint16_t)pioreg[1] << 8) | pioreg[0]);
-            } else if (dhigh & 0x40) {
-                /* Prime the data ports on the rising edge */
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "read edge: %02X = ", d);
-                d = ide_read16(ide0, d);
-                if (trace & TRACE_PPIDE)
-                    fprintf(stderr, "%04X\n", d);
-                pioreg[0] = d;
-                pioreg[1] = d >> 8;
-            }
-            break;
-        case 3: /* Control register */
-            /* We could check the direction bits but we don't */
-            pioreg[addr] = val;
-            break;
-    }
-}
-
-static uint8_t pio_read(uint8_t addr)
-{
-    if (trace & TRACE_PPIDE)
-        fprintf(stderr, "ide read %d:%02X\n", addr, pioreg[addr]);
-    return pioreg[addr];
-}
-
-/* UART: very mimimal for the moment */
-
-struct uart16x50 {
-    uint8_t ier;
-    uint8_t iir;
-    uint8_t fcr;
-    uint8_t lcr;
-    uint8_t mcr;
-    uint8_t lsr;
-    uint8_t msr;
-    uint8_t scratch;
-    uint8_t ls;
-    uint8_t ms;
-    uint8_t dlab;
-    uint8_t irq;
-#define RXDA	1
-#define TEMT	2
-#define MODEM	8
-    uint8_t irqline;
-};
-
-static struct uart16x50 uart[5];
-
-static void uart_init(struct uart16x50 *uptr)
-{
-    uptr->dlab = 0;
-}
-
-/* Compute the interrupt indicator register from what is pending */
-static void uart_recalc_iir(struct uart16x50 *uptr)
-{
-    if (uptr->irq & RXDA)
-        uptr->iir = 0x04;
-    else if (uptr->irq & TEMT)
-        uptr->iir = 0x02;
-    else if (uptr->irq & MODEM)
-        uptr->iir = 0x00;
-    else {
-        uptr->iir = 0x01;	/* No interrupt */
-        uptr->irqline = 0;
-        return;
-    }
-    /* Ok so we have an event, do we need to waggle the line */
-    if (uptr->irqline)
-        return;
-    uptr->irqline = uptr->irq;
-    Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
-    
-}
-
-/* Raise an interrupt source. Only has an effect if enabled in the ier */
-static void uart_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (uptr->irq & n)
-        return;
-    if (!(uptr->ier & n))
-        return;
-    uptr->irq |= n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (!(uptr->irq & n))
-        return;
-    uptr->irq &= ~n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_event(struct uart16x50 *uptr)
-{
-    uint8_t r = check_chario();
-    uint8_t old = uptr->lsr;
-    uint8_t dhigh;
-    if (r & 1)
-        uptr->lsr |= 0x01;	/* RX not empty */
-    if (r & 2)
-        uptr->lsr |= 0x60;	/* TX empty */
-    dhigh = (old ^ uptr->lsr);
-    dhigh &= uptr->lsr;		/* Changed high bits */
-    if (dhigh & 1)
-        uart_interrupt(uptr, RXDA);
-    if (dhigh & 0x2)
-        uart_interrupt(uptr, TEMT);
-}
-
-static void show_settings(struct uart16x50 *uptr)
-{
-    uint32_t baud;
-
-    if (!(trace & TRACE_UART))
-        return;
-
-    baud = uptr->ls + (uptr->ms << 8);
-    if (baud == 0)
-        baud = 1843200;
-    baud = 1843200 / baud;
-    baud /= 16;
-    fprintf(stderr, "[%d:%d",
-            baud, (uptr->lcr &3) + 5);
-    switch(uptr->lcr & 0x38) {
-        case 0x00:
-        case 0x10:
-        case 0x20:
-        case 0x30:
-            fprintf(stderr, "N");
-            break;
-        case 0x08:
-            fprintf(stderr, "O");
-            break;
-        case 0x18:
-            fprintf(stderr, "E");
-            break;
-        case 0x28:
-            fprintf(stderr, "M");
-            break;
-        case 0x38:
-            fprintf(stderr, "S");
-            break;
-    }
-    fprintf(stderr, "%d ",
-            (uptr->lcr & 4) ? 2 : 1);
-
-    if (uptr->lcr & 0x40)
-        fprintf(stderr, "break ");
-    if (uptr->lcr & 0x80)
-        fprintf(stderr, "dlab ");
-    if (uptr->mcr & 1)
-        fprintf(stderr, "DTR ");
-    if (uptr->mcr & 2)
-        fprintf(stderr, "RTS ");
-    if (uptr->mcr & 4)
-        fprintf(stderr, "OUT1 ");
-    if (uptr->mcr & 8)
-        fprintf(stderr, "OUT2 ");
-    if (uptr->mcr & 16)
-        fprintf(stderr, "LOOP ");
-    fprintf(stderr, "ier %02x]\n", uptr->ier);
-}
-
-static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
-{
-    switch(addr) {
-    case 0:	/* If dlab = 0, then write else LS*/
-        if (uptr->dlab == 0) {
-            if (uptr == &uart[0]) {
-                putchar(val);
-                fflush(stdout);
-            }
-            uart_clear_interrupt(uptr, TEMT);
-            uart_interrupt(uptr, TEMT);
-        } else {
-            uptr->ls = val;
-            show_settings(uptr);
-        }
-        break;
-    case 1:	/* If dlab = 0, then IER */
-        if (uptr->dlab) {
-            uptr->ms= val;
-            show_settings(uptr);
-        }
-        else
-            uptr->ier = val;
-        break;
-    case 2:	/* FCR */
-        uptr->fcr = val & 0x9F;
-        break;
-    case 3:	/* LCR */
-        uptr->lcr = val;
-        uptr->dlab = (uptr->lcr & 0x80);
-        show_settings(uptr);
-        break;
-    case 4:	/* MCR */
-        uptr->mcr = val & 0x3F;
-        show_settings(uptr);
-        break;
-    case 5:	/* LSR (r/o) */
-        break;
-    case 6:	/* MSR (r/o) */
-        break;
-    case 7:	/* Scratch */
-        uptr->scratch = val;
-        break;
-    }
-}
-
-static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
-{
-    uint8_t r;
-
-    switch(addr) {
-    case 0:
-        /* receive buffer */
-        if (!propio && uptr == &uart[0] && uptr->dlab == 0) {
-            uart_clear_interrupt(uptr, RXDA);
-            return next_char();
-        }
-        break;
-    case 1:
-        /* IER */
-        return uptr->ier;
-    case 2:
-        /* IIR */
-        return uptr->iir;
-    case 3:
-        /* LCR */
-        return uptr->lcr;
-    case 4:
-        /* mcr */
-        return uptr->mcr;
-    case 5:
-        /* lsr */
-        if (!propio) {
-            r = check_chario();
-            uptr->lsr = 0;
-            if (!propio && (r & 1))
-                 uptr->lsr |= 0x01;	/* Data ready */
-            if (r & 2)
-                 uptr->lsr |= 0x60;	/* TX empty | holding empty */
-            /* Reading the LSR causes these bits to clear */
-            r = uptr->lsr;
-            uptr->lsr &= 0xF0;
-            return r;
-        }
-        return 0x60;
-    case 6:
-        /* msr */
-        r = uptr->msr;
-        /* Reading clears the delta bits */
-        uptr->msr &= 0xF0;
-        uart_clear_interrupt(uptr, MODEM);
-        return r;
-    case 7:
-        return uptr->scratch;
-    }
-    return 0xFF;
-}
-
-/* Clock timer hack. The (signal level) DSR line on the jumpers is connected
-   to a slow clock generator */
-static void timer_pulse(void)
-{
-    struct uart16x50 *uptr = uart;
-    if (timerhack) {
-        uptr->msr ^= 0x20;	/* DSR toggles */
-        uptr->msr |= 0x02;	/* DSR delta */
-        uart_interrupt(uptr, MODEM);
-    }
-}
-
-
-static int ramf;
-static int ramf_fd;
-static const char *ramf_path = "ramf.disk";
-static uint8_t *ramf_addr;
-static uint8_t ramf_port[2][2];
-static uint16_t ramf_count[2];
-
-static void ramf_init(void)
-{
-    ramf_fd = open(ramf_path, O_RDWR|O_CREAT, 0600);
-    if(ramf_fd == -1) {
-        perror(ramf_path);
-        ramf = 0;
-        return;
-    }
-    ramf_addr = mmap(NULL, 8192 * 1024, PROT_READ|PROT_WRITE,
-        MAP_SHARED, ramf_fd, 0L);
-    if (ramf_addr == MAP_FAILED) {
-        perror("mmap");
-        close(ramf_fd);
-        ramf = 0;
-        return;
-    }
-}
-
-static uint8_t *ramaddr(uint8_t high)
-{
-    uint32_t offset = high ? 4096 * 1024 : 0;
-    offset += (ramf_port[high][0] & 0x1F) << 17;
-    offset += ramf_port[high][1] << 9;
-    offset += ramf_count[high]++;
-    return ramf_addr + offset;
-}
-
-static void ramf_write(uint8_t addr, uint8_t val)
-{
-    uint8_t high = (addr & 4) ? 1 : 0;
-    fprintf(stderr, "RAMF write %d = %d\n", addr, val);
-    addr &= 3;
-    if (addr == 0)
-        *ramaddr(high) = val;
-    else if (addr == 3)
-        return;
-    else {
-        ramf_port[high][addr & 1] = val;
-        ramf_count[high] = 0;
-    }
-}
-
-static uint8_t ramf_read(uint8_t addr)
-{
-    uint8_t high = (addr & 4) ? 1 : 0;
-    fprintf(stderr, "RAMF read %d\n", addr);
-    addr &= 3;
-    if (addr == 0)
-        return *ramaddr(high);
-    if (addr == 3)
-        return 0;	/* or 1 for write protected */
-    return ramf_port[high][addr];
-}
-
 static uint8_t io_read(int unused, uint16_t addr)
 {
     if (trace & TRACE_IO)
@@ -543,18 +162,18 @@ static uint8_t io_read(int unused, uint16_t addr)
     addr &= 0xFF;
     if (addr >= 0x28 && addr <= 0x2C && wiznet)
         return nic_w5100_read(wiz, addr & 3);
-    if (addr >= 0x60 && addr <= 0x67) 	/* Aliased */
-        return pio_read(addr & 3);
+    if (ppi0 && addr >= 0x60 && addr <= 0x67) 	/* Aliased */
+        return ppide_read(ppi0, addr & 3);
     if (addr >= 0x68 && addr < 0x70)
-        return uart_read(&uart[0], addr & 7);
+        return uart16x50_read(uart[0], addr & 7);
     if (addr >= 0x70 && addr <= 0x77)
         return rtc_read(rtc);
     if (ramf && (addr >= 0xA0 && addr <= 0xA7))
-        return ramf_read(addr & 7);
+        return ramf_read(ramf, addr & 7);
     if (propio && (addr >= 0xA8 && addr <= 0xAF))
         return propio_read(propio, addr);
     if (addr >= 0xC0 && addr <= 0xDF)
-        return uart_read(&uart[((addr - 0xC0) >> 3) + 1], addr & 7);
+        return uart16x50_read(uart[((addr - 0xC0) >> 3) + 1], addr & 7);
     if (trace & TRACE_UNK)
         fprintf(stderr, "Unknown read from port %04X\n", addr);
     return 0xFF;
@@ -567,10 +186,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     addr &= 0xFF;
     if (addr >= 0x28 && addr <= 0x2C && wiznet)
         nic_w5100_write(wiz, addr & 3, val);
-    else if (addr >= 0x60 && addr <= 0x67)	/* Aliased */
-        pio_write(addr & 3, val);
+    else if (ppi0 && addr >= 0x60 && addr <= 0x67)	/* Aliased */
+        ppide_write(ppi0, addr & 3, val);
     else if (addr >= 0x68 && addr < 0x70)
-        uart_write(&uart[0], addr & 7, val);
+        uart16x50_write(uart[0], addr & 7, val);
     else if (addr >= 0x70 && addr <= 0x77)
         rtc_write(rtc, val);
     else if (addr >= 0x78 && addr <= 0x79) {
@@ -586,11 +205,11 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         rombank = val;
     }
     else if (ramf && addr >=0xA0 && addr <=0xA7)
-        ramf_write(addr & 0x07, val);
+        ramf_write(ramf, addr & 0x07, val);
     else if (propio && addr >= 0xA8 && addr <= 0xAF)
         propio_write(propio, addr & 0x03, val);
     else if (addr >= 0xC0 && addr <= 0xDF)
-        uart_write(&uart[((addr - 0xC0) >> 3) + 1], addr & 7, val);
+        uart16x50_write(uart[((addr - 0xC0) >> 3) + 1], addr & 7, val);
     else if (addr == 0xFD) {
         printf("trace set to %d\n", val);
         trace = val;
@@ -628,13 +247,13 @@ int main(int argc, char *argv[])
     char *ppath = NULL;
     char *idepath[2] = { NULL, NULL };
     int i;
+    char *ramfpath = NULL;
     unsigned int prop = 0;
 
-    while((opt = getopt(argc, argv, "r:i:s:ptd:fRw")) != -1) {
+    while((opt = getopt(argc, argv, "r:i:s:ptd:fR:w")) != -1) {
         switch(opt) {
             case 'r':
                 rompath = optarg;
-                break;
                 break;
             case 'i':
                 if (ide == 2)
@@ -657,7 +276,7 @@ int main(int argc, char *argv[])
                 fast = 1;
                 break;
             case 'R':
-                ramf = 1;
+                ramfpath = optarg;
                 break;
             case 'w':
                 wiznet = 1;
@@ -683,21 +302,21 @@ int main(int argc, char *argv[])
     close(fd);
 
     if (ide) {
-        ide0 = ide_allocate("cf");
-        if (ide0) {
+        ppi0 = ppide_create("cf");
+        if (ppi0) {
             fd = open(idepath[0], O_RDWR);
             if (fd == -1) {
                 perror(idepath[0]);
                 ide = 0;
-            } else if (ide_attach(ide0, 0, fd) == 0) {
+            } else if (ppide_attach(ppi0, 0, fd) == 0) {
                 ide = 1;
-                ide_reset_begin(ide0);
+                ppide_reset(ppi0);
             }
             if (idepath[1]) {
                 fd = open(idepath[1], O_RDWR);
                 if (fd == -1)
                     perror(idepath[1]);
-                ide_attach(ide0, 1, fd);
+                ppide_attach(ppi0, 1, fd);
             }
         } else
             ide = 0;
@@ -712,16 +331,15 @@ int main(int argc, char *argv[])
         propio_trace(propio, trace & TRACE_PROP);
     }
 
-    ramf_init();
+    if (ramfpath)
+        ramf = ramf_create(ramfpath);
 
-    if (ramf)
-        ramf_init();
+    for (i = 0; i < 5; i++)
+        uart[i] = uart16x50_create();
 
-    uart_init(&uart[0]);
-    uart_init(&uart[1]);
-    uart_init(&uart[2]);
-    uart_init(&uart[3]);
-    uart_init(&uart[4]);
+    uart16x50_trace(uart[0], trace & TRACE_UART);
+    if (!prop)
+        uart16x50_set_input(uart[0], 1);
 
     if (wiznet) {
         wiz = nic_w5100_alloc();
@@ -765,8 +383,12 @@ int main(int argc, char *argv[])
 	/* Do 100ms of I/O and delays */
 	if (!fast)
 	    nanosleep(&tc, NULL);
-	uart_event(uart);
-	timer_pulse();
+	uart16x50_event(uart[0]);
+	uart16x50_event(uart[1]);
+	uart16x50_event(uart[2]);
+	uart16x50_event(uart[3]);
+	uart16x50_event(uart[4]);
+	uart16x50_dsr_timer(uart[0]);
         if (wiznet)
             w5100_process(wiz);
     }
