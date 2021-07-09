@@ -1,4 +1,4 @@
-/*
+#/*
  *	Platform features
  *
  *	Z180 at 18.432Hz
@@ -18,7 +18,7 @@
  *			3: SD select
  *			2: SD clock
  *			1: SD data to card
- *	0x8C		FDC (8272)
+ *	0x8C		FDC (37C65)
  *	0x8C		- Status
  *	0x8D		- Data
  *	0x90		- DACK
@@ -51,6 +51,7 @@
 
 #include "system.h"
 #include "libz180/z180.h"
+#include "lib765/include/765.h"
 #include "z180_io.h"
 
 #include "16x50.h"
@@ -71,6 +72,8 @@ static uint8_t int_recalc = 0;
 
 static struct ppide *ppide;
 static struct sdcard *sdcard;
+static FDC_PTR fdc;
+static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct z180_io *io;
@@ -270,6 +273,117 @@ uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 }
 
 
+static void fdc_log(int debuglevel, char *fmt, va_list ap)
+{
+	if ((trace & TRACE_FDC) || debuglevel == 0)
+		vfprintf(stderr, "fdc: ", ap);
+}
+
+static void fdc_write(uint8_t addr, uint8_t val)
+{
+	switch(addr) {
+	case 0x8D:	/* Data */
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Data: %02X\n", val);
+		fdc_write_data(fdc, val);
+		break;
+	case 0x92:	/* DOR */
+		if (trace & TRACE_FDC) {
+			fprintf(stderr, "FDC DOR %02X [", val);
+			if (val & 0x80)
+				fprintf(stderr, "SPECIAL ");
+			else
+				fprintf(stderr, "AT/EISA ");
+			if (val & 0x20)
+				fprintf(stderr, "MOEN2 ");
+			if (val & 0x10)
+				fprintf(stderr, "MOEN1 ");
+			if (val & 0x08)
+				fprintf(stderr, "DMA ");
+			if (!(val & 0x04))
+				fprintf(stderr, "SRST ");
+			if (!(val & 0x02))
+				fprintf(stderr, "DSEN ");
+			if (val & 0x01)
+				fprintf(stderr, "DSEL1");
+			else
+				fprintf(stderr, "DSEL0");
+			fprintf(stderr, "]\n");
+		}
+		fdc_write_dor(fdc, val);
+#if 0
+		if ((val & 0x21) == 0x21)
+			fdc_set_motor(fdc, 2);
+		else if ((val & 0x11) == 0x10)
+			fdc_set_motor(fdc, 1);
+		else
+			fdc_set_motor(fdc, 0);
+#endif
+		break;
+	case 0x91:	/* DCR */
+		if (trace & TRACE_FDC) {
+			fprintf(stderr, "FDC DCR %02X [", val);
+			if (!(val & 4))
+				fprintf(stderr, "WCOMP");
+			switch(val & 3) {
+			case 0:
+				fprintf(stderr, "500K MFM RPM");
+				break;
+			case 1:
+				fprintf(stderr, "250K MFM");
+				break;
+			case 2:
+				fprintf(stderr, "250K MFM RPM");
+				break;
+			case 3:
+				fprintf(stderr, "INVALID");
+			}
+			fprintf(stderr, "]\n");
+		}
+		fdc_write_drr(fdc, val & 3);	/* TODO: review */
+		break;
+	case 0x93:	/* TC */
+		fdc_set_terminal_count(fdc, 0);
+		fdc_set_terminal_count(fdc, 1);
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC TC\n");
+		break;
+	case 90:	/* DAC */
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC DAC\n");
+		break;
+	default:
+		fprintf(stderr, "FDC bogus %02X->%02X\n", addr, val);
+	}
+}
+
+static uint8_t fdc_read(uint8_t addr)
+{
+	uint8_t val = 0x78;
+	switch(addr) {
+	case 0x8C:	/* Status*/
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Read Status: ");
+		val = fdc_read_ctrl(fdc);
+		break;
+	case 0x8D:	/* Data */
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Read Data: ");
+		val = fdc_read_data(fdc);
+		break;
+	case 0x93:	/* TC */
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC TC: ");
+		break;
+	default:
+		fprintf(stderr, "FDC bogus read %02X: ", addr);
+	}
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "%02X\n", val);
+	return val;
+}
+
+
 /* The RTC is on this port but the other bits also do magic
 	7: RTC DOUT
 	6: RTC SCLK
@@ -308,6 +422,8 @@ uint8_t io_read(int unused, uint16_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr == 0x88 && rtc)
 		return rtc_read(rtc);
+	if (addr >= 0x8C && addr < 0x94)
+		return fdc_read(addr);
 	if ((addr == 0x98 || addr == 0x99) && vdp)
 		return tms9918a_read(vdp, addr & 1);
 	if (trace & TRACE_UNK)
@@ -342,6 +458,8 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		rmap = val;
 	else if ((addr == 0x98 || addr == 0x99) && vdp)
 		tms9918a_write(vdp, addr & 1, val);
+	else if (addr >= 0x8C && addr < 0x94)
+		fdc_write(addr, val);
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
 		trace |= val;
@@ -386,7 +504,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "n8: [-f] [-i idepath] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "n8: [-f] [-i idepath] [-S sdpath] [-F fdpath] [-R] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -398,12 +516,13 @@ int main(int argc, char *argv[])
 	char *rompath = "n8.rom";
 	char *sdpath = NULL;
 	char *idepath = NULL;
+	char *patha = NULL, *pathb = NULL;
 
 	uint8_t *p = ram;
 	while (p < ram + sizeof(ram))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "r:S:i:d:f")) != -1) {
+	while ((opt = getopt(argc, argv, "r:S:i:d:fF:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -421,6 +540,16 @@ int main(int argc, char *argv[])
 		case 'f':
 			fast = 1;
 			break;
+			break;
+		case 'F':
+			if (pathb) {
+				fprintf(stderr, "n8: too many floppy disks specified.\n");
+				exit(1);
+			}
+			if (patha)
+				pathb = optarg;
+			else
+				patha = optarg;
 			break;
 		default:
 			usage();
@@ -473,6 +602,34 @@ int main(int argc, char *argv[])
 	vdp = tms9918a_create();
 	tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 	vdprend = tms9918a_renderer_create(vdp);
+
+	fdc = fdc_new();
+
+	lib765_register_error_function(fdc_log);
+
+	if (patha) {
+		drive_a = fd_newdsk();
+		fd_settype(drive_a, FD_35);
+		fd_setheads(drive_a, 2);
+		fd_setcyls(drive_a, 80);
+		fdd_setfilename(drive_a, patha);
+	} else
+		drive_a = fd_new();
+
+	if (pathb) {
+		drive_b = fd_newdsk();
+		fd_settype(drive_a, FD_35);
+		fd_setheads(drive_a, 2);
+		fd_setcyls(drive_a, 80);
+		fdd_setfilename(drive_a, pathb);
+	} else
+		drive_b = fd_new();
+
+	fdc_reset(fdc);
+	fdc_setisr(fdc, NULL);
+
+	fdc_setdrive(fdc, 0, drive_a);
+	fdc_setdrive(fdc, 1, drive_b);
 
 	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
@@ -549,5 +706,10 @@ int main(int argc, char *argv[])
 				int_recalc = 0;
 		}
 	}
+	fd_eject(drive_a);
+	fd_eject(drive_b);
+	fdc_destroy(&fdc);
+	fd_destroy(&drive_a);
+	fd_destroy(&drive_b);
 	exit(0);
 }

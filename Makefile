@@ -123,8 +123,8 @@ nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
 markiv:	markiv.o z180_io.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o
 	cc -g3 markiv.o z180_io.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o -o markiv
 
-n8_sdl2: n8.o n8_sdlui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o
-	cc -g3 n8.o n8_sdlui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o -o n8_sdl2 -lSDL2
+n8_sdl2: n8.o n8_sdlui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 n8.o n8_sdlui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a  -o n8_sdl2 -lSDL2
 
 s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80
