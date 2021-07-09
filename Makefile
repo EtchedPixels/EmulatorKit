@@ -24,8 +24,8 @@ rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o
 rb-mbc:	rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 	cc -g3 rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
 
-rbcv2:	rbcv2.o ide.o propio.o rtc_bitbang.o w5100.o libz80/libz80.o
-	cc -g3 rbcv2.o ide.o propio.o rtc_bitbang.o w5100.o libz80/libz80.o -o rbcv2
+rbcv2:	rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o libz80/libz80.o
+	cc -g3 rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o libz80/libz80.o -o rbcv2
 
 searle:	searle.o ide.o libz80/libz80.o
 	cc -g3 searle.o ide.o libz80/libz80.o -o searle
@@ -120,9 +120,11 @@ nc100: nc100.o keymatrix.o libz80/libz80.o z80dis.o
 nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
 	cc -g3 nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
 
-
 markiv:	markiv.o z180_io.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o
 	cc -g3 markiv.o z180_io.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o -o markiv
+
+n8_sdl2: n8.o n8_sdlui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o
+	cc -g3 n8.o n8_sdlui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o -o n8_sdl2 -lSDL2
 
 s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80
