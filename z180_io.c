@@ -480,8 +480,16 @@ static uint8_t z180_do_read(struct z180_io *io, uint8_t addr)
     /* IL */
     case 0x33:
         return io->il;
-    /* ITC: TODO - UFO bits from CPU core emulation */
     case 0x34:
+        io->itc &= ~0xC0;
+        switch(io->cpu->UFO) {
+        case 2:
+            io->itc |= 0xC0;
+            break;
+        case 1:
+            io->itc |= 0x80;
+            break;
+        }
         return io->itc;
     /* Refresh */
     case 0x36:

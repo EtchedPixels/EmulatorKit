@@ -722,10 +722,10 @@ static void do_execute(Z180Context* ctx)
 				ctx->trace(ctx->memParam);
 			if (ctx->PC - ctx->M1PC > 2) {
 				ctx->tstates += 4;
-				ctx->UFO = 1;
+				ctx->UFO = 2;
 			} else {
 				ctx->tstates += 6;
-				ctx->UFO = 0;
+				ctx->UFO = 1;
 			}
 			doPush(ctx, ctx->PC - 1);
 			ctx->PC = 0;
