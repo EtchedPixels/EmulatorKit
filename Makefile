@@ -121,8 +121,8 @@ nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
 	cc -g3 nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
 
 
-markiv:	markiv.o z180_io.o ide.o rtc_bitbang.o sdcard.o z80dis.o libz180/libz180.o
-	cc -g3 markiv.o z180_io.o ide.o rtc_bitbang.o sdcard.o z80dis.o libz180/libz180.o -o markiv
+markiv:	markiv.o z180_io.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o
+	cc -g3 markiv.o z180_io.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o -o markiv
 
 s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80

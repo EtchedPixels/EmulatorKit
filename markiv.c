@@ -3,14 +3,14 @@
  *
  *	Z180 at 18.432MHz
  *	512K/512K flat memory card
- *	IDE CF 8bit on 0x40-47
- *	SD on CSIO control on 0x49
- *	RTC at 0x4A
+ *	IDE CF 8bit on 0x80-87
+ *	IDE reset on 0x88
+ *	SD on CSIO control on 0x89
+ *	RTC at 0x8A
+ *	PropIO at 0xA8
  *
- *	TODO: RTC needs adjusting to correct bits
- *
+ *	TODO:
  *	Add support for using real CF card
- *	Add support for PProp
  */
 
 #include <stdio.h>
@@ -30,6 +30,7 @@
 #include "z180_io.h"
 
 #include "ide.h"
+#include "propio.h"
 #include "rtc_bitbang.h"
 #include "sdcard.h"
 #include "z80dis.h"
@@ -40,6 +41,7 @@ static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
 static struct sdcard *sdcard;
 static struct z180_io *io;
+static struct propio *prop;
 
 static uint16_t tstate_steps = 737;	/* 18.432MHz */
 
@@ -207,243 +209,6 @@ void recalc_interrupts(void)
 	int_recalc = 1;
 }
 
-/* PropIO v2 */
-
-/* TODO:
-    - The rx/tx pointers don't appear to be separate nor the data buffer
-      so use one buffer and pointer set. Copy out the LBA on PREP
-    - Stat isn't used but how should it work
-    - What should be in the CSD ?
-    - Four byte error blocks
-    - Command byte for console does what ?
-    - Status command does what ?
-*/
-static uint8_t prop_csd[16];	/* What goes here ??? */
-static uint8_t prop_rbuf[4];
-static uint8_t prop_sbuf[512];
-static uint8_t *prop_rptr;
-static uint16_t prop_rlen;
-static uint8_t *prop_tptr;
-static uint16_t prop_tlen;
-static uint8_t prop_st;
-static uint8_t prop_err;
-static int prop_fd;
-static off_t prop_cardsize;
-
-static uint32_t buftou32(void)
-{
-    uint32_t x;
-    x = prop_rbuf[0];
-    x |= ((uint8_t)prop_rbuf[1]) << 8;
-    x |= ((uint8_t)prop_rbuf[2]) << 16;
-    x |= ((uint8_t)prop_rbuf[3]) << 24;
-    return x;
-}
-
-static void u32tobuf(uint32_t t)
-{
-    prop_rbuf[0] = t;
-    prop_rbuf[1] = t >> 8;
-    prop_rbuf[2] = t >> 16;
-    prop_rbuf[3] = t >> 24;
-    prop_st = 0;
-    prop_err = 0;
-    prop_rptr = prop_rbuf;
-    prop_rlen = 4;
-}
-
-static void prop_init(void)
-{
-    char *sdcard_path = "ibble";
-    prop_rptr = prop_rbuf;
-    prop_tptr = prop_rbuf;
-    prop_rlen = 4;
-    prop_tlen = 4;
-    prop_fd = open(sdcard_path, O_RDWR);
-    if (prop_fd == -1) {
-        perror(sdcard_path);
-        return;
-    }
-    if ((prop_cardsize = lseek(prop_fd, 0L, SEEK_END)) == -1) {
-        perror(sdcard_path);
-        close(prop_fd);
-        prop_fd = -1;
-    }
-}
-
-static uint8_t prop_read(uint8_t addr)
-{
-//    uint8_t r, v;
-    switch(addr) {
-    case 0:		/* Console status */
-#if 0
-        v = check_chario();
-        r = (v & 1) ? 0x20:0x00;
-        if (v & 2)
-            r |= 0x10;
-        return r;
-#else
-	return 0;
-#endif
-    case 1:		/* Keyboard input */
-    	return 0xFF;
-#if 0    	
-        return next_char();
-#endif
-    case 2:		/* Disk status */
-        return prop_st;
-    case 3:		/* Data transfer */
-        if (prop_rlen) {
-            if (trace & TRACE_PROP)
-                fprintf(stderr, "prop: read byte %02X\n", *prop_rptr);
-            prop_rlen--;
-            return *prop_rptr++;
-        }
-        else {
-            if (trace & TRACE_PROP)
-                fprintf(stderr, "prop: read byte - empty.\n");
-            return 0xFF; 
-        }
-    }
-    return 0xFF;
-}
-
-static void prop_write(uint8_t addr, uint8_t val)
-{
-    off_t lba;
-
-    switch(addr) {
-        case 0:
-            /* command port */
-            break;
-        case 1:
-            /* write to screen */
-            putchar(val);
-            fflush(stdout);
-            break;
-        case 2:
-            if (trace & TRACE_PROP)
-                fprintf(stderr, "Command %02X\n", val);
-            /* commands */
-            switch(val) {
-            case 0x00:	/* NOP */
-                prop_err = 0;
-                prop_st = 0;
-                prop_tptr = prop_rbuf;
-                prop_rptr = prop_rbuf;
-                prop_tlen = 4;
-                prop_rlen = 4;
-                break;
-            case 0x01:	/* STAT */
-                prop_rptr = prop_rbuf;
-                prop_rlen = 1;
-                *prop_rbuf = prop_err;
-                prop_err = 0;
-                prop_st = 0;
-                break;
-            case 0x02:	/* TYPE */
-                prop_err = 0;
-                prop_rptr = prop_rbuf;
-                prop_rlen = 1;
-                prop_st = 0;
-                if (prop_fd == -1) {
-                    *prop_rbuf = 0;
-                    prop_err = -9;
-                    prop_st |= 0x40;
-                } else
-                    *prop_rbuf = 1;		/* MMC */
-                break;
-            case 0x03:	/* CAP */
-                prop_err = 0;
-                u32tobuf(prop_cardsize >> 9);
-                break;
-            case 0x04:	/* CSD */
-                prop_err = 0;
-                prop_rptr = prop_csd;
-                prop_rlen = sizeof(prop_csd);
-                prop_st = 0;
-                break;
-            case 0x10:	/* RESET */
-                prop_st = 0;
-                prop_err = 0;
-                prop_tptr = prop_rbuf;
-                prop_rptr = prop_rbuf;
-                prop_tlen = 4;
-                prop_rlen = 4;
-                break;
-            case 0x20:	/* INIT */
-                if (prop_fd == -1) {
-                    prop_st = 0x40;
-                    prop_err = -9;
-                    /* Error packet */
-                } else {
-                    prop_st = 0;
-                    prop_err = 0;
-                }
-                break;
-            case 0x30:	/* READ */
-                lba = buftou32();
-                lba <<= 9;
-                prop_err = 0;
-                prop_st = 0;
-                if (lseek(prop_fd, lba, SEEK_SET) < 0 ||
-                    read(prop_fd, prop_sbuf, 512) != 512) {
-                    prop_err = -6;
-                    /* Do error packet FIXME */
-                } else {
-                    prop_rptr = prop_sbuf;
-                    prop_rlen = sizeof(prop_sbuf);
-                }
-                prop_tptr = prop_rbuf;
-                prop_tlen = 4;
-                break;
-                break;
-            case 0x40:	/* PREP */
-                prop_st = 0;
-                prop_err = 0;
-                prop_tptr = prop_sbuf;
-                prop_tlen = sizeof(prop_sbuf);
-                prop_rlen = 0;
-                break;
-            case 0x50:	/* WRITE */
-                lba = buftou32();
-                lba <<= 9;
-                prop_err = 0;
-                prop_st = 0;
-                if (lseek(prop_fd, lba, SEEK_SET) < 0 ||
-                    write(prop_fd, prop_sbuf, 512) != 512) {
-                    prop_err = -6;
-                    /* FIXME: do error packet */
-                }
-                prop_tptr = prop_rbuf;
-                prop_tlen = 4;
-                break;
-            case 0xF0:	/* VER */
-                prop_rptr = prop_rbuf;
-                prop_rlen = 4;
-                /* Whatever.. use a version that's obvious fake */
-                memcpy(prop_rbuf,"\x9F\x00\x0E\x03", 4);
-                break;
-            default:
-                if (trace & TRACE_PROP)
-                    fprintf(stderr, "Prop: unknown command %02X\n", val);
-                break;
-            }
-            break;
-        case 3:
-            /* data write */
-            if (prop_tlen) {
-                if (trace & TRACE_PROP)
-                    fprintf(stderr, "prop: queue byte %02X\n", val);
-                *prop_tptr++ = val;
-                prop_tlen--;
-            } else if (trace & TRACE_PROP)
-                fprintf(stderr, "prop: write byte over.\n");
-            break;
-    }
-}
-
-
 static int ide = 0;
 struct ide_controller *ide0;
 
@@ -525,7 +290,7 @@ static void xar_write(uint8_t v)
 	uint8_t delta = xar ^ v;
 	xar = v;
 
-	if (delta & xar & 0x80)
+	if (ide && (delta & xar & 0x80))
 		ide_reset_begin(ide0);
 }
 
@@ -545,8 +310,8 @@ uint8_t io_read(int unused, uint16_t addr)
 		return sd_read();
 	if (addr == 0x8A)
 		return rtc_read(rtc);
-	if (addr >= 0xA8 && addr <= 0xAB)
-		return prop_read(addr & 3);
+	if (addr >= 0xA8 && addr <= 0xAB && prop)
+		return propio_read(prop, addr);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -572,8 +337,8 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		sd_write(val);
 	else if (addr == 0x8A)
 		rtc_write(rtc, val);
-	else if (addr >= 0xA8 && addr <= 0xAB)
-		prop_write(addr & 3, val);
+	else if (addr >= 0xA8 && addr <= 0xAB && prop)
+		propio_write(prop, addr, val);
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
 		trace |= val;
@@ -608,7 +373,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "markiv: [-f] [-i idepath] [-r rompath] [-S sdpath] [-d debug]\n");
+	fprintf(stderr, "markiv: [-f] [-i idepath] [-p proppath] [-r rompath] [-S sdpath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -620,12 +385,13 @@ int main(int argc, char *argv[])
 	char *rompath = "markiv.rom";
 	char *sdpath = NULL;
 	char *idepath = NULL;
+	char *proppath = NULL;
 
 	uint8_t *p = ramrom;
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "r:S:i:d:f")) != -1) {
+	while ((opt = getopt(argc, argv, "r:S:i:d:fp:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -643,6 +409,9 @@ int main(int argc, char *argv[])
 		case 'f':
 			fast = 1;
 			break;
+		case 'p':
+			proppath = optarg;
+			break;
 		default:
 			usage();
 		}
@@ -656,7 +425,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, 524288) != 524288) {
-		fprintf(stderr, "markiv: banked rom image should be 512K.\n");
+		fprintf(stderr, "markiv: ROM image should be 512K.\n");
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
@@ -689,7 +458,11 @@ int main(int argc, char *argv[])
 			sd_trace(sdcard, 1);
 	}
 
-	prop_init();
+	if (proppath) {
+		prop = propio_create(proppath);
+		propio_set_input(prop, 0);
+		propio_trace(prop, trace & TRACE_PROP);
+	}
 
 	io = z180_create(&cpu_z180);
 	z180_set_input(io, 0, 1);
