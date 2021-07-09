@@ -1,9 +1,11 @@
 /*
  *	Platform features
  *
- *	Z180 at 7.372MHz
+ *	Z180 at 18.432Hz
  *	512K/512K flat memory card
  *	RTC at 0x0C
+ *	CF interface
+ *	SD card via CSIO SPI
  *
  *	Add support for using real CF card
  */
@@ -41,7 +43,6 @@ static uint8_t ramrom[1024 * 1024];	/* Low 512K is ROM */
 
 static uint8_t cpuboard = CPUBOARD_Z180;
 
-static uint8_t have_pio = 0;
 static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
 static uint8_t wiznet = 0;
@@ -579,7 +580,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'S':
 			sdpath = optarg;
-			have_pio = 1;
 			break;
 		case 'i':
 			ide = 1;
@@ -606,7 +606,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'F':
 			if (pathb) {
-				fprintf(stderr, "rc2014: too many floppy disks specified.\n");
+				fprintf(stderr, "rc2014-z180: too many floppy disks specified.\n");
 				exit(1);
 			}
 			if (patha)
@@ -633,7 +633,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, 524288) != 524288) {
-		fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
+		fprintf(stderr, "rc2014-z180: ROM image should be 512K.\n");
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
