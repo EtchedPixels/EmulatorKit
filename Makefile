@@ -3,8 +3,8 @@ CFLAGS = -Wall -pedantic -g3 -Werror
 
 all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 	rc2014-6800 rc2014-68008 rc2014-6809 rc2014-68hc11 rc2014-80c188 \
-	rc2014-8085 rc2014-z8 rbcv2 searle linc80 makedisk mbc2 smallz80 \
-	sbc2g z80mc simple80 flexbox tiny68k s100-z80
+	rc2014-8085 rc2014-z8 rc2014-z180 rbcv2 searle linc80 makedisk \
+	markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k s100-z80
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -87,6 +87,9 @@ rc2014-z280: rc2014-z280.o ide.o libz280/libz80.o
 rc2014-z8: rc2014-z8.o z8.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-z8.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z8.o -o rc2014-z8
 
+rc2014-z180:	rc2014-z180.o rc2014_noui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o zxkey_none.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 rc2014-z180.o rc2014_noui.o z180_io.o zxkey_none.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o rc2014-z180
+
 smallz80: smallz80.o ide.o libz80/libz80.o
 	cc -g3 smallz80.o ide.o libz80/libz80.o -o smallz80
 
@@ -117,8 +120,9 @@ nc100: nc100.o keymatrix.o libz80/libz80.o z80dis.o
 nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
 	cc -g3 nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
 
-rc2014-z180:	rc2014-z180.o rc2014_noui.o z180_io.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o zxkey_none.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 rc2014-z180.o rc2014_noui.o z180_io.o zxkey_none.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o rc2014-z180
+
+markiv:	markiv.o z180_io.o ide.o rtc_bitbang.o sdcard.o z80dis.o libz180/libz180.o
+	cc -g3 markiv.o z180_io.o ide.o rtc_bitbang.o sdcard.o z80dis.o libz180/libz180.o -o markiv
 
 s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80
