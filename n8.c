@@ -77,7 +77,7 @@ static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct z180_io *io;
-static struct ps2 *ps2;
+struct ps2 *ps2;
 
 static uint8_t acr;
 static uint8_t rmap;
