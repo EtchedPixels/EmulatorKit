@@ -1,4 +1,4 @@
-#/*
+/*
  *	Platform features
  *
  *	Z180 at 18.432Hz
@@ -9,7 +9,7 @@
  *	0x84		- printer data
  *	0x85		- printer status/key and mouse in
  *	0x86		- print control, key and mouse out
- *	0x87		(control)
+ *	0x87		(control) - used for keyboard pull down
  *	0x88		RTC latch and buffer
  *			7: rtc data out
  *			6: rtc clock	/	SD data in
@@ -56,13 +56,13 @@
 
 #include "16x50.h"
 #include "ide.h"
+#include "ps2.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
 #include "sdcard.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 #include "z80dis.h"
-#include "zxkey.h"
 
 static uint8_t ram[1024 * 1024];
 static uint8_t rom[512 * 1024];
@@ -77,6 +77,7 @@ static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct z180_io *io;
+static struct ps2 *ps2;
 
 static uint8_t acr;
 static uint8_t rmap;
@@ -103,17 +104,30 @@ volatile int emulator_done;
 #define TRACE_FDC	0x000400
 #define TRACE_IDE	0x000800
 #define TRACE_SPI	0x001000
+#define TRACE_PS2	0x002000
 
 static int trace = 0;
 
 static void reti_event(void);
 
+uint8_t z180_phys_read(int unused, uint32_t addr)
+{
+	if (addr >= 0x8000  || (acr & 0x80))
+		return ram[addr & 0xFFFFF];
+	return rom[addr + ((rmap & 0x1F) << 15)];
+}
+
+void z180_phys_write(int unused, uint32_t addr, uint8_t val)
+{
+	addr &= 0xFFFFF;
+	if (addr >= 0x8000 || (acr & 0x80))
+		ram[addr] = val;
+}
+
 static uint8_t do_mem_read(uint16_t addr, int quiet)
 {
 	uint32_t pa = z180_mmu_translate(io, addr);
-	uint8_t r = ram[pa];
-	if (pa < 0x8000 && !(acr & 0x80))
-		r = rom[pa + ((rmap & 0x1F) << 15)];
+	uint8_t r = z180_phys_read(0, pa);
 	if (!quiet && (trace & TRACE_MEM))
 		fprintf(stderr, "R %04X[%06X] -> %02X\n", addr, pa, r);
 	return r;
@@ -131,20 +145,6 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W: %04X[%06X] <- %02X\n", addr, pa, val);
 	ram[pa] = val;
-}
-
-uint8_t z180_phys_read(int unused, uint32_t addr)
-{
-	if (addr >= 0x8000  || (acr & 0x80))
-		return ram[addr & 0xFFFFF];
-	return rom[addr + ((rmap & 0x1F) << 15)];
-}
-
-void z180_phys_write(int unused, uint32_t addr, uint8_t val)
-{
-	addr &= 0xFFFFF;
-	if (addr >= 0x8000 || (acr & 0x80))
-		ram[addr] = val;
 }
 
 uint8_t mem_read(int unused, uint16_t addr)
@@ -410,6 +410,23 @@ static void sysio_write(uint8_t val)
 	sysio = val;
 }
 
+static uint8_t kbd_in(void)
+{
+	uint8_t r = 0x00;
+	if (ps2_get_data(ps2))
+		r |= 0x01;
+	if (ps2_get_clock(ps2))
+		r |= 0x02;
+	return r;
+}
+
+static void kbd_out(uint8_t r)
+{
+	unsigned int clock = !!(r & 0x20);
+	unsigned int data = !!(r & 0x10);
+	ps2_set_lines(ps2, clock, data);
+}
+
 uint8_t io_read(int unused, uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -422,6 +439,8 @@ uint8_t io_read(int unused, uint16_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr == 0x88 && rtc)
 		return rtc_read(rtc);
+	if (addr == 0x85)
+		return kbd_in();
 	if (addr >= 0x8C && addr < 0x94)
 		return fdc_read(addr);
 	if ((addr == 0x98 || addr == 0x99) && vdp)
@@ -449,6 +468,8 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x83)
 		ppide_write(ppide, addr & 3, val);
+	else if (addr == 0x87)
+		kbd_out(val);
 	else if (addr == 0x88) {
 		rtc_write(rtc, val);
 		sysio_write(val);
@@ -603,6 +624,9 @@ int main(int argc, char *argv[])
 	tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 	vdprend = tms9918a_renderer_create(vdp);
 
+	/* Divider for a microsecond clock */
+	ps2 = ps2_create(18);
+	ps2_trace(ps2, trace & TRACE_PS2);
 	fdc = fdc_new();
 
 	lib765_register_error_function(fdc_log);
@@ -684,6 +708,7 @@ int main(int argc, char *argv[])
 			}
 			/* We want to run UI events regularly it seems */
 			ui_event();
+			ps2_event(ps2, 7372);
 		}
 
 		/* 50Hz which is near enough */

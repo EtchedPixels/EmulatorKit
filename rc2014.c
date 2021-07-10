@@ -19,6 +19,7 @@
  *	relevant peripherals. I'll align it properly with the real thing as more
  *	info appears.
  *
+ *	TODO: implement quiet for the mem_read methods
  */
 
 #include <stdio.h>
@@ -40,6 +41,7 @@
 #include "acia.h"
 #include "ide.h"
 #include "ppide.h"
+#include "ps2.h"
 #include "rtc_bitbang.h"
 #include "sdcard.h"
 #include "tms9918a.h"
@@ -48,6 +50,7 @@
 #include "z80copro.h"
 #include "z80dma.h"
 #include "zxkey.h"
+#include "z80dis.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
@@ -74,6 +77,7 @@ static uint8_t cpuboard = CPUBOARD_Z80;
 
 static uint8_t have_ctc = 0;
 static uint8_t have_pio = 0;
+static uint8_t have_ps2 = 0;
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
 static uint8_t fast = 0;
@@ -93,6 +97,7 @@ static FDC_PTR fdc;
 static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
+struct ps2 *ps2;
 
 struct zxkey *zxkey;
 
@@ -115,10 +120,10 @@ volatile int emulator_done;
 #define TRACE_IO	0x000002
 #define TRACE_ROM	0x000004
 #define TRACE_UNK	0x000008
-#define TRACE_SIO	0x000010
+#define TRACE_CPU	0x000010
 #define TRACE_512	0x000020
 #define TRACE_RTC	0x000040
-#define TRACE_ACIA	0x000080
+#define TRACE_SIO	0x000080
 #define TRACE_CTC	0x000100
 #define TRACE_CPLD	0x000200
 #define TRACE_IRQ	0x000400
@@ -132,6 +137,8 @@ volatile int emulator_done;
 #define TRACE_COPRO_IO	0x040000
 #define TRACE_TMS9918A  0x080000
 #define TRACE_FDC	0x100000
+#define TRACE_PS2	0x200000
+#define TRACE_ACIA	0x400000
 
 static int trace = 0;
 
@@ -561,9 +568,8 @@ static void mem_write_pickled512(uint16_t addr, uint8_t val)
 	*p = val;
 }
 
-uint8_t mem_read(int unused, uint16_t addr)
+uint8_t do_mem_read(uint16_t addr, int quiet)
 {
-	static uint8_t rstate = 0;
 	uint8_t r;
 
 	switch (cpuboard) {
@@ -602,6 +608,14 @@ uint8_t mem_read(int unused, uint16_t addr)
 		fputs("invalid cpu type.\n", stderr);
 		exit(1);
 	}
+	return r;
+}
+
+uint8_t mem_read(int unused, uint16_t addr)
+{
+	static uint8_t rstate = 0;
+	uint8_t r = do_mem_read(addr, 0);
+
 	if (cpu_z80.M1) {
 		/* DD FD CB see the Z80 interrupt manual */
 		if (r == 0xDD || r == 0xFD || r == 0xCB) {
@@ -660,6 +674,48 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		exit(1);
 	}
 }
+
+static unsigned int nbytes;
+
+uint8_t z80dis_byte(uint16_t addr)
+{
+	uint8_t r = do_mem_read(addr, 1);
+	fprintf(stderr, "%02X ", r);
+	nbytes++;
+	return r;
+}
+
+uint8_t z80dis_byte_quiet(uint16_t addr)
+{
+	return do_mem_read(addr, 1);
+}
+
+static void z80_trace(unsigned unused)
+{
+	static uint32_t lastpc = -1;
+	char buf[256];
+
+	if ((trace & TRACE_CPU) == 0)
+		return;
+	nbytes = 0;
+	/* Spot XXXR repeating instructions and squash the trace */
+	if (cpu_z80.M1PC == lastpc && z80dis_byte_quiet(lastpc) == 0xED &&
+		(z80dis_byte_quiet(lastpc + 1) & 0xF4) == 0xB0) {
+		return;
+	}
+	lastpc = cpu_z80.M1PC;
+	fprintf(stderr, "%04X: ", lastpc);
+	z80_disasm(buf, lastpc);
+	while(nbytes++ < 6)
+		fprintf(stderr, "   ");
+	fprintf(stderr, "%-16s ", buf);
+	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n",
+		cpu_z80.R1.br.A, cpu_z80.R1.br.F,
+		cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL,
+		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
+}
+
+
 
 unsigned int check_chario(void)
 {
@@ -2064,6 +2120,23 @@ static void z512_write_wd(uint8_t addr, uint8_t val)
 	z512_wdog = 3200;
 }
 
+/* PS/2 keyboard and mouse - only keyboard bits for now */
+
+static uint8_t ps2_read(void)
+{
+	uint8_t r = 0x00;
+	if (ps2_get_clock(ps2))
+		r |= 0x04;
+	if (ps2_get_data(ps2))
+		r |= 0x08;
+	return r;
+}
+
+static void ps2_write(uint8_t val)
+{
+	ps2_set_lines(ps2, !!(val & 0x01) , !!(val & 0x02));
+}
+
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -2093,8 +2166,10 @@ static uint8_t io_read_2014(uint16_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
-	else if (addr >= 0x68 && addr <= 0x6F && have_pio)
+	if (addr >= 0x68 && addr <= 0x6F && have_pio)
 		return pio_read2(addr & 3);
+	if (addr == 0xBB && ps2)
+		return ps2_read();
 	if (addr == 0xC0 && rtc)
 		return rtc_read(rtc);
 	/* Scott Baker is 0x90-93, suggested defaults for the
@@ -2154,7 +2229,9 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		if (trace & TRACE_512)
 			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
 		bankenable = val & 1;
-	} else if (addr == 0xC0 && rtc)
+	} else if (addr == 0xBB && ps2)
+		ps2_write(val);
+	else if (addr == 0xC0 && rtc)
 		rtc_write(rtc, val);
 	else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		ctc_write(addr & 3, val);
@@ -2602,7 +2679,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pr:sRS:Tuw8C:Zz")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pPr:sRS:Tuw8C:Zz")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2646,6 +2723,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'p':
 			bankenable = 1;
+			break;
+		case 'P':
+			have_ps2 = 1;
 			break;
 		case 'i':
 			ide = 1;
@@ -2956,6 +3036,11 @@ int main(int argc, char *argv[])
 		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 		vdprend = tms9918a_renderer_create(vdp);
 	}
+	if (have_ps2) {
+		ps2 = ps2_create(7);
+		ps2_trace(ps2, trace & TRACE_PS2);
+	}
+
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
@@ -3049,6 +3134,7 @@ int main(int argc, char *argv[])
 	cpu_z80.ioWrite = io_write;
 	cpu_z80.memRead = mem_read;
 	cpu_z80.memWrite = mem_write;
+	cpu_z80.trace = z80_trace;
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
@@ -3067,6 +3153,8 @@ int main(int argc, char *argv[])
 				Z80ExecuteTStates(&cpu_z80, tstate_steps);
 				if (copro)
 					z80copro_run(copro);
+				if (ps2)
+					ps2_event(ps2, tstate_steps);
 			}
 			if (acia)
 				acia_timer(acia);
