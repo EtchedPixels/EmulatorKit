@@ -637,7 +637,14 @@ static void doDAA(Z180Context * ctx) {
   int correction_factor = 0x00;
   int carry = 0;
   /* Z180 differs (see AN006601-0201 Z180-QA) */
-  if(BR.A > 0x99 /*|| GETFLAG(F_C)*/) {
+#if 1
+  /* Hack for now until I get the emulation right */
+  if (BR.A == 0xFF && !GETFLAG(F_C)) {
+      fprintf(stderr, "Z180 fudge.\n");
+      correction_factor = 0x00;
+  } else
+#endif
+  if(BR.A > 0x99 || GETFLAG(F_C)) {
     correction_factor |= 0x60;
     carry = 1;
   }
