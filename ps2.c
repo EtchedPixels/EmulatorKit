@@ -25,7 +25,7 @@ static int parity_even(uint8_t b)
     return 1;
 }
 
-#define DELAY_BIT_TO_CLOCK	15		/* 15uS */
+#define DELAY_BIT_TO_CLOCK	30		/* 30uS */
 #define DELAY_SEND_BYTE		50		/* 50us */
 
 /* There is nothing happening */
@@ -102,7 +102,7 @@ static void ps2_abort(struct ps2 *ps2)
 static int ps2_send_byte(struct ps2 *ps2, int clocks)
 {
     if (ps2->wait) {
-        if (clocks > ps2->wait) {
+        if (clocks < ps2->wait) {
             ps2->wait -= clocks;
             return 0;
         }
@@ -113,11 +113,15 @@ static int ps2_send_byte(struct ps2 *ps2, int clocks)
     if (ps2->step == 1) {		/* Data */
         if (ps2->clock_in == 0) {	/* Pulled low by remote */
             if (ps2->trace)
-                fprintf(stderr, "Host aborted our transmit bits left %d.\n",
+                fprintf(stderr, "PS2: Host aborted our transmit bits left %d.\n",
                     ps2->count);
             ps2_abort(ps2);
             return clocks;
         }
+        if (ps2->trace)
+            fprintf(stderr, "PS2: load bit for host.\n");
+        if (ps2->trace && ps2->data_in == 0)
+            fprintf(stderr, "PS2: **error** host has data pulled down.\n");
         ps2->data_out = ps2->send & 0x01;
         ps2->send >>= 1;
         ps2->wait = DELAY_BIT_TO_CLOCK;
@@ -125,12 +129,16 @@ static int ps2_send_byte(struct ps2 *ps2, int clocks)
     }
     /* Pull the clock low - the remote will then read the bit */
     if (ps2->step == 2)	{	/* Clock toggle */
+        if (ps2->trace)
+            fprintf(stderr, "PS2: clock low - bit ready for host (%d).\n", ps2->data_out);
         ps2->clock_out = 0;
         ps2->wait = DELAY_BIT_TO_CLOCK;
         return --clocks;
     }
     /* Pull the clock high indicating we are going to send a new bit */
     if (ps2->step == 3) {
+        if (ps2->trace)
+            fprintf(stderr, "PS2: clock back high on send.\n");
         ps2->clock_out = 1;
         ps2->wait = DELAY_BIT_TO_CLOCK;
         return --clocks;
@@ -183,7 +191,7 @@ static void ps2_begin_sending(struct ps2 *ps2, uint8_t byte)
     ps2->state = ps2_send_wait;
     ps2->count = 11;		/* Send 11 bits */
     if (ps2->trace)
-        fprintf(stderr, "PS2: begin sending %02X.\n", byte);
+        fprintf(stderr, "PS2: begin sending %02X (%X).\n", byte, r);
 }
 
 /*
@@ -192,7 +200,7 @@ static void ps2_begin_sending(struct ps2 *ps2, uint8_t byte)
 static int ps2_ack_byte(struct ps2 *ps2, int clocks)
 {
     if (ps2->wait) {
-        if (clocks > ps2->wait) {
+        if (clocks < ps2->wait) {
             ps2->wait -= clocks;
             return 0;
         }
@@ -215,25 +223,27 @@ static int ps2_ack_byte(struct ps2 *ps2, int clocks)
         ps2->data_out = 0;
         ps2->wait = DELAY_BIT_TO_CLOCK;
         if (ps2->trace)	
-            fprintf(stderr, "PS2: released clock.\n");
+            fprintf(stderr, "PS2: pull data low.\n");
         return clocks;
     }
-    /* The host pulls  clock down */
+    /* We pull clock down */
     if (ps2->step == 3) {
         ps2->clock_out = 0;
         ps2->wait = DELAY_BIT_TO_CLOCK;
         if (ps2->trace)	
-            fprintf(stderr, "PS2: released data.\n");
+            fprintf(stderr, "PS2: pull clock low.\n");
         return clocks;
     }
-    /* The host lets the data and clock float */
+    /* We let the data and clock float */
     if (ps2->step == 4) {
         ps2->clock_out = 1;
         ps2->data_out = 1;
         /* And the cycle is over */
         /* Process the byte that arrived */
-        if (ps2->trace)
-            fprintf(stderr, "PS2: received %02X.\n", ps2->receive);
+        if (ps2->trace) {
+            fprintf(stderr, "PS2: release clock and data.\n");
+            fprintf(stderr, "PS2: received %04X.\n", ps2->receive);
+        }
         ps2_byte_received(ps2, ps2->receive);
         ps2_idle(ps2);
         return clocks;
@@ -253,7 +263,7 @@ static int ps2_receive_byte(struct ps2 *ps2, int clocks)
         return clocks;
     }
     if (ps2->wait) {
-        if (clocks > ps2->wait) {
+        if (clocks < ps2->wait) {
             ps2->wait -= clocks;
             return 0;
         }
@@ -264,12 +274,16 @@ static int ps2_receive_byte(struct ps2 *ps2, int clocks)
     if (ps2->step == 1) {
         ps2->clock_out = 0;
         ps2->wait = DELAY_BIT_TO_CLOCK;
+        if (ps2->trace)
+            fprintf(stderr, "PS2: receive clock low\n");
         return --clocks;
     }
     /* Take the clock back high indicating we will sample it */
     if (ps2->step == 2) {
         ps2->clock_out = 1;
         ps2->wait = DELAY_BIT_TO_CLOCK;
+        if (ps2->trace)
+            fprintf(stderr, "PS2: receive clock high\n");
         return --clocks;
     }
     /* Sample the bit */
@@ -277,8 +291,11 @@ static int ps2_receive_byte(struct ps2 *ps2, int clocks)
         ps2->receive >>= 1;
         /* This will shift down losing start and leaving the parity and
            stop in bits 8-9. We should check parity FIXME */
+        /* FIXME: should also consider data_out being low */
         ps2->receive |= (ps2->data_in) ? (1 << 9) : 0;
         ps2->wait = DELAY_BIT_TO_CLOCK;
+        if (ps2->trace)
+            fprintf(stderr, "PS2: sample - %d\n", ps2->data_in);
         return --clocks;
     }
     /* Bit complete, move on */
@@ -315,6 +332,8 @@ static void ps2_clocks(struct ps2 *ps2, int clocks)
 
 static void ps2_queue_key(struct ps2 *ps2, uint8_t key)
 {
+    if (ps2->disabled)
+        return;
     /* For now don't emulate overflows */
     if (ps2->bufptr == PS2_BUFSIZ)
         return;
@@ -326,14 +345,14 @@ static void ps2_queue_reply(struct ps2 *ps2, uint8_t r)
     if (ps2->rbufptr == PS2_BUFSIZ)
         return;
     ps2->rbuffer[ps2->rbufptr++] = r;
-    fprintf(stderr, "queued reply %02X rbufptr %d\n", r, ps2->rbufptr);
+    if (ps2->trace)
+        fprintf(stderr, "PS2: queued reply %02X rbufptr %d\n", r, ps2->rbufptr);
 }
 
 /* A send completed, adjust our buffers */
 static void ps2_byte_sent(struct ps2 *ps2)
 {
     if (ps2->replymode) {
-        fprintf(stderr, "sent rbufptr %d\n", ps2->rbufptr);
         ps2->rbufptr--;
         if (ps2->rbufptr)
             memmove(ps2->rbuffer, ps2->rbuffer+1, ps2->rbufptr);
@@ -365,32 +384,75 @@ static void ps2_poll(struct ps2 *ps2)
 /* Lots of expansion needed here even for stuff we ignore */
 static void ps2_byte_received(struct ps2 *ps2, uint8_t byte)
 {
+    /* Discard byte */
+    if (ps2->rxstate == 1) {
+        ps2->rxstate = 0;
+        return;
+    }
+    /* Stream of scan codes */
+    if (ps2->rxstate == 2) {
+        if (byte >= 0xED) {
+            ps2->rxstate = 0;
+            ps2->disabled = 0;
+        }
+        ps2_queue_reply(ps2, 0xFA);	/* TODO - is this sent on the terminator ? */
+    }
+    /* Set scan code set */
+    if (ps2->rxstate == 3) {
+        ps2_queue_reply(ps2, 0xFA);
+        /* Reply 2 to if a query of scan codd state */
+        if (byte == 0x00)
+            ps2_queue_reply(ps2, 2);
+        ps2->rxstate = 0;
+    }
     switch(byte) {
         case 0xFF:	/* Reset */
             ps2_queue_reply(ps2, 0xFA);
             break;
         case 0xFE:	/* Resend */
-            ps2_queue_reply(ps2, ps2->last_sent);
+            if (ps2->last_sent != 0xFE)
+                ps2_queue_reply(ps2, ps2->last_sent);
             break;
-        case 0xFC:
-        case 0xFB:
-        case 0xFA:
-        case 0xF9:
-        case 0xF8:
-        case 0xF7:
+        case 0xFD:	/* This one is hard... we have to ack a series of
+                           set 3 codes */
+            ps2->rxstate = 2;
+            ps2_queue_reply(ps2, 0xFA);
+            ps2->disabled = 1;
+            break;
+        /* We don't bother emulating these - just reply FA */
+        case 0xFC:	/* Make/break */
+        case 0xFB:	/* Typematic */
+        case 0xFA:	/* All keys typematic/make/break */
+        case 0xF9:	/* All keys make */
+        case 0xF8:	/* All keys make/break */
+        case 0xF7:	/* All keys typematic */
             ps2_queue_reply(ps2, 0xFA);
             break;
-        case 0xF6:
+        case 0xF6:	/* Set default */
             break;
-        case 0xF5:	/* TOOD: disable */
+        case 0xF5:
+            ps2->disabled = 1;
+            break;
         case 0xF4:
+            ps2->disabled = 0;
             break;
-        case 0xF2:
+        case 0xF3:	/* Set typematic delay.. ignored - eat the parameter */
+            ps2->rxstate = 1;
+            break;
+        case 0xF2:	/* Read ID */
             ps2_queue_reply(ps2, 0xAB);
             ps2_queue_reply(ps2, 0x83);
             break;
+        case 0xF0:	/* Set scan code set */
+            ps2_queue_reply(ps2, 0xFA);
+            ps2->rxstate = 3;
+            break;
         case 0xEE:
             ps2_queue_reply(ps2, 0xEE);
+            break;
+        case 0xED:
+            /* Ignore LED state */
+            ps2->rxstate = 1;
             break;
         default:
             ps2_queue_reply(ps2, 0xFE);
