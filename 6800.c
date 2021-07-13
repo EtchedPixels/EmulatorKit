@@ -3766,8 +3766,6 @@ void m68hc11a_reset(struct m6800 *cpu, int type, uint8_t cfg, const uint8_t *rom
     cpu->intio = INTIO_HC11;
 
     cpu->p = P_I | P_S | P_X;
-    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
-    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
 
     cpu->io.rom = rom;
     cpu->io.eerom = eerom;
@@ -3826,7 +3824,7 @@ void m68hc11a_reset(struct m6800 *cpu, int type, uint8_t cfg, const uint8_t *rom
     cpu->io.irambase = 0;
     switch(type) {
     /* Internal EEROM/EPROM/ROM is not yet modelled */
-    case 8:	/* As 1 with 12K of ROM or EPROM */
+    case 8:	/* As 1 with 8K of ROM or EPROM */
         cpu->io.rombase = 0xE000;
     case 1:	/* 68HC11A1, 256 bytes IRAM, 256 bytes EEPROM */
         cpu->io.erombase = 0xB600;
@@ -3840,6 +3838,10 @@ void m68hc11a_reset(struct m6800 *cpu, int type, uint8_t cfg, const uint8_t *rom
     }
 
     cpu->io.lock = 64;		/* Some stuff locks after 64 cycles */
+
+    /* Must be last so the CPU config is correct for things like internal ROM */
+    cpu->pc = m6800_do_read(cpu, 0xFFFE) << 8;
+    cpu->pc |= m6800_do_read(cpu, 0xFFFF);
 }
 
 #endif
@@ -4570,7 +4572,7 @@ uint8_t m6800_do_read(struct m6800 *cpu, uint16_t addr)
             return cpu->iram[addr];
         if (addr >= cpu->io.erombase && addr <= cpu->io.eromend &&
                 (cpu->io.config_latch & CFG_EEON))
-            return cpu->io.eerom[addr - cpu->io.rombase];
+            return cpu->io.eerom[addr - cpu->io.erombase];
         if (addr >= 0xBF00 && addr <= 0xBFFF && (cpu->io.hprio & HPRIO_RBOOT))
             return cpu->io.bootrom[addr & 0xFF];
         if (addr >= cpu->io.rombase && (cpu->io.config_latch & CFG_ROMON))
