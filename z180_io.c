@@ -76,7 +76,6 @@ struct z180_io {
     /* CPU internal context */
     Z180Context *cpu;
     /* Internal IRQ management */
-    uint8_t irq;
     uint8_t irqpend;
     uint8_t vector;
 
@@ -167,77 +166,46 @@ static void z180_next_interrupt(struct z180_io *io)
     uint8_t live = io->irqpend & io->itc & 7;
 
     if (live & 1) {	/* IRQ is highest */
-        if (io->irq == 0) {
-            Z180INT(io->cpu, io->vector);
-            io->irq = 1;
-        }
+        Z180INT(io->cpu, io->vector);
         return;
     }
     if (live & 2) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x00);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x00);
         return;
     }
     if (live & 4) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x02);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x02);
         return;
     }
     /* Check for internal interrupts in priority order */
     if ((io->tcr & 0x50) == 0x50) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x04);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x04);
         return;
     }
     if ((io->tcr & 0xA0) == 0xA0) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x06);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x06);
         return;
     }
     if ((io->dstat & 0x44) == 0x04) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x08);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x08);
         return;
     }
     if ((io->dstat & 0x88) == 0x08) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x08);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x08);
         return;
     }
     if ((io->cntr & 0xC0) == 0xC0) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x0C);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x0C);
         return;
     }
     if (io->asci[0].irq) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x0E);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x0E);
         return;
     }
     if (io->asci[1].irq) {
-        if (io->irq == 0) {
-            Z180INT_IM2(io->cpu, io->il | 0x10);
-            io->irq = 1;
-        }
+        Z180INT_IM2(io->cpu, io->il | 0x10);
         return;
     }
-    io->irq = 0;
     Z180NOINT(io->cpu);
 }
 
@@ -251,12 +219,6 @@ void z180_interrupt(struct z180_io *io, uint8_t pin, uint8_t vec, bool on)
     if (pin == 0)
         io->vector = vec;
 
-    if (io->irq == 0)
-        z180_next_interrupt(io);
-}
-    
-void z180_reti(struct z180_io *io)
-{
     z180_next_interrupt(io);
 }
     
