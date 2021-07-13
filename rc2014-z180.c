@@ -27,6 +27,8 @@
 #include "lib765/include/765.h"
 #include "z180_io.h"
 
+#include "16x50.h"
+#include "acia.h"
 #include "ide.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
@@ -48,6 +50,9 @@ static uint8_t int_recalc = 0;
 static uint8_t wiznet = 0;
 static uint8_t has_tms;
 static uint8_t leds;
+static uint8_t banked;
+static uint8_t bankenable;
+static uint8_t bankreg[4];
 static struct ppide *ppide;
 static struct sdcard *sdcard;
 static FDC_PTR fdc;
@@ -56,6 +61,8 @@ static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 struct zxkey *zxkey;
 static struct z180_io *io;
+static struct acia *acia;
+static struct uart16x50 *uart;
 
 static uint16_t tstate_steps = 737;	/* 18.432MHz */
 
@@ -81,14 +88,30 @@ volatile int emulator_done;
 #define TRACE_FDC	0x000400
 #define TRACE_IDE	0x000800
 #define TRACE_SPI	0x001000
+#define TRACE_ACIA	0x002000
+#define TRACE_512	0x004000
+#define TRACE_UART	0x008000
 
 static int trace = 0;
 
 static void reti_event(void);
 
+static uint32_t bank_translate(uint32_t pa)
+{
+	unsigned int bank;
+	pa &= 0xFFFF;
+	bank = pa >> 14;
+	if (bankenable == 0)
+		return pa;
+	pa = (bankreg[bank] << 14) + (pa & 0x3FFF);
+	return pa;
+}
+
 static uint8_t do_mem_read0(uint16_t addr, int quiet)
 {
 	uint32_t pa = z180_mmu_translate(io, addr);
+	if (banked)
+		pa = bank_translate(pa);
 	if (!quiet && (trace & TRACE_MEM))
 		fprintf(stderr, "R %04X[%06X] -> %02X\n", addr, pa, ramrom[pa]);
 	return ramrom[pa];
@@ -97,6 +120,8 @@ static uint8_t do_mem_read0(uint16_t addr, int quiet)
 static void mem_write0(uint16_t addr, uint8_t val)
 {
 	uint32_t pa = z180_mmu_translate(io, addr);
+	if (banked)
+		pa = bank_translate(pa);
 	if (pa < 0x80000) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W %04X[%06X] *ROM*\n",
@@ -110,14 +135,20 @@ static void mem_write0(uint16_t addr, uint8_t val)
 
 uint8_t z180_phys_read(int unused, uint32_t addr)
 {
+	if (banked)
+		addr = bank_translate(addr);
 	return ramrom[addr & 0xFFFFF];
 }
 
 void z180_phys_write(int unused, uint32_t addr, uint8_t val)
 {
+	if (banked)
+		addr = bank_translate(addr);
 	addr &= 0xFFFFF;
 	if (addr >= 0x80000)
 		ramrom[addr] = val;
+	else
+		fprintf(stderr, "[%06X: write to ROM.]\n", addr);
 }
 
 uint8_t mem_read(int unused, uint16_t addr)
@@ -441,6 +472,10 @@ static uint8_t io_read_2014(uint16_t addr)
 		return zxkey_scan(zxkey, addr);
 
 	addr &= 0xFF;
+	if (addr >= 0x80 && addr < 0xC0 && acia)
+		return acia_read(acia, addr & 1);
+	if (addr >= 0xA0 && addr <= 0xA7 && uart)
+		return uart16x50_read(uart, addr & 7);
 	if (addr >= 0x48 && addr < 0x50) 
 		return fdc_read(addr & 7);
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
@@ -472,7 +507,11 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		return;
 	}
 	addr &= 0xFF;
-	if (addr >= 0x48 && addr < 0x50)
+	if (addr >= 0x80 && addr < 0xC0 && acia)
+		acia_write(acia, addr & 1, val);
+	else if (addr >= 0xA0 && addr <= 0xA7 && uart)
+		uart16x50_write(uart, addr & 7, val);
+	else if (addr >= 0x48 && addr < 0x50)
 		fdc_write(addr & 7, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
@@ -483,8 +522,15 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	else if (addr == 0x0C && rtc) {
 		rtc_write(rtc, val);
 		sysio_write(val);
-	}
-	else if (addr == 0x0D)
+	} else if (banked && addr >= 0x78 && addr < 0x7C) {
+		bankreg[addr & 3] = val & 0x3F;
+		if (trace & TRACE_512)
+			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+	} else if (banked && addr >= 0x7C && addr <=0x7F) {
+		if (trace & TRACE_512)
+			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
+		bankenable = val & 1;
+	} else if (addr == 0x0D)
 		diag_write(val);
 	else if ((addr == 0x98 || addr == 0x99) && vdp)
 		tms9918a_write(vdp, addr & 1, val);
@@ -525,8 +571,11 @@ uint8_t io_read(int unused, uint16_t addr)
 
 static void poll_irq_event(void)
 {
-	/* Only one external interrupting device is present */
-	if (vdp && tms9918a_irq_pending(vdp))
+	if (acia && acia_irq_pending(acia))
+		z180_interrupt(io, 0, 0xFF, 1);
+	if (uart && uart16x50_irq_pending(uart))
+		z180_interrupt(io, 0, 0xFF, 1);
+	else if (vdp && tms9918a_irq_pending(vdp))
 		z180_interrupt(io, 0, 0xFF, 1);
 	else
 		z180_interrupt(io, 0, 0, 0);
@@ -555,7 +604,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-z180: [-f] [-i idepath] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-z180: [-a] [-b] [-f] [-i idepath] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -568,12 +617,13 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	char *idepath = NULL;
 	char *patha = NULL, *pathb = NULL;
+	int input = 0;
 
 	uint8_t *p = ramrom;
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "cd:fF:i:I:lr:sRS:Twz")) != -1) {
+	while ((opt = getopt(argc, argv, "1acd:fF:i:I:lr:sRS:Twzb")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -601,8 +651,17 @@ int main(int argc, char *argv[])
 		case 'R':
 			rtc = rtc_create();
 			break;
+		case 'b':
+			banked = 1;
+			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 'a':
+			input = 1;
+			break;
+		case '1':
+			input = 2;
 			break;
 		case 'F':
 			if (pathb) {
@@ -679,8 +738,23 @@ int main(int argc, char *argv[])
 	}
 
 	io = z180_create(&cpu_z180);
-	z180_set_input(io, 0, 1);
 	z180_trace(io, trace & TRACE_CPU_IO);
+
+	switch(input) {
+		case 0:
+			z180_set_input(io, 0, 1);
+			break;
+		case 1:
+			acia = acia_create();
+			acia_trace(acia, trace & TRACE_ACIA);
+			acia_set_input(acia, 1);
+			break;
+		case 2:
+			uart = uart16x50_create();
+			uart16x50_trace(uart, trace & TRACE_UART);
+			uart16x50_set_input(uart, 1);
+			break;
+	}
 
 	if (rtc)
 		rtc_trace(rtc, trace & TRACE_RTC);
