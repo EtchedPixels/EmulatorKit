@@ -101,7 +101,7 @@ struct ps2 *ps2;
 
 struct zxkey *zxkey;
 
-static uint16_t tstate_steps = 294;	/* RC2014 speed */
+static uint16_t tstate_steps = 365;	/* RC2014 speed */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
@@ -2185,7 +2185,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return z512_read(addr);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
-	return 0xFF;	/* 78 is what my actual board floats at */
+	return 0x78;	/* 78 is what my actual board floats at */
 }
 
 static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
@@ -2249,7 +2249,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
 		trace |= val;
-		printf("trace set to %04X\n", trace);
+		fprintf(stderr, "trace set to %04X\n", trace);
 	} else if (addr == 0xFE) {
 		trace &= 0xFF;
 		trace |= val << 8;
@@ -2766,7 +2766,7 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_Z80SBC64;
 				bankreg[0] = 3;
 				/* Triple RC2014 rate */
-				tstate_steps = 294 * 3;
+				tstate_steps *= 3;
 			} else if (strcmp(optarg, "easyz80") == 0) {
 				bank512 = 1;
 				cpuboard = CPUBOARD_EASYZ80;
@@ -2805,7 +2805,7 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_ZRCC;
 				bankreg[0] = 3;
 				/* 22MHz CPU */
-				tstate_steps = 294 * 3;
+				tstate_steps *= 3;
 			} else if (strcmp(optarg, "tinyz80") == 0) {
 				bank512 = 1;
 				cpuboard = CPUBOARD_TINYZ80;
@@ -3142,19 +3142,19 @@ int main(int argc, char *argv[])
 	   is loaded though */
 
 	/* We run 7372000 t-states per second */
-	/* We run 369 cycles per I/O check, do that 50 times then poll the
+	/* We run 365 cycles per I/O check, do that 50 times then poll the
 	   slow stuff and nap for 20ms to get 50Hz on the TMS99xx */
 	while (!emulator_done) {
 		int i;
 		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 50; i++) {
 			int j;
-			for (j = 0; j < 10; j++) {
-				Z80ExecuteTStates(&cpu_z80, tstate_steps);
+			for (j = 0; j < 100; j++) {
+				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/ 10);
 				if (copro)
 					z80copro_run(copro);
 				if (ps2)
-					ps2_event(ps2, tstate_steps);
+					ps2_event(ps2, (tstate_steps + 5) / 10);
 			}
 			if (acia)
 				acia_timer(acia);
