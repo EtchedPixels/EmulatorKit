@@ -18,6 +18,8 @@ struct ps2 {
     unsigned int count;
     unsigned int wait;
 
+    unsigned int rxstate;
+
     uint8_t last_sent;
     uint16_t receive;
     uint16_t send;
@@ -28,6 +30,7 @@ struct ps2 {
     uint8_t buffer[PS2_BUFSIZ];
     unsigned int bufptr;
     unsigned int replymode;
+    unsigned int disabled;
 
     unsigned int divider;
 
