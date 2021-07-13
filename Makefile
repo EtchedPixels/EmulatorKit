@@ -2,9 +2,10 @@
 CFLAGS = -Wall -pedantic -g3 -Werror
 
 all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
-	rc2014-6800 rc2014-68008 rc2014-6809 rc2014-68hc11 rc2014-80c188 \
-	rc2014-8085 rc2014-z8 rc2014-z180 rbcv2 searle linc80 makedisk \
-	markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k s100-z80
+	rc2014-65c816 rc2014-6800 rc2014-68008 rc2014-6809 rc2014-68hc11 \
+	rc2014-80c188 rc2014-8085 rc2014-z8 rc2014-z180 rbcv2 searle linc80 \
+	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
+	s100-z80
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -45,6 +46,9 @@ rc2014-6303: rc2014-6303.o 6800.o ide.o w5100.o ppide.o rtc_bitbang.o
 rc2014-6502: rc2014-6502.o 6502.o 6502dis.o ide.o 6522.o acia.o 16x50.o rtc_bitbang.o w5100.o
 	cc -g3 rc2014-6502.o ide.o 6522.o acia.o 16x50.o rtc_bitbang.o w5100.o 6502.o 6502dis.o -o rc2014-6502
 
+rc2014-65c816: rc2014-65c816.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o w5100.o lib65c816/src/lib65816.a
+	cc -g3 rc2014-65c816.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o w5100.o lib65c816/src/lib65816.a -o rc2014-65c816
+
 rc2014-65c816-mini: rc2014-65c816-mini.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o w5100.o lib65c816/src/lib65816.a
 	cc -g3 rc2014-65c816-mini.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o w5100.o lib65c816/src/lib65816.a -o rc2014-65c816-mini
 
@@ -52,6 +56,9 @@ lib65c816/src/lib65816.a:
 	$(MAKE) --directory lib65c816 -j 1
 
 lib65816/config.h: lib65c816/src/lib65816.a
+
+rc2014-65c816.o: rc2014-65c816-mini.c lib65816/config.h
+	$(CC) $(CFLAGS) -Ilib65c816 -c rc2014-65c816.c
 
 rc2014-65c816-mini.o: rc2014-65c816-mini.c lib65816/config.h
 	$(CC) $(CFLAGS) -Ilib65c816 -c rc2014-65c816-mini.c
@@ -128,6 +135,11 @@ n8_sdl2: n8.o n8_sdlui.o z180_io.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tm
 
 s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80
+
+mini11: mini11.o 68hc11.o sdcard.o
+	cc -g3 mini11.o sdcard.o 68hc11.o -o mini11
+
+68hc11.o: 6800.c
 
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
