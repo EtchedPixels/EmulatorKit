@@ -411,10 +411,10 @@
 #define O_pcrl(a)	wtmp.B.L = M_READ(PC.A); wtmp.B.H = M_READ(PC.A+1); PC.W.PC += 2;	\
 			a.W.L = PC.W.PC + (offset_l) wtmp.W; a.B.B = PC.B.PB;
 
-#define O_ai(a)		atmp.B.L = M_READ(PC.A); atmp.B.H = M_READ(PC.A+1); atmp.B.B = DB; PC.W.PC += 2;	\
+#define O_ai(a)		atmp.B.L = M_READ(PC.A); atmp.B.H = M_READ(PC.A+1); atmp.B.B = 0; PC.W.PC += 2;	\
 			a.B.L = M_READ(atmp.A); a.B.H = M_READ(atmp.A+1); a.B.B = PC.B.PB;
 
-#define O_ail(a)	atmp.B.L = M_READ(PC.A); atmp.B.H = M_READ(PC.A+1); atmp.B.B = DB; PC.W.PC += 2;	\
+#define O_ail(a)	atmp.B.L = M_READ(PC.A); atmp.B.H = M_READ(PC.A+1); atmp.B.B = 0; PC.W.PC += 2;	\
 			a.B.L = M_READ(atmp.A); a.B.H = M_READ(atmp.A+1); a.B.B = M_READ(atmp.A+2)
 
 #define O_di(a)		if (D.B.L) cpu_cycle_count++;					\
@@ -426,7 +426,7 @@
 			a.B.L = M_READ(atmp.A); a.B.H = M_READ(atmp.A+1); a.B.B = M_READ(atmp.A+2)
 
 #define O_axi(a)	atmp.B.L = M_READ(PC.A); atmp.B.H = M_READ(PC.A+1);				\
-			atmp.A += X.W; atmp.B.B = PC.B.PB;						 \
+			atmp.A += X.W; atmp.B.B = 0;						 \
 			PC.W.PC += 2; a.B.L = M_READ(atmp.A); a.B.H = M_READ(atmp.A+1); a.B.B = PC.B.PB
 
 #define O_sr(a)		a.W.L = M_READ(PC.A) + S.W; a.B.B = 0; PC.W.PC++
