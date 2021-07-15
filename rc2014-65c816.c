@@ -177,8 +177,9 @@ static uint32_t bytemangle(uint32_t addr)
 	uint32_t r = 0;
 	r |= (addr & 0xFF00) >> 8;
 	r |= (addr & 0xFF) << 8;
+	r |= (addr & 0x0F0000);
 	if (iolatch & 4)
-		addr |= 0x80000;
+		r |= 0x80000;
 	return r;
 }
 
@@ -296,7 +297,7 @@ uint8_t read65c816(uint32_t addr, uint8_t debug)
 	case 3:
 		if (debug)
 			return 0xFF;
-		else if (iolatch & 1)
+		else if (!(iolatch & 1))
 			r = mmio_read_65c816(addr);
 	}
 	return r;
@@ -313,6 +314,8 @@ void write65c816(uint32_t addr, uint8_t val)
 	case 2:
 		if (iolatch & 1)
 			break;
+		if (trace & TRACE_MMU)
+			fprintf(stderr, "[iolatch to %02X]\n", val);
 		iolatch = val;
 		break;
 	case 3:
