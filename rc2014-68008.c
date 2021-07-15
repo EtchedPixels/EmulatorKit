@@ -36,11 +36,9 @@
 #include "rtc_bitbang.h"
 #include "16x50.h"
 #include "w5100.h"
+#include "sram_mmu8.h"
 
 static uint8_t ramrom[1024 * 1024];	/* ROM low RAM high */
-static uint8_t mmu_sram[8 * 32768];
-static uint8_t ext_ram[512 * 1024];	/* For now */
-static uint8_t mmu_latch;
 
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
@@ -60,6 +58,7 @@ static struct acia *acia;
 static struct ppide *ppide;
 static struct rtc *rtc;
 static struct uart16x50 *uart;
+static struct sram_mmu *mmu;
 
 static unsigned acia_narrow;
 
@@ -72,6 +71,7 @@ static unsigned acia_narrow;
 #define TRACE_ACIA	64
 #define TRACE_UART	128
 #define TRACE_PPIDE	256
+#define TRACE_MMU	512
 
 static int trace = 0;
 static int irq_mask;
@@ -205,6 +205,8 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
+	else if (addr == 0x38)
+		sram_mmu_set_latch(mmu, val);
 	else if (addr == 0x0C && rtc)
 		rtc_write(rtc, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart)
@@ -222,7 +224,8 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 
 uint8_t *bmmu_translate(unsigned int addr, int wflag, int silent)
 {
-	uint32_t page;
+	unsigned int berr;
+
 	if (bmmu == 0)
 		return ramrom + (addr & 0xFFFFF);
 	if (!(addr & 0x80000)) {
@@ -236,39 +239,10 @@ uint8_t *bmmu_translate(unsigned int addr, int wflag, int silent)
 		/* Linear RAM */
 		return ramrom + addr;
 	}
-	/* Page is the address presented to the fast SRAM on the MMU */
-	page = addr >> 13;
-	page |= (mmu_latch & 0x7F) << 8;
-	if (kernelmode)
-		page |= (1 << 7);
-	/* In CONFIG mode the fast SRAM data lines connect to the CPU data
-	   bus for writes only */
-	if (!(mmu_latch & 0x80)) {
-		if (wflag)
-			return mmu_sram + addr;
-		else
-			return NULL;		/* Not readable */
-	}
-	/* In MMU mode the output of the SRAM instead connects to the high
-	   address lines of the actual memory proper and that memory is
-	   enabled and drives the bus */
-	addr &= 0x1FFF;		/* 8K */
-	addr |= (mmu_sram[page] & 0x3F) << 13;
-	/* Fault bit */
-	if (mmu_sram[page] & 0x80) {
-		if (!silent)
-			fprintf(stderr, "Fault at logical 0x%06X\n", addr);
-		return NULL;
-	}
-	/* Read only bit */
-	if (mmu_sram[page] & 0x40) {
-		if (!wflag)
-			return ext_ram + addr;
-		if (!silent)
-			fprintf(stderr, "Write fault at logical 0x%06X\n", addr);
-		return NULL;
-	}
-	return ext_ram + addr;
+
+	return sram_mmu_translate(mmu, addr & 0x7FFFF, wflag,
+					kernelmode, silent, &berr);
+	/* We don't emulate bus error yet */
 }
 
 unsigned int cpu_read_byte_dasm(unsigned int addr)
@@ -557,7 +531,10 @@ int main(int argc, char *argv[])
 		acia_set_input(acia, 1);
 		acia_trace(acia, trace & TRACE_ACIA);
 	}
-
+	if (bmmu) {
+		mmu = sram_mmu_create();
+		sram_mmu_trace(mmu, trace & TRACE_MMU);
+	}
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
 		atexit(exit_cleanup);

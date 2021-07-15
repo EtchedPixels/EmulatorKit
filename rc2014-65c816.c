@@ -4,26 +4,26 @@
  *	65C816 processor card for RC2014 with flat addressing
  *
  *	Because the 65C816 memory management is somewhat deranged the
- *	upper address bits are set by a latch and only a 128K window is
- *	seen by the CPU
+ *	memory can be folded to just keep the RAM present and have RAM
+ *	at 0 post initial bootstrap.
+ *
+ *	Memory map
+ *	Top quadrant decides what something is
+ *	00	memory
+ *	01	unused
+ *	10	control latch
+ *	11	I/O space
  *
  *	At boot we are in the top of the first 64K of ROM as the physical
  *	mapping is the flat memory card so
  *		00000-7FFFF ROM
  *		80000-FFFFF RAM
  *
- *	The latch and two muxes will let us pick any bank for each of the
- *	64K windows (so we can run split I/D and also to access other stuff)
- *
- *	MREQ is A23	(active low)
- *	IORQ is !A23	(active low)
- *
  *	All I/O is effectively 'far' but this doesn't really matter.
  *
  *	Physically RAM addresses are permuted within the 64K bank so that
  *	logical ABCDE is physical ADEBC. This is done so that I/O devices
  *	which don't care abotut the upper bits appear 256 bytes wide.
- *
  *	Other than the ROM needing shuffling this has no real inconveniences
  *	but makes disk I/O a crapload faster.
  *
@@ -32,6 +32,11 @@
  *	RTC at 0x0C
  *	16550A at 0xC0
  *	Minimal 6522VIA emulation
+ *
+ *	TODO
+ *	MMU emulation including ABORT
+ *	Interrupt via NMI and mask register
+ *	Wire CPU VP to the iolatch
  */
 
 #include <stdio.h>
@@ -52,6 +57,7 @@
 #include "6522.h"
 #include "16x50.h"
 #include "w5100.h"
+#include "sram_mmu8.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
@@ -69,10 +75,11 @@ static uint8_t iolatch;
 #define IRQ_VIA		3
 
 static nic_w5100_t *wiz;
-struct via6522 *via;
-struct acia *acia;
-struct uart16x50 *uart;
-struct rtc *rtc;
+static struct via6522 *via;
+static struct acia *acia;
+static struct uart16x50 *uart;
+static struct rtc *rtc;
+static struct sram_mmu *mmu;
 
 static int acia_narrow;
 
@@ -85,6 +92,7 @@ static int acia_narrow;
 #define TRACE_ACIA	128
 #define TRACE_UART	256
 #define TRACE_VIA	512
+#define TRACE_MMU	1024
 
 static int trace = 0;
 
@@ -169,10 +177,8 @@ static uint32_t bytemangle(uint32_t addr)
 	uint32_t r = 0;
 	r |= (addr & 0xFF00) >> 8;
 	r |= (addr & 0xFF) << 8;
-	if  (addr & 0x10000)
-		r |= (iolatch & 0xF0) << 12;
-	else
-		r |= (iolatch & 0x0F) << 16;
+	if (iolatch & 4)
+		addr |= 0x80000;
 	return r;
 }
 
@@ -215,8 +221,8 @@ static void mmio_write_65c816(uint16_t addr, uint8_t val)
 		my_ide_write(addr & 7, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
-	else if (addr == 0x38)
-		iolatch = val;
+	else if (addr == 0x38 && mmu)
+		sram_mmu_set_latch(mmu, val);
 	else if (addr >= 0x60 && addr <= 0x6F)
 		via_write(via, addr & 0x0F, val);
 	else if (addr == 0x0C && rtc)
@@ -236,38 +242,84 @@ static void mmio_write_65c816(uint16_t addr, uint8_t val)
 
 uint8_t do_65c816_read(uint32_t addr)
 {
+	uint8_t *ptr;
+	unsigned int abrt;
 	addr = bytemangle(addr);
-	return ramrom[addr & 0xFFFFF];
+
+	if (mmu == NULL || !(addr & 0x80000))
+		return ramrom[addr & 0xFFFFF];
+
+	ptr = sram_mmu_translate(mmu, addr, 0, !(iolatch & 1), 0, &abrt);
+	/* TODO ABORT CYCLE */
+	if (ptr)
+		return *ptr;
+	return 0xFF;
+}
+
+void do_65c816_write(uint32_t addr, uint8_t val)
+{
+	uint8_t *ptr;
+	unsigned int abrt;
+	addr = bytemangle(addr);
+
+	/* Low 512K is fixed ROM mapping */
+	if (addr < 0x80000) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "[Discarded: ROM]\n");
+		return;
+	}
+	if (mmu == NULL) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "W: %04X = %02X\n", addr, val);
+		ramrom[addr & 0xFFFFF] = val;
+		return;
+	}
+	ptr = sram_mmu_translate(mmu, addr, 1, !(iolatch & 1), 0, &abrt);
+	/* TODO ABORT CYCLE */
+	if (ptr)
+		*ptr = val;
+	/* MMU provided fault diagnostics itself */
 }
 
 uint8_t read65c816(uint32_t addr, uint8_t debug)
 {
-	uint8_t r;
+	uint8_t r = 0xFF;
 
-	if (addr & (1 << 23)) {
+	switch(addr >> 22) {
+	case 0:
+		r = do_65c816_read(addr);
+		break;
+	case 1:
+		break;
+	case 2:
+		break;
+	case 3:
 		if (debug)
 			return 0xFF;
-		else
-			return mmio_read_65c816(addr);
+		else if (iolatch & 1)
+			r = mmio_read_65c816(addr);
 	}
-	r = do_65c816_read(addr);
 	return r;
 }
 
 void write65c816(uint32_t addr, uint8_t val)
 {
-	if (addr & (1 << 23)) {
+	switch(addr >> 22) {
+	case 0:
+		do_65c816_write(addr, val);
+		break;
+	case 1:
+		break;
+	case 2:
+		if (iolatch & 1)
+			break;
+		iolatch = val;
+		break;
+	case 3:
+		if (iolatch & 1)
+			break;
 		mmio_write_65c816(addr, val);
-		return;
-	}
-	addr = bytemangle(addr);
-	if (addr < 0x80000) { 
-		if (trace & TRACE_MEM)
-			fprintf(stderr, "[Discarded: ROM]\n");
-	} else {
-		if (trace & TRACE_MEM)
-			fprintf(stderr, "W: %04X = %02X\n", addr, val);
-		ramrom[addr & 0xFFFFF] = val;
+		break;
 	}
 }
 
@@ -332,7 +384,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-c] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-65c816: [-1] [-A] [-a] [-b] [-c] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -345,7 +397,7 @@ int main(int argc, char *argv[])
 	int input = 0;
 	int hasrtc = 0;
 
-	while ((opt = getopt(argc, argv, "1Aad:fi:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabd:fi:r:Rw")) != -1) {
 		switch (opt) {
 		case '1':
 			input = 2;
@@ -353,6 +405,10 @@ int main(int argc, char *argv[])
 		case 'a':
 			input = 1;
 			acia_narrow = 0;
+			break;
+		case 'b':
+			if (mmu == NULL)
+				mmu = sram_mmu_create();
 			break;
 		case 'A':
 			input = 1;
@@ -437,7 +493,8 @@ int main(int argc, char *argv[])
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
 	}
-
+	if (mmu)
+		sram_mmu_trace(mmu, trace & TRACE_MMU);
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
