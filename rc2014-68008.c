@@ -14,6 +14,8 @@
  *	16550A at 0xC0
  *	68B50 at 0xA0
  *
+ *	Optional MMU adapter
+ *
  *	TODO: QUART or similar and timer emulation
  */
 
@@ -36,14 +38,15 @@
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* ROM low RAM high */
-static uint8_t mmu_sram[8 * 1024];
-static uint8_t ext_ram[1024 * 1024];	/* For now */
+static uint8_t mmu_sram[8 * 32768];
+static uint8_t ext_ram[512 * 1024];	/* For now */
+static uint8_t mmu_latch;
 
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 static uint8_t bmmu = 0;
 
-static int usermode;
+static int kernelmode;
 
 static uint16_t tstate_steps = 200;
 
@@ -219,10 +222,11 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 
 uint8_t *bmmu_translate(unsigned int addr, int wflag, int silent)
 {
+	uint32_t page;
 	if (bmmu == 0)
 		return ramrom + (addr & 0xFFFFF);
 	if (!(addr & 0x80000)) {
-		if (usermode) {
+		if (!kernelmode) {
 			fprintf(stderr, "Low fault at 0x%06X\n", addr);
 			return NULL;
 		}
@@ -232,33 +236,39 @@ uint8_t *bmmu_translate(unsigned int addr, int wflag, int silent)
 		/* Linear RAM */
 		return ramrom + addr;
 	}
-	/* MMU half */
-	if (usermode) {
-		uint16_t page = (addr & 0x7FFFF) >> 13;
-		/* No task bits yet */
-		addr &= 0xFFF;
-		addr |= (mmu_sram[page] & 0x3F) << 13;
-		/* We don't implement the fault bit yet */
-		if (addr & 0x80) {
-			if (!silent)
-				fprintf(stderr, "Fault at logical 0x%06X\n", addr);
-			return NULL;
-		}
-		if ((addr & 0x40) && wflag) {
-			if (!silent)
-				fprintf(stderr, "Write fault at logical 0x%06X\n", addr);
-			return NULL;
-		}
-		return ext_ram + addr;
+	/* Page is the address presented to the fast SRAM on the MMU */
+	page = addr >> 13;
+	page |= (mmu_latch & 0x7F) << 8;
+	if (kernelmode)
+		page |= (1 << 7);
+	/* In CONFIG mode the fast SRAM data lines connect to the CPU data
+	   bus for writes only */
+	if (!(mmu_latch & 0x80)) {
+		if (wflag)
+			return mmu_sram + addr;
+		else
+			return NULL;		/* Not readable */
 	}
-	/* MMU programming view */
-	if (wflag) {
-		/* Task bits to add here */
-		addr >>= 12;
-		addr &= 0x7F;
-		return mmu_sram + addr;
+	/* In MMU mode the output of the SRAM instead connects to the high
+	   address lines of the actual memory proper and that memory is
+	   enabled and drives the bus */
+	addr &= 0x1FFF;		/* 8K */
+	addr |= (mmu_sram[page] & 0x3F) << 13;
+	/* Fault bit */
+	if (mmu_sram[page] & 0x80) {
+		if (!silent)
+			fprintf(stderr, "Fault at logical 0x%06X\n", addr);
+		return NULL;
 	}
-	return NULL;
+	/* Read only bit */
+	if (mmu_sram[page] & 0x40) {
+		if (!wflag)
+			return ext_ram + addr;
+		if (!silent)
+			fprintf(stderr, "Write fault at logical 0x%06X\n", addr);
+		return NULL;
+	}
+	return ext_ram + addr;
 }
 
 unsigned int cpu_read_byte_dasm(unsigned int addr)
@@ -368,7 +378,7 @@ void cpu_pulse_reset(void)
 
 void cpu_set_fc(int fc)
 {
-	usermode = !(fc & 4);
+	kernelmode = (fc & 4);
 }
 
 void system_process(void)
