@@ -1,7 +1,4 @@
 - Z180 DAA change
 - New instructions
-	Implement SLP, test others
-- New interrupt logic
-- IM2 - low bit of vector I does not need to be 0 to work right
-- Separate driver for Z180 internal I/O
+	Implement SLP
 - Cycle time checks for new instructions
