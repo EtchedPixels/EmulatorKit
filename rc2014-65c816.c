@@ -171,15 +171,22 @@ void via_handshake_b(struct via6522 *via)
 
 
 /* The address lines are permuted */
-
 static uint32_t bytemangle(uint32_t addr)
 {
-	uint32_t r = 0;
+	uint32_t r = (addr & 0x0F0000);
 	r |= (addr & 0xFF00) >> 8;
 	r |= (addr & 0xFF) << 8;
-	r |= (addr & 0x0F0000);
 	if (iolatch & 4)
 		r |= 0x80000;
+	return r;
+}
+
+/* The 65C816 version of the MMU card flips the address lines back */
+static uint32_t backpermute(uint32_t addr)
+{
+	uint32_t r = (addr & 0x030000);
+	r |= (addr & 0xFF00) >> 8;
+	r |= (addr & 0xFF) << 8;
 	return r;
 }
 
@@ -250,7 +257,7 @@ uint8_t do_65c816_read(uint32_t addr)
 	if (mmu == NULL || !(addr & 0x80000))
 		return ramrom[addr & 0xFFFFF];
 
-	ptr = sram_mmu_translate(mmu, addr, 0, !(iolatch & 1), 0, &abrt);
+	ptr = sram_mmu_translate(mmu, backpermute(addr), 0, !(iolatch & 1), 0, &abrt);
 	/* TODO ABORT CYCLE */
 	if (ptr)
 		return *ptr;
@@ -275,8 +282,9 @@ void do_65c816_write(uint32_t addr, uint8_t val)
 		ramrom[addr & 0xFFFFF] = val;
 		return;
 	}
-	ptr = sram_mmu_translate(mmu, addr, 1, !(iolatch & 1), 0, &abrt);
-	/* TODO ABORT CYCLE */
+	ptr = sram_mmu_translate(mmu, backpermute(addr), 1, !(iolatch & 1), 0, &abrt);
+	if (abrt)
+		CPU_abort();
 	if (ptr)
 		*ptr = val;
 	/* MMU provided fault diagnostics itself */
