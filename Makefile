@@ -17,7 +17,7 @@ lib765/lib/lib765.a:
 	$(MAKE) --directory lib765/lib
 
 am9511/libam9511.a:
-	$(MAKE) --directory libam9511
+	$(MAKE) --directory am9511
 
 rc2014:	rc2014.o rc2014_noui.o acia.o amd9511.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o zxkey_none.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a
 	cc -g3 rc2014.o rc2014_noui.o zxkey_none.o acia.o amd9511.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
