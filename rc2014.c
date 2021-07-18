@@ -39,6 +39,7 @@
 #include "lib765/include/765.h"
 
 #include "acia.h"
+#include "amd9511.h"
 #include "ide.h"
 #include "ppide.h"
 #include "ps2.h"
@@ -97,6 +98,7 @@ static FDC_PTR fdc;
 static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
+static struct amd9511 *amd9511;
 struct ps2 *ps2;
 
 struct zxkey *zxkey;
@@ -2152,6 +2154,8 @@ static uint8_t io_read_2014(uint16_t addr)
 	addr &= 0xFF;
 	if (addr >= 0x48 && addr < 0x50) 
 		return fdc_read(addr & 7);
+	if ((addr == 0x50 || addr == 0x51) && amd9511)
+		return amd9511_read(amd9511, addr);
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		return acia_read(acia, addr & 1);
 	if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
@@ -2204,6 +2208,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	addr &= 0xFF;
 	if (addr >= 0x48 && addr < 0x50)
 		fdc_write(addr & 7, val);
+	else if ((addr == 0x50 || addr == 0x51) && amd9511)
+		amd9511_write(amd9511, addr, val);
 	else if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
@@ -2679,7 +2685,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1Aabcd:e:fF:i:I:m:pPr:sRS:Tuw8C:Zz")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:e:fF:i:I:m:pPr:sRS:Tuw8C:Zz")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_acia = 1;
@@ -2869,6 +2875,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'T':
 			has_tms = 1;
+			break;
+		case '9':
+			if (amd9511 == NULL)
+				amd9511 = amd9511_create();
 			break;
 		default:
 			usage();

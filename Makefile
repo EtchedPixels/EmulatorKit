@@ -16,11 +16,14 @@ libz180/libz180.o:
 lib765/lib/lib765.a:
 	$(MAKE) --directory lib765/lib
 
-rc2014:	rc2014.o rc2014_noui.o acia.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o zxkey_none.o z80dis.o libz80/libz80.o lib765/lib/lib765.a
-	cc -g3 rc2014.o rc2014_noui.o zxkey_none.o acia.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o z80dis.o libz80/libz80.o lib765/lib/lib765.a -o rc2014
+am9511/libam9511.a:
+	$(MAKE) --directory libam9511
 
-rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a
-	cc -g3 rc2014.o rc2014_sdlui.o acia.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a -o rc2014_sdl2 -lSDL2
+rc2014:	rc2014.o rc2014_noui.o acia.o amd9511.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o zxkey_none.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o rc2014_noui.o zxkey_none.o acia.o amd9511.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
+
+rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o amd9511.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a amd9511/libam9511.a
+	cc -g3 rc2014.o rc2014_sdlui.o acia.o amd9511.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a amd9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
 
 rb-mbc:	rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 	cc -g3 rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
@@ -151,6 +154,7 @@ clean:
 	$(MAKE) --directory 80x86 clean && \
 	$(MAKE) --directory lib65c816 clean && \
 	$(MAKE) --directory m68k clean && \
+	$(MAKE) --directory am9511 clean && \
 	rm -f *.o *~ rc2014 rbcv2
 
 SRCS := $(subst ./,,$(shell find . -name '*.c'))
