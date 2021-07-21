@@ -31,6 +31,7 @@
 #include "acia.h"
 #include "ide.h"
 #include "ppide.h"
+#include "piratespi.h"
 #include "rtc_bitbang.h"
 #include "sdcard.h"
 #include "tms9918a.h"
@@ -63,6 +64,8 @@ struct zxkey *zxkey;
 static struct z180_io *io;
 static struct acia *acia;
 static struct uart16x50 *uart;
+static struct piratespi *pspi;
+static unsigned int pspi_cs = 0;
 
 static uint16_t tstate_steps = 737;	/* 18.432MHz */
 
@@ -306,6 +309,15 @@ uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 {
 	uint8_t r;
 
+	if (pspi_cs == 0 && pspi) {
+		r = piratespi_txrx(pspi, bitrev[bits]);
+		if (r == -1)
+			return 0xFF;
+		if (trace & TRACE_SPI)
+			fprintf(stderr,	"[SPI2 %02X:%02X]\n", bitrev[bits], r);
+		return bitrev[r];
+	}
+
 	if (sdcard == NULL)
 		return 0xFF;
 
@@ -454,6 +466,15 @@ static void sysio_write(uint8_t val)
 		else
 			sd_spi_lower_cs(sdcard);
 	}
+	if (pspi && (delta & 8)) {
+		if (trace & TRACE_SPI)
+			fprintf(stderr, "[SPI2 CS %sed]\n",
+				(val & 8) ? "rais" : "lower");
+		piratespi_cs(pspi, val & 8);
+	}
+	pspi_cs = val & 8;
+	if ((val & 0x0C) == 0x00)
+		fprintf(stderr, "[Error SPI contention.]\n");
 	sysio = val;
 	/* We don't have anything on the second emulated SPI nor on the
 	   I2C */
@@ -519,8 +540,9 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
-	else if (addr == 0x0C && rtc) {
-		rtc_write(rtc, val);
+	else if (addr == 0x0C) {
+		if (rtc)
+			rtc_write(rtc, val);
 		sysio_write(val);
 	} else if (banked && addr >= 0x78 && addr < 0x7C) {
 		bankreg[addr & 3] = val & 0x3F;
@@ -604,7 +626,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-z180: [-a] [-b] [-f] [-i idepath] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-z180: [-a] [-b] [-f] [-i idepath] [-P buspirate] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -617,13 +639,14 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	char *idepath = NULL;
 	char *patha = NULL, *pathb = NULL;
+	char *piratepath = NULL;
 	int input = 0;
 
 	uint8_t *p = ramrom;
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1acd:fF:i:I:lr:sRS:Twzb")) != -1) {
+	while ((opt = getopt(argc, argv, "1acd:fF:i:I:lr:sP:RS:Twzb")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -647,6 +670,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'P':
+			piratepath = optarg;
 			break;
 		case 'R':
 			rtc = rtc_create();
@@ -797,6 +823,9 @@ int main(int argc, char *argv[])
 	fdc_setdrive(fdc, 0, drive_a);
 	fdc_setdrive(fdc, 1, drive_b);
 
+	if (piratepath)
+		pspi = piratespi_create(piratepath);
+
 	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
@@ -823,6 +852,12 @@ int main(int argc, char *argv[])
 	cpu_z180.memRead = mem_read;
 	cpu_z180.memWrite = mem_write;
 	cpu_z180.trace = rc2014_trace;
+
+	/* We don't have a GPIO control pin on the SC126, but we do have
+	   devices that need to be wired to \RESET so emulate that with
+	   the ALT pin. */
+	piratespi_alt(spi, 0);
+	piratespi_alt(spi, 1);
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
@@ -881,5 +916,7 @@ int main(int argc, char *argv[])
 	fdc_destroy(&fdc);
 	fd_destroy(&drive_a);
 	fd_destroy(&drive_b);
+	if (pspi)
+		piratespi_free(pspi);
 	exit(0);
 }

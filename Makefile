@@ -97,8 +97,8 @@ rc2014-z280: rc2014-z280.o ide.o libz280/libz80.o
 rc2014-z8: rc2014-z8.o z8.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rc2014-z8.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z8.o -o rc2014-z8
 
-rc2014-z180:	rc2014-z180.o rc2014_noui.o z180_io.o 16x50.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o zxkey_none.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 rc2014-z180.o rc2014_noui.o z180_io.o zxkey_none.o 16x50.o acia.o ide.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o rc2014-z180
+rc2014-z180:	rc2014-z180.o rc2014_noui.o z180_io.o 16x50.o acia.o ide.o ppide.o piratespi.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o zxkey_none.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 rc2014-z180.o rc2014_noui.o z180_io.o zxkey_none.o 16x50.o acia.o ide.o piratespi.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o rc2014-z180
 
 smallz80: smallz80.o ide.o libz80/libz80.o
 	cc -g3 smallz80.o ide.o libz80/libz80.o -o smallz80
