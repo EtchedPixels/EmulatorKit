@@ -856,8 +856,8 @@ int main(int argc, char *argv[])
 	/* We don't have a GPIO control pin on the SC126, but we do have
 	   devices that need to be wired to \RESET so emulate that with
 	   the ALT pin. */
-	piratespi_alt(spi, 0);
-	piratespi_alt(spi, 1);
+	piratespi_alt(pspi, 0);
+	piratespi_alt(pspi, 1);
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
