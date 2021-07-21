@@ -208,6 +208,7 @@ nic_w5100_debug( const char *format, ... )
     va_start( ap, format );
     vprintf( format, ap );
     va_end( ap );
+    fflush(stdout);
   }
 }
 
@@ -216,6 +217,7 @@ nic_w5100_vdebug( const char *format, va_list ap )
 {
   if( W5100_DEBUG ) {
     vprintf( format, ap );
+    fflush(stdout);
   }
 }
 
@@ -574,6 +576,10 @@ nic_w5100_socket_read( nic_w5100_t *self, uint16_t reg )
     case W5100_SOCKET_IR:
       b = socket->ir;
       nic_w5100_debug( "w5100: reading 0x%02x from S%d_IR\n", b, socket->id );
+      break;
+    case W5100_SOCKET_CR:
+      b = 0;	/* All commands finish instantly */
+      nic_w5100_debug( "w5100: reading 0x%02x from S%d_CR\n", b, socket->id );
       break;
     case W5100_SOCKET_SR:
       b = socket->state;
