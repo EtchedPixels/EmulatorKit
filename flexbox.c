@@ -2,8 +2,8 @@
  *	A very primitive platform to run Flex 6800 on for hacking around
  *	6800 CPU
  *	ACIA
- *	WD17xx floppy disk (double sided 5.25")
- *	IDE at $FE10-$FE17 no high or control access (mirrored at $FE90-97)
+ *	WD17xx floppy disk (double sided 5.25") and DC4 controls
+ *	IDE at $8000
  *	Simple memory
  */
 
@@ -24,8 +24,7 @@
 static uint8_t ramrom[65536];
 static uint8_t fast = 0;
 
-/* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
-   rate and get 115200 baud - which is pushing it admittedly! */
+/* The CPU runs at CLK/4 */
 static uint16_t clockrate = 364 / 4;
 
 static volatile int done;
@@ -474,7 +473,7 @@ static void exit_cleanup(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"flexbox: [-b] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
+		"flexbox: [-i idepath] [-f] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
