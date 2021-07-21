@@ -5,7 +5,7 @@ all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 	rc2014-65c816 rc2014-6800 rc2014-68008 rc2014-6809 rc2014-68hc11 \
 	rc2014-80c188 rc2014-8085 rc2014-z8 rc2014-z180 rbcv2 searle linc80 \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
-	s100-z80
+	s100-z80 scelbi
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -141,6 +141,9 @@ s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 
 mini11: mini11.o 68hc11.o sdcard.o
 	cc -g3 mini11.o sdcard.o 68hc11.o -o mini11
+
+scelbi: scelbi.o i8008.o
+	cc -g3 scelbi.o i8008.o -o scelbi
 
 68hc11.o: 6800.c
 
