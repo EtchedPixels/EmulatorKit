@@ -35,8 +35,15 @@
 #include <time.h>
 
 #include "i8008.h"
+#include "dgvideo.h"
+#include "dgvideo_render.h"
+#include "asciikbd.h"
 
 static struct i8008 *cpu;
+static struct dgvideo *dgvideo;
+static struct dgvideo_renderer *dgrender;
+static struct asciikbd *kbd;
+
 static uint8_t memory[16384];
 static uint8_t memflags[64];	/* Which pages can be read or written */
 #define MF_READ		1
@@ -105,6 +112,14 @@ void io_write(struct i8008 *cpu, uint8_t port, uint8_t val)
 	static int serop = 0;
 	static uint8_t serbyte = 0;
 
+	if (port == 014) {
+		asciikbd_ack(kbd);
+		return;
+	}
+	if (port == 017) {
+		dgvideo_write(dgvideo, val);
+		return;
+	}
 	if (port != 016) {
 		fprintf(stderr, "Port %o = %o\n", port,
 			(unsigned int) val);
@@ -137,6 +152,14 @@ uint8_t io_read(struct i8008 *cpu, uint8_t port)
 	static uint8_t serbyte = 0;
 	uint8_t v;
 
+	if (port == 4) {
+		if (asciikbd_ready(kbd)) {
+			v = asciikbd_read(kbd) | 0x80;
+			printf("kbd 0x%02x\n", v);
+			return v;
+		}
+		return 0;
+	}
 	if (port != 5) {
 		fprintf(stderr, "Port %o read\n", port);
 		return 0377;
@@ -286,6 +309,7 @@ static void run_system(void)
 	   Note that the 8008 starts halted */
 /* 5ms - it's a balance between nice behaviour and simulation
    smoothness */
+	signal(SIGINT, intr);
 	tc.tv_sec = 0;
 	tc.tv_nsec = 5000000L;
 
@@ -294,10 +318,13 @@ static void run_system(void)
 	i8008_trace(cpu, 0);
 	while (1) {
 		i8008_execute(cpu, 2500);	/* 500Khz */
+		dgvideo_render(dgrender);
+		asciikbd_event(kbd);
 		nanosleep(&tc, NULL);
 		if (i8008_halted(cpu)) {
 			tcsetattr(0, TCSADRAIN, &saved_term);
 			do {
+				dgvideo_render(dgrender);
 				machine_halted();
 			} while (i8008_halted(cpu));
 			tcsetattr(0, TCSADRAIN, &term);
@@ -343,13 +370,11 @@ int main(int argc, char *argv[])
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
 		atexit(exit_cleanup);
-		signal(SIGINT, cleanup);
 		signal(SIGQUIT, cleanup);
 		signal(SIGPIPE, cleanup);
 		term.c_lflag &= ~(ICANON | ECHO);
 		term.c_cc[VMIN] = 0;
 		term.c_cc[VTIME] = 0;
-		term.c_cc[VINTR] = 0;
 		term.c_cc[VSUSP] = 0;
 		term.c_cc[VSTOP] = 0;
 		tcsetattr(0, TCSADRAIN, &term);
@@ -393,6 +418,10 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+	dgvideo = dgvideo_create();
+	dgrender = dgvideo_renderer_create(dgvideo);
+	kbd = asciikbd_create();
+
 	/* Memory enables */
 	for (i = 0; i < 4 * memsize; i++)
 		memflags[i] = MF_READ | MF_WRITE;
@@ -422,7 +451,6 @@ int main(int argc, char *argv[])
 		for (i = 4 * 14; i < 4 * 16; i++)
 			memflags[i] = MF_READ;
 	}
-	signal(SIGINT, intr);
 	run_system();
 	exit(0);
 }

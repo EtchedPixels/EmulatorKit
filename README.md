@@ -21,6 +21,7 @@ RC2014 and Fuzix.
 - 6803
 - 6809 (vecX)
 - 68HC11 - I/O model is very basic
+- 8008
 - 8085 - Extended from Mike Chambers 8080 emulation
 - 8086 (from Hampa Hug's pcem)
 - Z8 - initial model
@@ -92,6 +93,7 @@ RC2014 and Fuzix.
 - Retrobrew Mark-IV
 - SBC 2G
 - Simple80
+- Scelbi
 - Small Z80
 - Tiny68K
 - TinyZ80
