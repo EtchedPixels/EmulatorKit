@@ -43,6 +43,7 @@ void tms9918a_render(struct tms9918a_renderer *render)
 
 void tms9918a_renderer_free(struct tms9918a_renderer *render)
 {
+    free(render);
 }
 
 

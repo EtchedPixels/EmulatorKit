@@ -46,14 +46,6 @@ struct tms9918a_renderer {
 void tms9918a_render(struct tms9918a_renderer *render)
 {
     SDL_Rect sr;
-    SDL_Event event;
-
-    /* We need a nicer way to do this once we start doing more graphical
-       and UI emulation stuff - this needs to live somewhere more sensible */
-    if (SDL_PollEvent(&event)) {
-        if (event.type == SDL_QUIT)
-            exit(0);
-    }
 
     sr.x = 0;
     sr.y = 0;
@@ -69,6 +61,7 @@ void tms9918a_renderer_free(struct tms9918a_renderer *render)
 {
     if (render->texture)
         SDL_DestroyTexture(render->texture);
+    free(render);
 }
 
 
