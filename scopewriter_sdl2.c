@@ -4,43 +4,43 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
-#include "dgvideo.h"
-#include "dgvideo_render.h"
+#include "scopewriter.h"
+#include "scopewriter_render.h"
 
 extern int sdl_live;
 
-struct dgvideo_renderer {
-    struct dgvideo *dg;
+struct scopewriter_renderer {
+    struct scopewriter *sw;
     SDL_Renderer *render;
     SDL_Texture *texture;
     SDL_Window *window;
 };
 
-void dgvideo_render(struct dgvideo_renderer *render)
+void scopewriter_render(struct scopewriter_renderer *render)
 {
     SDL_Rect sr;
 
     sr.x = 0;
     sr.y = 0;
     sr.w = 256;
-    sr.h = 128;
+    sr.h = 32;
 
-    SDL_UpdateTexture(render->texture, NULL, dgvideo_get_raster(render->dg), 1024);
+    SDL_UpdateTexture(render->texture, NULL, scopewriter_get_raster(render->sw), 1024);
     SDL_RenderClear(render->render);
     SDL_RenderCopy(render->render, render->texture, NULL, &sr);
     SDL_RenderPresent(render->render);
 }
 
-void dgvideo_renderer_free(struct dgvideo_renderer *render)
+void scopewriter_renderer_free(struct scopewriter_renderer *render)
 {
     if (render->texture)
         SDL_DestroyTexture(render->texture);
     free(render);
 }
 
-struct dgvideo_renderer *dgvideo_renderer_create(struct dgvideo *dg)
+struct scopewriter_renderer *scopewriter_renderer_create(struct scopewriter *sw)
 {
-    struct dgvideo_renderer *render;
+    struct scopewriter_renderer *render;
 
     /* We will need a nicer way to do this once we have multiple SDL using
        devices */
@@ -53,17 +53,17 @@ struct dgvideo_renderer *dgvideo_renderer_create(struct dgvideo *dg)
         atexit(SDL_Quit);
     }
 
-    render = malloc(sizeof(struct dgvideo_renderer));
+    render = malloc(sizeof(struct scopewriter_renderer));
     if (render == NULL) {
         fprintf(stderr, "Out of memory.\n");
         exit(1);
     }
-    memset(render, 0, sizeof(struct dgvideo_renderer));
-    render->dg = dg;
-    render->window = SDL_CreateWindow("DGVideo",
+    memset(render, 0, sizeof(struct scopewriter_renderer));
+    render->sw = sw;
+    render->window = SDL_CreateWindow("Scopewriter",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
-        768, 384,
+        768, 96,
         SDL_WINDOW_RESIZABLE);
     if (render->window == NULL) {
         fprintf(stderr, "Unable to create window: %s.\n", SDL_GetError());
@@ -75,12 +75,12 @@ struct dgvideo_renderer *dgvideo_renderer_create(struct dgvideo *dg)
         exit(1);
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-    SDL_RenderSetLogicalSize(render->render, 256, 128);
+    SDL_RenderSetLogicalSize(render->render, 256, 32);
 
     render->texture = SDL_CreateTexture(render->render,
                         SDL_PIXELFORMAT_ARGB8888,
                         SDL_TEXTUREACCESS_STREAMING,
-                        256, 128);
+                        256, 32);
     if (render->render == NULL) {
         fprintf(stderr, "Unable to create renderer: %s.\n", SDL_GetError());
         exit(1);

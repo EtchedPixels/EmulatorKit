@@ -142,11 +142,11 @@ s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 mini11: mini11.o 68hc11.o sdcard.o
 	cc -g3 mini11.o sdcard.o 68hc11.o -o mini11
 
-scelbi: scelbi.o i8008.o dgvideo.o dgvideo_norender.o asciikbd_none.o
-	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_norender.o asciikbd_none.o -o scelbi
+scelbi: scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o
+	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o -o scelbi
 
-scelbi_sdl2: scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o asciikbd_sdl2.o
-	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o asciikbd_sdl2.o -o scelbi_sdl2 -lSDL2
+scelbi_sdl2: scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o
+	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o -o scelbi_sdl2 -lSDL2
 
 
 68hc11.o: 6800.c

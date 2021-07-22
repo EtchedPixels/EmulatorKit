@@ -37,11 +37,17 @@
 #include "i8008.h"
 #include "dgvideo.h"
 #include "dgvideo_render.h"
+#include "scopewriter.h"
+#include "scopewriter_render.h"
 #include "asciikbd.h"
+
+int sdl_live;
 
 static struct i8008 *cpu;
 static struct dgvideo *dgvideo;
 static struct dgvideo_renderer *dgrender;
+static struct scopewriter *sw;
+static struct scopewriter_renderer *swrender;
 static struct asciikbd *kbd;
 
 static uint8_t memory[16384];
@@ -116,9 +122,35 @@ void io_write(struct i8008 *cpu, uint8_t port, uint8_t val)
 		asciikbd_ack(kbd);
 		return;
 	}
+	if (port == 010) {
+		if (sw) {
+			scopewriter_switches(sw, SW_RD, val & 1);
+			return;
+		}
+	}
+	if (port == 011) {
+		if (sw) {
+			scopewriter_switches(sw, SW_LOAD, val & 1);
+			return;
+		}
+	}
+	if (port == 012) {
+		if (sw) {
+			scopewriter_switches(sw, SW_PB, val & 1);
+			return;
+		}
+	}
+	if (port == 013) {
+		if (sw) {
+			scopewriter_write(sw, val);
+			return;
+		}
+	}
 	if (port == 017) {
-		dgvideo_write(dgvideo, val);
-		return;
+		if (dgvideo) {
+			dgvideo_write(dgvideo, val);
+			return;
+		}
 	}
 	if (port != 016) {
 		fprintf(stderr, "Port %o = %o\n", port,
@@ -215,7 +247,7 @@ static void machine_halted(void)
 		return;
 	}
 	if (*buf == 'b') {
-		if (sscanf(buf, "b%ho", &breakpt) == 0) {
+		if (sscanf(buf, "b %ho", &breakpt) == 0) {
 			i8008_breakpoint(cpu, 0xFFFF);
 			printf("cleared.\n");
 		} else {
@@ -227,14 +259,14 @@ static void machine_halted(void)
 	if (*buf == 'i') {
 		uint8_t jambuf[3];
 		int len =
-		    sscanf(buf, "i%hho %hho %hho", jambuf, jambuf + 1,
+		    sscanf(buf, "i %hho %hho %hho", jambuf, jambuf + 1,
 			   jambuf + 2);
 		i8008_stuff(cpu, jambuf, len);
 		return;
 	}
 	if (*buf == 'w') {
 		unsigned int v, d;
-		if (sscanf(buf, "w%u,%o", &v, &d) == 2) {
+		if (sscanf(buf, "w %o,%o", &v, &d) == 2) {
 			mem_write(cpu, v, d);
 		} else {
 			printf("w?\n");
@@ -243,7 +275,7 @@ static void machine_halted(void)
 	}
 	if (*buf == 'g') {
 		unsigned int v, d;
-		if (sscanf(buf, "g%o,%o", &v, &d) == 2) {
+		if (sscanf(buf, "g %o,%o", &v, &d) == 2) {
 			int i = 0;
 			for (i = 0; i < d; i++) {
 				printf("%o(%d) %o(%d)\n", v + i, v + i,
@@ -259,7 +291,7 @@ static void machine_halted(void)
 	}
 	if (*buf == 'x') {
 		uint16_t addr;
-		if (sscanf(buf, "x%ho", &addr) == 1) {
+		if (sscanf(buf, "x %ho", &addr) == 1) {
 			uint8_t buf[3];
 			buf[0] = 0104;
 			buf[1] = addr & 0xFF;
@@ -318,13 +350,19 @@ static void run_system(void)
 	i8008_trace(cpu, 0);
 	while (1) {
 		i8008_execute(cpu, 2500);	/* 500Khz */
-		dgvideo_render(dgrender);
+		if (dgrender)
+			dgvideo_render(dgrender);
+		if (swrender)
+			scopewriter_render(swrender);
 		asciikbd_event(kbd);
 		nanosleep(&tc, NULL);
 		if (i8008_halted(cpu)) {
 			tcsetattr(0, TCSADRAIN, &saved_term);
 			do {
-				dgvideo_render(dgrender);
+				if (dgrender)
+					dgvideo_render(dgrender);
+				if (swrender)
+					scopewriter_render(swrender);
 				machine_halted();
 			} while (i8008_halted(cpu));
 			tcsetattr(0, TCSADRAIN, &term);
@@ -352,7 +390,7 @@ static void exit_cleanup(void)
 void usage(void)
 {
 	fprintf(stderr,
-		"scelbi [-f] [-m kb] [-l load] [-b loadbase] [-r rom]\n");
+		"scelbi [-f] [-m kb] [-l load] [-b loadbase] [-r rom] [-v] [-s]\n");
 	exit(1);
 }
 
@@ -366,6 +404,7 @@ int main(int argc, char *argv[])
 	uint16_t base;
 	const char *loadpath = NULL;
 	const char *rompath = NULL;
+	unsigned int has_sw = 0, has_dg = 0;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -380,7 +419,7 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	while ((opt = getopt(argc, argv, "fl:m:r:b:")) != -1) {
+	while ((opt = getopt(argc, argv, "fl:m:r:b:sv")) != -1) {
 		switch (opt) {
 		case 'f':
 			fast = 1;
@@ -411,6 +450,12 @@ int main(int argc, char *argv[])
 		case 'r':
 			rompath = optarg;
 			break;
+		case 's':
+			has_sw = 1;
+			break;
+		case 'v':
+			has_dg = 1;
+			break;
 		default:
 			usage();
 		}
@@ -418,8 +463,14 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	dgvideo = dgvideo_create();
-	dgrender = dgvideo_renderer_create(dgvideo);
+	if (has_dg) {
+		dgvideo = dgvideo_create();
+		dgrender = dgvideo_renderer_create(dgvideo);
+	}
+	if (has_sw) {
+		sw = scopewriter_create();
+		swrender = scopewriter_renderer_create(sw);
+	}
 	kbd = asciikbd_create();
 
 	/* Memory enables */
@@ -434,22 +485,23 @@ int main(int argc, char *argv[])
 		}
 		p = fread(memory + base, 1, sizeof(memory) - base, f);
 		fclose(f);
-		printf("[Loaded %d bytes at %o from %s.]\n", p, base,
+		printf("[Loaded %d bytes at %o-%o from %s.]\n", p, base, base + p - 1,
 		       loadpath);
 	}
 	if (rompath) {
-		/* Emulate a 2K EPROM in the top space */
+		uint16_t l = 14336;
+		/* Emulate a 256 byte or 2K EPROM in the top space */
 		f = fopen(rompath, "r");
 		if (f == NULL) {
 			perror(rompath);
 			exit(1);
 		}
-		p = fread(memory + 14336, 1, 2048, f);
+		p = fread(memory + l, 1, 2048, f);
 		fclose(f);
-		printf("[Loaded %d bytes at %o from %s.]\n", p, 14336,
-		       rompath);
 		for (i = 4 * 14; i < 4 * 16; i++)
 			memflags[i] = MF_READ;
+		printf("[Loaded %d bytes at %o from %s.]\n", p, 14336,
+		       rompath);
 	}
 	run_system();
 	exit(0);

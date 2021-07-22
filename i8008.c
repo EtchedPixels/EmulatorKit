@@ -88,7 +88,6 @@ static uint8_t fetch(struct i8008 *cpu)
 	uint8_t r;
 
 	if (cpu->ins_jpos != -1) {
-		printf("jpos %d, jlen %d\n", cpu->ins_jpos, cpu->ins_jlen);
 		r = cpu->ins_jammed[cpu->ins_jpos++];
 		tprintf("Jam->");
 		if (cpu->ins_jpos >= cpu->ins_jlen)
@@ -137,6 +136,7 @@ static void jumpcall(struct i8008 *cpu, uint8_t op)
 
 	newpc = fetch(cpu);
 	newpc |= fetch(cpu) << 8;
+	newpc &= 0x3FFF;
 	if ((op & 004) || condition(cpu, op >> 3)) {
 		if (op & 002) {
 			cpu->cycle_count += 2;
