@@ -267,7 +267,7 @@ static const uint8_t dg_font[] = {
 
 struct dgvideo {
     uint8_t ptr;
-    uint8_t mem[128];	/* 6bit wide */
+    uint8_t mem[256];	/* 6bit wide */
     uint8_t last;
     uint32_t raster[128 * 256];
 };
@@ -299,31 +299,79 @@ static void dg_raster(struct dgvideo *dg, unsigned int byte)
 /* Write only device */
 void dgvideo_write(struct dgvideo *dg, uint8_t val)
 {
-    if (val == 0xFF)
-        dg->ptr = 0;
-    /* Bit 6 goes low to high */
-    if ((dg->last ^ val) & val & 0x80) {
+    dg->mem[dg->ptr] = val & 0x7F; 
+    if (val == 0xFF) {
+        dg->ptr = 0xFF;
+    }
+    if (!((dg->last ^ val) & val & 0x80)) {
+    	/* Bit 6 high to lowclocked ptr */
         dg->ptr++;
     }
     dg->last = val;    
-    dg->mem[dg->ptr] = val & 0x7F; 
-    dg_raster(dg, dg->ptr);
+}
+
+/* For now this is wildly approximate but it looks good */
+void dgvideo_noise(struct dgvideo *dg, unsigned int cycles, uint8_t val)
+{
+    /* There are 10000 cycles per half video frame  (interlanced)
+       There are 262.5 lines per frame (NTSC) and there are
+       38 machine clocks per scan line. Roughly speaking we need to divide
+       the 38 machine clocks into 64us, the first 6.2 and last 4.5 of which
+       are skipped and vertically on lines 1-21 or so */
+    unsigned int line = cycles / 38;
+    unsigned int p;
+    unsigned int x;
+    uint8_t byte;
+    uint32_t *rp;
+    if (line < 20)
+    	return;
+    printf("cycle %d line %d\n", cycles, line);
+    cycles -= 21 * 38;
+    cycles %= 38;
+    if (cycles < 3 || cycles >= 35)
+    	return;
+    cycles -= 3;
+    line -= 20;
+    /* We have 242 lines but only 128 we care about */
+    if (line < 57)
+    	return;
+    line -= 57;
+    if (line > 127)
+    	return;
+
+    /* Now it's a horizontal byte for that line */
+    for (p = 0; p < 1; p++) {
+	    rp = dg->raster + 256 * line + 8 * cycles;
+	    byte = val;
+	    for (x = 0; x < 8; x++) { 
+		if (byte & 0x80)
+		    *rp++ = 0xFFAAAAAA;
+		else
+		    *rp++ = 0xFF222222;
+		byte <<= 1;
+	    }
+	    cycles++;
+    }
+}
+
+void dgvideo_rasterize(struct dgvideo *dg)
+{
+    unsigned int i;
+    for (i = 0; i < 256; i++) {
+        dg_raster(dg, i);
+    }
 }
 
 struct dgvideo *dgvideo_create(void)
 {
     struct dgvideo *dg = malloc(sizeof(struct dgvideo));
-    unsigned int i;
-
     if (dg == NULL) {
         fprintf(stderr, "Out of memory.\n");
         exit(1);
     }
     dg->ptr = 0;
-    memset(dg->raster, 0x99, sizeof(dg->raster));
-    for (i = 0; i <= 255; i++) {
-        dg_raster(dg, i);
-    }
+    memset(dg->mem, 'A', 256);
+    dgvideo_rasterize(dg);
     return dg;
 }
 
@@ -336,3 +384,4 @@ uint32_t *dgvideo_get_raster(struct dgvideo *dg)
 {
     return dg->raster;
 }
+

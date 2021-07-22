@@ -50,6 +50,9 @@ static struct scopewriter *sw;
 static struct scopewriter_renderer *swrender;
 static struct asciikbd *kbd;
 
+/* We need this outside the main loop for noise emulation */
+static unsigned int cycle = 0;
+
 static uint8_t memory[16384];
 static uint8_t memflags[64];	/* Which pages can be read or written */
 #define MF_READ		1
@@ -149,6 +152,7 @@ void io_write(struct i8008 *cpu, uint8_t port, uint8_t val)
 	if (port == 017) {
 		if (dgvideo) {
 			dgvideo_write(dgvideo, val);
+			dgvideo_noise(dgvideo, cycle * 2500 + i8008_get_cycles(cpu), val);
 			return;
 		}
 	}
@@ -350,10 +354,18 @@ static void run_system(void)
 	i8008_trace(cpu, 0);
 	while (1) {
 		i8008_execute(cpu, 2500);	/* 500Khz */
-		if (dgrender)
-			dgvideo_render(dgrender);
-		if (swrender)
-			scopewriter_render(swrender);
+		cycle++;
+		/* We do the video rendering every 20ms (50Hz) and the
+		   rest of our cycle runs faster so things like window
+		   resizing are not laggy */
+		if ((cycle & 3) == 3) {
+			cycle = 0;
+			if (dgrender)
+				dgvideo_render(dgrender);
+			if (swrender)
+				scopewriter_render(swrender);
+			dgvideo_rasterize(dgvideo);
+		}
 		asciikbd_event(kbd);
 		nanosleep(&tc, NULL);
 		if (i8008_halted(cpu)) {

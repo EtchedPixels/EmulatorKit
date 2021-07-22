@@ -13,6 +13,7 @@ extern void i8008_breakpoint(struct i8008 *cpu, uint16_t addr);
 extern void i8008_singlestep(struct i8008 *cpu, unsigned int onoff);
 extern void i8008_halt(struct i8008 *cpu, unsigned int onoff);
 extern unsigned int i8008_execute(struct i8008 *cpu, unsigned int tstates);
+extern unsigned int i8008_get_cycles(struct i8008 *cpu);
 
 /* Platform provided */
 

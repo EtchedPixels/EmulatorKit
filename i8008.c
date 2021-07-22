@@ -518,6 +518,11 @@ void i8008_trace(struct i8008 *cpu, unsigned int trace)
 	cpu->trace = trace;
 }
 
+unsigned int i8008_get_cycles(struct i8008 *cpu)
+{
+	return cpu->cycle_count;
+}
+
 static void what_changed(struct i8008 *cpu)
 {
 	static int snap = 0;
