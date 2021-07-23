@@ -97,7 +97,7 @@ static void rtcop(struct rtc *rtc)
 	/* The emulated task asked us to write a byte, and has now provided
 	   the data byte to go with it */
 	if (rtc->state == 2) {
-		if (!rtc->wp) {
+		if ((!rtc->wp) || (rtc->reg == 7)) {
 			if (rtc->trace)
 				fprintf(stderr, "RTC write %d as %d\n", rtc->reg, rtc->w);
 			/* We did a real write! */
@@ -111,6 +111,7 @@ static void rtcop(struct rtc *rtc)
 		}
 		/* For now don't emulate writes to the time */
 		rtc->state = 0;
+		return;
 	}
 	/* Check for broken requests */
 	if (!(rtc->w & 0x80)) {
@@ -189,7 +190,7 @@ void rtc_write(struct rtc *rtc, uint8_t val)
 			rtc->cnt++;
 			if (rtc->trace)
 				fprintf(stderr, "rtc->w now %02x (%d)\n", rtc->w, rtc->cnt);
-			if (rtc->cnt == 8 && !is_read)
+			if (!(rtc->cnt % 8) && !is_read)
 				rtcop(rtc);
 		}
 	}
