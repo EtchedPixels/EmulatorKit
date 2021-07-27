@@ -28,6 +28,8 @@ enum {
 	IRQ_CWAI	= 2
 };
 
+static int trace_cpu;
+
 /* index registers */
 
 static unsigned reg_x;
@@ -243,6 +245,9 @@ static einline unsigned pc_read8 (void)
 
 	data = read8 (reg_pc);
 	reg_pc++;
+
+	if (trace_cpu)
+		fprintf(stderr, "%02X ", data);
 
 	return data;
 }
@@ -1103,8 +1108,10 @@ static einline void inst_tfr (void)
 
 /* reset the 6809 */
 
-void e6809_reset (void)
+void e6809_reset (int trace)
 {
+	trace_cpu = trace;
+
 	reg_x = 0;
 	reg_y = 0;
 	reg_u = 0;
@@ -1142,6 +1149,8 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 			reg_pc = read16 (0xfff6);
 			irq_status = IRQ_NORMAL;
 			cycles += 7;
+			if (trace_cpu)
+				fprintf(stderr, "\nF Interrupt\n");
 		} else {
 			if (irq_status == IRQ_SYNC) {
 				irq_status = IRQ_NORMAL;
@@ -1161,6 +1170,8 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 			reg_pc = read16 (0xfff8);
 			irq_status = IRQ_NORMAL;
 			cycles += 7;
+			if (trace_cpu)
+				fprintf(stderr, "\nI Interrupt\n");
 		} else {
 			if (irq_status == IRQ_SYNC) {
 				irq_status = IRQ_NORMAL;
@@ -1172,6 +1183,8 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		return cycles + 1;
 	}
 
+	if (trace_cpu)
+		fprintf(stderr, "\n%04X: ", reg_pc);
 	op = pc_read8 ();
 
 	switch (op) {
