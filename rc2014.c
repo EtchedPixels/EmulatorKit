@@ -2154,7 +2154,7 @@ static uint8_t io_read_2014(uint16_t addr)
 	addr &= 0xFF;
 	if (addr >= 0x48 && addr < 0x50) 
 		return fdc_read(addr & 7);
-	if ((addr == 0x50 || addr == 0x51) && amd9511)
+	if ((addr == 0x42 || addr == 0x43) && amd9511)
 		return amd9511_read(amd9511, addr);
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		return acia_read(acia, addr & 1);
@@ -2208,7 +2208,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	addr &= 0xFF;
 	if (addr >= 0x48 && addr < 0x50)
 		fdc_write(addr & 7, val);
-	else if ((addr == 0x50 || addr == 0x51) && amd9511)
+	else if ((addr == 0x42 || addr == 0x43) && amd9511)
 		amd9511_write(amd9511, addr, val);
 	else if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		acia_write(acia, addr & 1, val);
