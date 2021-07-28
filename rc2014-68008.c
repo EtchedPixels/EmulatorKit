@@ -404,7 +404,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-68008: [-1] [-A] [-a] [-b] [-f] [-R] [-r rompath] [-i disk] [-p disk] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-68008: [-1] [-A] [-a] [-b] [-f] [-R] [-r rompath] [-i disk] [-I disk] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -419,7 +419,7 @@ int main(int argc, char *argv[])
 	int has_acia = 0;
 	int has_16550a = 0;
 
-	while ((opt = getopt(argc, argv, "1Aabd:fi:r:p:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aabd:fi:r:I:Rw")) != -1) {
 		switch (opt) {
 		case '1':
 			has_16550a = 1;
@@ -443,7 +443,7 @@ int main(int argc, char *argv[])
 			ppi = 0;
 			idepath = optarg;
 			break;
-		case 'p':
+		case 'I':
 			ppi = 1;
 			ide = 0;
 			idepath = optarg;
