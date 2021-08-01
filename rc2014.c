@@ -76,21 +76,24 @@ static uint32_t romsize = 65536;
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
-static uint8_t have_ctc = 0;
-static uint8_t have_pio = 0;
-static uint8_t have_ps2 = 0;
+static uint8_t have_ctc;
+static uint8_t have_pio;
+static uint8_t have_ps2;
+static uint8_t have_kio;
+static uint8_t have_wiznet;
+static uint8_t have_cpld_serial;
+static uint8_t have_im2;
+static uint8_t have_16x50;
+static uint8_t have_copro;
+static uint8_t have_tms;
+
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
 static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
-static uint8_t wiznet = 0;
-static uint8_t cpld_serial = 0;
-static uint8_t has_im2;
-static uint8_t has_16x50;
-static uint8_t has_copro;
-static uint8_t has_tms;
 static uint8_t is_z512;
 static uint8_t z512_control = 0;
+
 static struct ppide *ppide;
 static struct sdcard *sdcard;
 static struct z80copro *copro;
@@ -1985,6 +1988,30 @@ static void z84c15_write(uint8_t port, uint8_t val)
 	}
 }
 
+/* Z84C90 KIO. The CTC, PIO and SIO bundled together with some other bits */
+static uint8_t kio_read(uint8_t addr)
+{
+	if (addr < 0x04)
+		return pio_read(addr & 3);
+	if (addr < 0x08)
+		return ctc_read(addr & 3);
+	if (addr < 0x0C)
+		return sio2_read((addr & 3) ^ 1);
+	/* PIA and KIO control - TODO */
+	return 0xFF;
+}
+
+static void kio_write(uint8_t addr, uint8_t val)
+{
+	if (addr < 0x04)
+		pio_write(addr & 3, val);
+	else if (addr < 0x08)
+		ctc_write(addr & 3, val);
+	else if (addr < 0x0C)
+		sio2_write((addr & 3) ^ 1, val);
+	/* PIA and KIO control - TODO */
+}
+
 static void fdc_log(int debuglevel, char *fmt, va_list ap)
 {
 	if ((trace & TRACE_FDC) || debuglevel == 0)
@@ -2152,6 +2179,9 @@ static uint8_t io_read_2014(uint16_t addr)
 		return zxkey_scan(zxkey, addr);
 
 	addr &= 0xFF;
+
+	if (addr >= 0x80 && addr <= 0x9F && have_kio)
+		return kio_read(addr & 0x1F);
 	if (addr >= 0x48 && addr < 0x50) 
 		return fdc_read(addr & 7);
 	if ((addr == 0x42 || addr == 0x43) && amd9511)
@@ -2162,16 +2192,17 @@ static uint8_t io_read_2014(uint16_t addr)
 		return acia_read(acia, addr & 1);
 	if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		return acia_read(acia, addr & 1);
-	if ((addr >= 0x80 && addr <= 0x87) && sio2)
+	if ((addr >= 0x80 && addr <= 0x87) && sio2 && !have_kio)
 		return sio2_read(addr & 3);
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
 	if (addr >= 0x20 && addr <= 0x27 && ide == 2)
 		return ppide_read(ppide, addr & 3);
-	if (addr >= 0x28 && addr <= 0x2C && wiznet)
+	if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr >= 0x68 && addr <= 0x6F && have_pio)
 		return pio_read2(addr & 3);
+
 	if (addr == 0xBB && ps2)
 		return ps2_read();
 	if (addr == 0xC0 && rtc)
@@ -2183,7 +2214,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return ctc_read(addr & 3);
 	if ((addr == 0x98 || addr == 0x99) && vdp)
 		return tms9918a_read(vdp, addr & 1);
-	if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
+	if (addr >= 0xA0 && addr <= 0xA7 && have_16x50)
 		return uart_read(&uart[0], addr & 7);
 	if (addr == 0x6D && is_z512)
 		return z512_read(addr);
@@ -2206,7 +2237,9 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		return;
 	}
 	addr &= 0xFF;
-	if (addr >= 0x48 && addr < 0x50)
+	if (addr >= 0x80 && addr <= 0x9F && have_kio)
+		kio_write(addr & 0x1F, val);
+	else if (addr >= 0x48 && addr < 0x50)
 		fdc_write(addr & 7, val);
 	else if ((addr == 0x42 || addr == 0x43) && amd9511)
 		amd9511_write(amd9511, addr, val);
@@ -2216,13 +2249,13 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0xBF) && acia && !acia_narrow)
 		acia_write(acia, addr & 1, val);
-	else if ((addr >= 0x80 && addr <= 0x87) && sio2)
+	else if ((addr >= 0x80 && addr <= 0x87) && sio2 && !have_kio)
 		sio2_write(addr & 3, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
 	else if (addr >= 0x20 && addr <= 0x27 && ide == 2)
 		ppide_write(ppide, addr & 3, val);
-	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
+	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	else if (addr >= 0x68 && addr <= 0x6F && have_pio)
 		pio_write2(addr & 3, val);
@@ -2243,7 +2276,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		ctc_write(addr & 3, val);
 	else if ((addr == 0x98 || addr == 0x99) && vdp)
 		tms9918a_write(vdp, addr & 1, val);
-	else if (addr >= 0xA0 && addr <= 0xA7 && has_16x50)
+	else if (addr >= 0xA0 && addr <= 0xA7 && have_16x50)
 		uart_write(&uart[0], addr & 7, val);
 	else if (addr == 0x6D && is_z512)
 		z512_write(addr, val);
@@ -2273,7 +2306,7 @@ static uint8_t io_read_4(uint16_t addr)
 		return sio2_read((addr & 3) ^ 1);
 	if ((addr >= 0x10 && addr <= 0x17) && ide)
 		return my_ide_read(addr & 7);
-	if (addr >= 0x28 && addr <= 0x2C && wiznet)
+	if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0xC0 && rtc)
 		return rtc_read(rtc);
@@ -2293,7 +2326,7 @@ static void io_write_4(uint16_t addr, uint8_t val)
 		sio2_write((addr & 3) ^ 1, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide)
 		my_ide_write(addr & 7, val);
-	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
+	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
@@ -2327,7 +2360,7 @@ static uint8_t io_read_5(uint16_t addr)
 		return sio2_read((addr & 3) ^ 1);
 	if ((addr >= 0x90 && addr <= 0x97) && ide)
 		return my_ide_read(addr & 7);
-	if (addr >= 0x28 && addr <= 0x2C && wiznet)
+	if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0xC0 && rtc)
 		return rtc_read(rtc);
@@ -2351,7 +2384,7 @@ static void io_write_5(uint16_t addr, uint8_t val)
 		sio2_write((addr & 3) ^ 1, val);
 	else if ((addr >= 0x90 && addr <= 0x97) && ide)
 		my_ide_write(addr & 7, val);
-	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
+	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
@@ -2581,7 +2614,7 @@ uint8_t io_read(int unused, uint16_t addr)
 
 static void poll_irq_event(void)
 {
-	if (has_im2) {
+	if (have_im2) {
 		if (acia)
 			acia_check_irq(acia);
 		uart_check_irq(&uart[0]);
@@ -2607,7 +2640,7 @@ static void reti_event(void)
 {
 	if (live_irq && (trace & TRACE_IRQ))
 		fprintf(stderr, "RETI\n");
-	if (has_im2) {
+	if (have_im2) {
 		switch(live_irq) {
 		case IRQ_SIOA:
 			sio2_reti(sio);
@@ -2672,7 +2705,7 @@ int main(int argc, char *argv[])
 	char *idepath = NULL;
 	char *copro_rom;
 	int save = 0;
-	int has_acia = 0;
+	int have_acia = 0;
 	int indev;
 	char *patha = NULL, *pathb = NULL;
 
@@ -2680,27 +2713,28 @@ int main(int argc, char *argv[])
 #define INDEV_SIO	2
 #define INDEV_CPLD	3
 #define INDEV_16C550A	4
+#define INDEV_KIO	5
 
 	uint8_t *p = ramrom;
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:fF:i:I:m:pPr:sRS:Tuw8C:Zz")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:e:fF:i:I:km:pPr:sRS:Tuw8C:Zz")) != -1) {
 		switch (opt) {
 		case 'a':
-			has_acia = 1;
+			have_acia = 1;
 			indev = INDEV_ACIA;
 			acia_narrow = 0;
 			sio2 = 0;
 			break;
 		case 'A':
-			has_acia = 1;
+			have_acia = 1;
 			acia_narrow = 1;
 			indev = INDEV_ACIA;
 			sio2_input = 0;
 			break;
 		case '8':
-			has_acia = 1;
+			have_acia = 1;
 			acia_narrow = 2;
 			indev = INDEV_ACIA;
 			sio2 = 0;
@@ -2713,7 +2747,7 @@ int main(int argc, char *argv[])
 			sio2_input = 1;
 			indev = INDEV_SIO;
 			if (!acia_narrow)
-				has_acia = 0;
+				have_acia = 0;
 			break;
 		case 'S':
 			sdpath = optarg;
@@ -2746,8 +2780,11 @@ int main(int argc, char *argv[])
 			break;
 		case 'u':
 		case '1':
-			has_16x50 = 1;
+			have_16x50 = 1;
 			indev = INDEV_16C550A;
+			break;
+		case 'k':
+			have_kio = 1;
 			break;
 		case 'm':
 			/* Default Z80 board */
@@ -2778,11 +2815,11 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_EASYZ80;
 				switchrom = 0;
 				rom = 0;
-				has_acia = 0;
+				have_acia = 0;
 				have_ctc = 1;
 				sio2 = 1;
 				sio2_input = 1;
-				has_im2 = 1;
+				have_im2 = 1;
 				tstate_steps = 400;
 			} else if (strcmp(optarg, "sc121") == 0) {
 				switchrom = 0;
@@ -2792,16 +2829,16 @@ int main(int argc, char *argv[])
 				sio2_input = 1;
 				have_ctc = 1;
 				rom = 0;
-				has_acia = 0;
-				has_im2 = 1;
+				have_acia = 0;
+				have_im2 = 1;
 				/* FIXME: SC122 is four ports */
 			} else if (strcmp(optarg, "micro80") == 0) {
 				cpuboard = CPUBOARD_MICRO80;
 				have_ctc = 1;
 				sio2 = 1;
 				sio2_input = 1;
-				has_im2 = 1;
-				has_acia = 0;
+				have_im2 = 1;
+				have_acia = 0;
 				rom = 1;
 				switchrom = 0;
 				tstate_steps = 800;	/* 16MHz */
@@ -2817,11 +2854,11 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_TINYZ80;
 				switchrom = 0;
 				rom = 0;
-				has_acia = 0;
+				have_acia = 0;
 				have_ctc = 1;
 				sio2 = 1;
 				sio2_input = 1;
-				has_im2 = 1;
+				have_im2 = 1;
 				tstate_steps = 500;
 			} else if (strcmp(optarg, "pdog128") == 0) {
 				cpuboard = CPUBOARD_PDOG128;
@@ -2851,10 +2888,10 @@ int main(int argc, char *argv[])
 			rtc = rtc_create();
 			break;
 		case 'w':
-			wiznet = 1;
+			have_wiznet = 1;
 			break;
 		case 'C':
-			has_copro = 1;
+			have_copro = 1;
 			copro_rom = optarg;
 			break;
 		case 'F':
@@ -2874,7 +2911,7 @@ int main(int argc, char *argv[])
 			zxkey = zxkey_create();
 			break;
 		case 'T':
-			has_tms = 1;
+			have_tms = 1;
 			break;
 		case '9':
 			if (amd9511 == NULL)
@@ -2887,13 +2924,20 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+	if (have_kio) {
+		sio2 = 1;
+		have_ctc = 0;
+		have_pio = 0;
+		have_im2 = 1;
+		indev = INDEV_SIO;
+	}
 	if (cpuboard == CPUBOARD_Z80SBC64 || cpuboard == CPUBOARD_ZRCC) {
-		cpld_serial = 1;
+		have_cpld_serial = 1;
 		indev = INDEV_CPLD;
-	} else if (has_acia == 0 && sio2 == 0 && has_16x50 == 0 ) {
+	} else if (have_acia == 0 && sio2 == 0 && have_16x50 == 0 ) {
 		if (cpuboard != 3) {
 			fprintf(stderr, "rc2014: no UART selected, defaulting to 68B50\n");
-			has_acia = 1;
+			have_acia = 1;
 			indev = INDEV_ACIA;
 		}
 	}
@@ -3026,7 +3070,7 @@ int main(int argc, char *argv[])
 			sd_trace(sdcard, 1);
 	}
 
-	if (has_acia) {
+	if (have_acia) {
 		acia = acia_create();
 		if (trace & TRACE_ACIA)
 			acia_trace(acia, 1);
@@ -3039,9 +3083,9 @@ int main(int argc, char *argv[])
 		ctc_init();
 	if (have_pio)
 		pio_reset();
-	if (has_16x50)
+	if (have_16x50)
 		uart_init(&uart[0], indev == INDEV_16C550A ? 1: 0);
-	if (has_tms) {
+	if (have_tms) {
 		vdp = tms9918a_create();
 		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 		vdprend = tms9918a_renderer_create(vdp);
@@ -3051,7 +3095,7 @@ int main(int argc, char *argv[])
 		ps2_trace(ps2, trace & TRACE_PS2);
 	}
 
-	if (wiznet) {
+	if (have_wiznet) {
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
 	}
@@ -3084,7 +3128,7 @@ int main(int argc, char *argv[])
 	fdc_setdrive(fdc, 0, drive_a);
 	fdc_setdrive(fdc, 1, drive_b);
 
-	if (has_copro) {
+	if (have_copro) {
 		int eprom_fd;
 		copro = z80copro_create();
 		eprom_fd = open(copro_rom, O_RDONLY);
@@ -3170,9 +3214,9 @@ int main(int argc, char *argv[])
 				acia_timer(acia);
 			if (sio2)
 				sio2_timer();
-			if (has_16x50)
+			if (have_16x50)
 				uart_event(&uart[0]);
-			if (cpld_serial)
+			if (have_cpld_serial)
 				sbc64_cpld_timer();
 			if (have_ctc) {
 				if (cpuboard != CPUBOARD_MICRO80)
@@ -3213,7 +3257,7 @@ int main(int argc, char *argv[])
 			tms9918a_rasterize(vdp);
 			tms9918a_render(vdprend);
 		}
-		if (wiznet)
+		if (have_wiznet)
 			w5100_process(wiz);
 		/* Do 20ms of I/O and delays */
 		if (!fast)
@@ -3222,7 +3266,7 @@ int main(int argc, char *argv[])
 			/* If there is no pending Z80 vector IRQ but we think
 			   there now might be one we use the same logic as for
 			   reti */
-			if (!live_irq || !has_im2)
+			if (!live_irq || !have_im2)
 				poll_irq_event();
 			/* Clear this after because reti_event may set the
 			   flags to indicate there is more happening. We will
