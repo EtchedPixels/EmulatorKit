@@ -2663,7 +2663,7 @@ static void reti_event(void)
 			sio2_reti(sio);
 			sio2_reti(sio + 1);
 		}
-		if (have_ctc) {
+		if (have_ctc || have_kio) {
 			ctc_reti(0);
 			ctc_reti(1);
 			ctc_reti(2);
@@ -3083,6 +3083,11 @@ int main(int argc, char *argv[])
 		ctc_init();
 	if (have_pio)
 		pio_reset();
+	if (have_kio) {
+		sio_reset();
+		ctc_init();
+		pio_reset();
+	}
 	if (have_16x50)
 		uart_init(&uart[0], indev == INDEV_16C550A ? 1: 0);
 	if (have_tms) {
@@ -3218,7 +3223,7 @@ int main(int argc, char *argv[])
 				uart_event(&uart[0]);
 			if (have_cpld_serial)
 				sbc64_cpld_timer();
-			if (have_ctc) {
+			if (have_ctc || have_kio) {
 				if (cpuboard != CPUBOARD_MICRO80)
 					ctc_tick(tstate_steps);
 				else	/* Micro80 it's not off the CPU clock */
