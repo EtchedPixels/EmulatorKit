@@ -68,7 +68,7 @@ struct keymapping keytable[] = {
     { SDL_SCANCODE_A,		0x1C },
     { SDL_SCANCODE_S,		0x1B },
     { SDL_SCANCODE_D,		0x23 },
-    { SDL_SCANCODE_F,		0x28 },
+    { SDL_SCANCODE_F,		0x2B },
     { SDL_SCANCODE_G,		0x34 },
     { SDL_SCANCODE_H,		0x33 },
     { SDL_SCANCODE_J,		0x3B },
