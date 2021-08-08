@@ -1,7 +1,7 @@
 /*
  *	Platform features
  *	Z80A @ 8Mhz
- *	1MB ROM (max), 512K RAM
+ *	1MB ROM (max), 512K RAM (can also be set to 128K)
  *	16550A UART @1.8432Mhz at I/O 0x68
  *	DS1302 bitbanged RTC
  *	8255 for PPIDE etc
@@ -50,6 +50,7 @@
 static uint8_t ramrom[64][32768];	/* 512K ROM for now */
 static uint8_t rombank;
 static uint8_t rambank;
+static uint8_t ram_mask = 0x0F;		/* 16 * 32K */
 
 static uint8_t ide;
 static struct ppide *ppi0;
@@ -92,8 +93,8 @@ static uint8_t mem_read(int unused, uint16_t addr)
     if (rombank & 0x80) {
         if (trace & TRACE_MEM)
             fprintf(stderr, "LR%d %04X<-%02X\n",
-                rambank & 0x1F, addr, ramrom[32 + (rambank & 0x1F)][addr]);
-        return ramrom[32 + (rambank & 0x1F)][addr];
+                rambank, addr, ramrom[32 + (rambank)][addr]);
+        return ramrom[32 + (rambank)][addr];
     }
     if (trace & TRACE_MEM)
         fprintf(stderr, "LF%d %04X<->%02X\n",
@@ -112,8 +113,8 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
     }
     else if (rombank & 0x80) {
         if (trace & TRACE_MEM)
-            fprintf(stderr, "LR%d %04X->%02X\n", (rambank & 0x1F), addr, val);
-        ramrom[32 + (rambank & 0x1F)][addr] = val;
+            fprintf(stderr, "LR%d %04X->%02X\n", (rambank), addr, val);
+        ramrom[32 + (rambank)][addr] = val;
     } else if (trace & TRACE_MEM)
         fprintf(stderr, "LF%d %04X->ROM\n",
             (rombank & 0x1F), addr);
@@ -195,12 +196,12 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     else if (addr >= 0x78 && addr <= 0x79) {
         if (trace & TRACE_BANK)
             fprintf(stderr, "RAM bank to %02X\n", val);
-        rambank = val;
+        rambank = val & ram_mask;
     } else if (addr >= 0x7C && addr <= 0x7F) {
         if (trace & TRACE_BANK) {
             fprintf(stderr, "ROM bank to %02X\n", val);
             if (val & 0x80)
-                fprintf(stderr, "Using RAM bank %d\n", rambank & 0x1F);
+                fprintf(stderr, "Using RAM bank %d\n", rambank);
         }
         rombank = val;
     }
@@ -234,7 +235,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-    fprintf(stderr, "rcbv2: [-r rompath] [-i idepath] [-t] [-p] [-s sdcardpath] [-d tracemask] [-R]\n");
+    fprintf(stderr, "rcbv2: [-1] [-f] [-r rompath] [-i idepath] [-t] [-p] [-s sdcardpath] [-d tracemask] [-R]\n");
     exit(EXIT_FAILURE);
 }
 
@@ -250,8 +251,11 @@ int main(int argc, char *argv[])
     char *ramfpath = NULL;
     unsigned int prop = 0;
 
-    while((opt = getopt(argc, argv, "r:i:s:ptd:fR:w")) != -1) {
+    while((opt = getopt(argc, argv, "1r:i:s:ptd:fR:w")) != -1) {
         switch(opt) {
+            case '1':
+                ram_mask = 0x03;	/* 4 x 32K banks only */
+                break;
             case 'r':
                 rompath = optarg;
                 break;
