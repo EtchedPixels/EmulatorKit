@@ -54,6 +54,8 @@ static uint8_t leds;
 static uint8_t banked;
 static uint8_t bankenable;
 static uint8_t bankreg[4];
+static uint8_t mem_map = 0;
+static uint32_t ram_base = 0x80000;
 static struct ppide *ppide;
 static struct sdcard *sdcard;
 static FDC_PTR fdc;
@@ -99,6 +101,9 @@ static int trace = 0;
 
 static void reti_event(void);
 
+/*
+ *	Model the bank registers on the paged memory
+ */
 static uint32_t bank_translate(uint32_t pa)
 {
 	unsigned int bank;
@@ -110,36 +115,19 @@ static uint32_t bank_translate(uint32_t pa)
 	return pa;
 }
 
-static uint8_t do_mem_read0(uint16_t addr, int quiet)
-{
-	uint32_t pa = z180_mmu_translate(io, addr);
-	if (banked)
-		pa = bank_translate(pa);
-	if (!quiet && (trace & TRACE_MEM))
-		fprintf(stderr, "R %04X[%06X] -> %02X\n", addr, pa, ramrom[pa]);
-	return ramrom[pa];
-}
-
-static void mem_write0(uint16_t addr, uint8_t val)
-{
-	uint32_t pa = z180_mmu_translate(io, addr);
-	if (banked)
-		pa = bank_translate(pa);
-	if (pa < 0x80000) {
-		if (trace & TRACE_MEM)
-			fprintf(stderr, "W %04X[%06X] *ROM*\n",
-				addr, pa);
-		return;
-	}
-	if (trace & TRACE_MEM)
-		fprintf(stderr, "W: %04X[%06X] <- %02X\n", addr, pa, val);
-	ramrom[pa] = val;
-}
-
+/*
+ *	Model the physical bus interface including wrapping and
+ *	the like. This is used directly by the DMA engines
+ */
 uint8_t z180_phys_read(int unused, uint32_t addr)
 {
 	if (banked)
 		addr = bank_translate(addr);
+	if (mem_map == 1) { 
+		addr &= 0x7FFFF;	/* Only 19 bits on a DIP part */
+		if (addr & 0x40000) /* RAM is 128k and wraps */
+			addr &= 0x5FFFF;
+	}
 	return ramrom[addr & 0xFFFFF];
 }
 
@@ -148,10 +136,40 @@ void z180_phys_write(int unused, uint32_t addr, uint8_t val)
 	if (banked)
 		addr = bank_translate(addr);
 	addr &= 0xFFFFF;
-	if (addr >= 0x80000)
+	if (mem_map == 1) { 
+		addr &= 0x7FFFF;	/* Only 19 bits on a DIP part */
+		if (addr & 0x40000) /* RAM is 128k and wraps */
+			addr &= 0x5FFFF;
+	}
+	if (addr >= ram_base)
 		ramrom[addr] = val;
 	else
 		fprintf(stderr, "[%06X: write to ROM.]\n", addr);
+}
+
+/*
+ *	Model CPU accesses starting with a virtual address
+ */
+static uint8_t do_mem_read0(uint16_t addr, int quiet)
+{
+	uint32_t pa = z180_mmu_translate(io, addr);
+	uint8_t r;
+	if (banked)
+		pa = bank_translate(pa);
+	r = z180_phys_read(0, pa);
+	if (!quiet && (trace & TRACE_MEM))
+		fprintf(stderr, "R %04X[%06X] -> %02X\n", addr, pa, r);
+	return r;
+}
+
+static void mem_write0(uint16_t addr, uint8_t val)
+{
+	uint32_t pa = z180_mmu_translate(io, addr);
+	if (banked)
+		pa = bank_translate(pa);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W: %04X[%06X] <- %02X\n", addr, pa, val);
+	z180_phys_write(0, pa, val);
 }
 
 uint8_t mem_read(int unused, uint16_t addr)
@@ -646,7 +664,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "1acd:fF:i:I:lr:sP:RS:Twzb")) != -1) {
+	while ((opt = getopt(argc, argv, "1acd:fF:i:I:lm:r:sP:RS:Twzb")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -668,6 +686,32 @@ int main(int argc, char *argv[])
 		case 'l':
 			leds = 1;
 			break;
+		case 'm':
+			if (strcmp(optarg, "sc126") == 0) {
+				rtc = rtc_create();
+				banked = 0;
+				input = 0;
+				break;
+			}
+			if (strcmp(optarg, "sc130") == 0 || strcmp(optarg, "sc131") == 0 || strcmp(optarg, "sc111") ==0) {
+				banked = 0;
+				input = 0;
+				break;
+			}
+			if (strcmp(optarg, "riz180") == 0) {
+				/* A DIP Z180 running more slowly and with
+				   only 128K RAM and 256K flash accessible */
+				tstate_steps = 294;
+				banked = 0;
+				input = 0;
+				ram_base = 0x40000;
+				mem_map = 1;
+				/* No SPI select line */
+				sdpath = NULL;
+				break;
+			}
+			fprintf(stderr, "rc2014-z180: unknown machine type '%s'.\n", optarg);
+			exit(1);
 		case 'f':
 			fast = 1;
 			break;
@@ -717,8 +761,9 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, ramrom, 524288) != 524288) {
-		fprintf(stderr, "rc2014-z180: ROM image should be 512K.\n");
+	if (read(fd, ramrom, ram_base) != ram_base) {
+		fprintf(stderr, "rc2014-z180: ROM image should be %dK.\n",
+			ram_base >> 10);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
