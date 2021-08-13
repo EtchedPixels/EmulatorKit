@@ -28,8 +28,6 @@ enum {
 	IRQ_CWAI	= 2
 };
 
-static int trace_cpu;
-
 /* index registers */
 
 static unsigned reg_x;
@@ -70,6 +68,8 @@ static unsigned *rptr_xyus[4] = {
 	&reg_u,
 	&reg_s
 };
+
+static unsigned trace_cpu;
 
 /* user defined read and write functions */
 
@@ -245,9 +245,6 @@ static einline unsigned pc_read8 (void)
 
 	data = read8 (reg_pc);
 	reg_pc++;
-
-	if (trace_cpu)
-		fprintf(stderr, "%02X ", data);
 
 	return data;
 }
@@ -1110,8 +1107,6 @@ static einline void inst_tfr (void)
 
 void e6809_reset (int trace)
 {
-	trace_cpu = trace;
-
 	reg_x = 0;
 	reg_y = 0;
 	reg_u = 0;
@@ -1183,8 +1178,7 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		return cycles + 1;
 	}
 
-	if (trace_cpu)
-		fprintf(stderr, "\n%04X: ", reg_pc);
+	e6809_instruction(reg_pc);
 	op = pc_read8 ();
 
 	switch (op) {

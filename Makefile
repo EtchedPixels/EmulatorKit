@@ -69,8 +69,8 @@ rc2014-65c816-mini.o: rc2014-65c816-mini.c lib65816/config.h
 rc2014-6800: rc2014-6800.o 6800.o ide.o acia.o 16x50.o
 	cc -g3 rc2014-6800.o ide.o acia.o 6800.o 16x50.o -o rc2014-6800
 
-rc2014-6809: rc2014-6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o
-	cc -g3 rc2014-6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o e6809.o -o rc2014-6809
+rc2014-6809: rc2014-6809.o d6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o
+	cc -g3 rc2014-6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o d6809.o e6809.o -o rc2014-6809
 
 rc2014-68hc11: rc2014-68hc11.o 68hc11.o ide.o w5100.o ppide.o rtc_bitbang.o sdcard.o
 	cc -g3 rc2014-68hc11.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o 68hc11.o -o rc2014-68hc11

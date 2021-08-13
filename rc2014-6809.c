@@ -26,6 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include "d6809.h"
 #include "e6809.h"
 #include "ide.h"
 #include "16x50.h"
@@ -238,9 +239,11 @@ void m6809_outport(uint8_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-unsigned char e6809_read8(unsigned addr)
+unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 {
 	if (addr >> 8 == 0xFE) {
+		if (debug)
+			return 0xFF;
 		return m6809_inport(addr & 0xFF);
 	}
 	if (bankhigh) {
@@ -272,6 +275,16 @@ unsigned char e6809_read8(unsigned addr)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
 	return ramrom[addr];
+}
+
+unsigned char e6809_read8(unsigned addr)
+{
+	return do_e6809_read8(addr, 0);
+}
+
+unsigned char e6809_read8_debug(unsigned addr)
+{
+	return do_e6809_read8(addr, 1);
 }
 
 void e6809_write8(unsigned addr, unsigned char val)
@@ -320,6 +333,16 @@ void e6809_write8(unsigned addr, unsigned char val)
 			ramrom[addr] = val;
 		else if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
+	}
+}
+
+/* Called each new instruction issue */
+void e6809_instruction(unsigned pc)
+{
+	char buf[80];
+	if (trace & TRACE_CPU) {
+		d6809_disassemble(buf, pc);
+		fprintf(stderr, "%04X: %s\n", pc, buf);
 	}
 }
 
