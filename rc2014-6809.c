@@ -165,10 +165,8 @@ void m6840_output_change(struct m6840 *m, uint8_t outputs)
 	old = outputs;
 }
 
-uint8_t m6809_inport(uint8_t addr)
+static uint8_t m6809_do_inport(uint8_t addr)
 {
-	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
 	if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
@@ -186,6 +184,17 @@ uint8_t m6809_inport(uint8_t addr)
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
+}
+
+uint8_t m6809_inport(uint8_t addr)
+{
+	uint8_t r;
+	if (trace & TRACE_IO)
+		fprintf(stderr, "read %02x = ", addr);
+	r = m6809_do_inport(addr);
+	if (trace & TRACE_IO)
+		fprintf(stderr, "%02x\n", r);
+	return r;
 }
 
 void m6809_outport(uint8_t addr, uint8_t val)
