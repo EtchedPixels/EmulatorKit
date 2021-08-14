@@ -91,6 +91,10 @@ rc2014-80c188: rc2014-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \
 	cc -g3 rc2014-80c188.o ide.o ppide.o rtc_bitbang.o w5100.o 80x86/*.o -o rc2014-80c188
 
+rc2014-ns32k: rc2014-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o
+	$(MAKE) --directory ns32k && \
+	cc -g3 rc2014-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.c -o rc2014-ns32k
+
 rc2014-z280: rc2014-z280.o ide.o libz280/libz80.o
 	cc -g3 rc2014-z280.o ide.o libz280/libz80.o -o rc2014-z280
 
@@ -162,6 +166,7 @@ clean:
 	$(MAKE) --directory lib65c816 clean && \
 	$(MAKE) --directory m68k clean && \
 	$(MAKE) --directory am9511 clean && \
+	$(MAKE) --directory ns32k clean && \
 	rm -f *.o *~ rc2014 rbcv2
 
 SRCS := $(subst ./,,$(shell find . -name '*.c'))
