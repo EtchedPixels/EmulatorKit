@@ -1,4 +1,4 @@
-	/*
+/*
  *	Platform features
  *
  *	8085 at 6.144MHz
@@ -138,8 +138,6 @@ void i8085_write(uint16_t addr, uint8_t val)
 		uint8_t higha;
 		if (addr < 0xE000)
 			reg >>= 1;
-		if (addr == 0xF260)
-			fprintf(stderr, "**F260->%02X\n", val);
 		higha = (reg & 0x40) ? 1 : 0;
 		higha |= (reg & 0x10) ? 2 : 0;
 		higha |= (reg & 0x4) ? 4 : 0;
