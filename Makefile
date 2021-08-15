@@ -152,6 +152,8 @@ scelbi: scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_
 scelbi_sdl2: scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o
 	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o -o scelbi_sdl2 -lSDL2
 
+nascom: nascom.o keymatrix.o libz80/libz80.o z80dis.o
+	cc -g3 nascom.o keymatrix.o libz80/libz80.o z80dis.o -lSDL2 -o nascom
 
 68hc11.o: 6800.c
 
