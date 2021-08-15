@@ -2,8 +2,14 @@
  *	NASCOM emulator
  *
  *	TODO:
- *	Lots 8)
- *	NMI circuit - fourth M1 after low to hi of bit 3 port 0
+ *	NMI circuit
+ *	Fix the keyboard shift and lower case handling
+ *	Add the NASCOM2 control, shift and lf/ch etc
+ *	Native keymap mode
+ *	Fix disk write
+ *	Emulate fdc command C4
+ *	Emulate disk status bytes
+ *	Emulate the disk drive selection
  */
 
 #include <stdio.h>
@@ -25,6 +31,8 @@
 
 #include "nasfont.h"
 
+#include "wd17xx.h"
+
 #include "libz80/z80.h"
 #include "z80dis.h"
 
@@ -44,6 +52,10 @@ static uint64_t is_rom;
 static uint64_t is_base;
 static uint64_t is_present;
 //static uint8_t rpage = 0, wpage = 0;
+static unsigned int cpmmap;
+static uint16_t vidbase = 0x0800;
+
+static struct wd17xx *fdc;
 
 static uint8_t kbd_row;
 
@@ -59,6 +71,7 @@ volatile int emulator_done;
 #define TRACE_CPU	0x000008
 #define TRACE_BANK	0x000010
 #define TRACE_KEY	0x000020
+#define TRACE_FDC	0x000040
 
 static int trace = 0;
 
@@ -193,15 +206,15 @@ unsigned int next_char(void)
  */
 
 static SDL_Keycode keyboard[] = {
-	0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, SDLK_RSHIFT, 0, 0,
 	SDLK_h, SDLK_b, SDLK_5, SDLK_f, SDLK_x, SDLK_t, SDLK_UP,
 	SDLK_j, SDLK_n, SDLK_6, SDLK_d, SDLK_z, SDLK_y, SDLK_LESS,
 	SDLK_k, SDLK_m, SDLK_7, SDLK_e, SDLK_s, SDLK_u, SDLK_DOWN,
 	SDLK_l, SDLK_COMMA, SDLK_8, SDLK_w, SDLK_a, SDLK_i, SDLK_RIGHT,
-	SDLK_SEMICOLON, 0/*SDLK_DOT*/, SDLK_9, SDLK_3, SDLK_q, SDLK_o, SDLK_GREATER,
+	SDLK_SEMICOLON, SDLK_PERIOD, SDLK_9, SDLK_3, SDLK_q, SDLK_o, SDLK_GREATER,
 	SDLK_COLON, SDLK_SLASH, SDLK_0, SDLK_2, SDLK_1, SDLK_p, SDLK_RIGHTBRACKET,
 	SDLK_g, SDLK_v, SDLK_4, SDLK_c, SDLK_SPACE, SDLK_r, SDLK_LEFTBRACKET,
-	SDLK_BACKSPACE, SDLK_RETURN, SDLK_MINUS, SDLK_RCTRL, SDLK_LSHIFT, SDLK_AT, 0/* FIXME */
+	SDLK_BACKSPACE, SDLK_RETURN, SDLK_MINUS, SDLK_LCTRL, SDLK_LSHIFT, SDLK_AT, 0/* FIXME */
 };
 
 static void z80pio_write(uint8_t addr, uint8_t val)
@@ -237,9 +250,80 @@ static void uart_transmit(uint8_t val)
 	write(1, &val, 1);
 }
 
+/*
+ *	Port offsets
+ *	0 : FDC status / command
+ *	1 : FDC track
+ *	2 : FDC sector
+ *	3 : FDC data
+ *
+ *	4 : Control latch
+ *	5 : Status on NREADY INTRQ
+ */
+
+static uint8_t fdc_latch;
+
+static void lucas_fdc_write(uint16_t addr, uint8_t val)
+{
+	switch(addr) {
+	case 0x00:
+		wd17xx_command(fdc, val);
+		break;
+	case 0x01:
+		wd17xx_write_track(fdc, val);
+		break;
+	case 0x02:
+		wd17xx_write_sector(fdc, val);
+		break;
+	case 0x03:
+		wd17xx_write_data(fdc, val);
+		break;
+	case 0x04:
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "fdc: latch set to %x\n", fdc_latch);
+		fdc_latch = val;
+		break;
+	case 0x05:	/* No write on 0xE5 */
+		break;
+	}
+}
+
+static uint8_t lucas_fdc_read(uint16_t addr)
+{
+	uint8_t r, rx = 0x00;
+	switch(addr) {
+	case 0x00:
+		return wd17xx_status(fdc);
+	case 0x01:
+		return wd17xx_read_track(fdc);
+	case 0x02:
+		return wd17xx_read_sector(fdc);
+	case 0x03:
+		return wd17xx_read_data(fdc);
+	case 0x04:
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "fdc: latch read as %x\n", fdc_latch & 0x5F);
+		return fdc_latch & 0x5F;
+	case 0x05:
+		r = wd17xx_status_noclear(fdc);
+		if (r & 0x80)
+			rx = 0x02;
+		if (r & 0x02)
+			rx |= 0x80;
+		if (wd17xx_intrq(fdc))
+			rx |= 0x01;
+		rx ^= 0x43;
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "fdc: status read as %x\n", rx);
+		/* Should check intq etc */
+		return rx;
+	}
+	return 0xFF;
+}
+
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
-	uint8_t port = addr;
+	uint8_t port = addr & 0xFF;
 
 	if (nascom_ver == 1)
 		port &= 0x07;
@@ -269,11 +353,14 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 			z80pio_write(addr & 3, val);
 			break;
 	}
+	/* Settable by jumpers but all software used 0xE0 */
+	if (fdc && port >= 0xE0 && port <= 0xE5)
+		lucas_fdc_write(addr & 0x07, val);
 }
 
 static uint8_t do_io_read(int unused, uint16_t addr)
 {
-	uint8_t port = addr;
+	uint8_t port = addr & 0xFF;
 
 	if (nascom_ver == 1)
 		port &= 0x07;
@@ -292,6 +379,8 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 		case 0x07:
 			return z80pio_read(addr & 3);
 	}
+	if (fdc && port >= 0xE0 && port <= 0xE5)
+		return lucas_fdc_read(addr & 0x07);
 	return 0xFF;
 }
 
@@ -344,8 +433,7 @@ static void nascom_rasterize(void)
 	unsigned int lines, cols;
 	uint8_t *ptr;
 	for (lines = 0; lines < 16; lines ++) {
-		/* We will need to make this configurable with CP/M */
-		ptr = base_mem + 0x0800 + lptr;
+		ptr = base_mem + vidbase + lptr;
 		for (cols = 0; cols < 48; cols ++) {
 			raster_char(lines, cols, *ptr++);
 		}
@@ -368,6 +456,18 @@ static void nascom_render(void)
 	SDL_RenderPresent(render);
 }
 
+/* Most PC layouts don't have a colon key so use # */
+static void keytranslate(SDL_Event *ev)
+{
+	SDL_Keycode c = ev->key.keysym.sym;
+	switch(c) {
+	case SDLK_HASH:
+		c = SDLK_COLON;
+		break;
+	}
+	ev->key.keysym.sym = c;
+}
+	
 static void ui_event(void)
 {
 	SDL_Event ev;
@@ -378,6 +478,7 @@ static void ui_event(void)
 			break;
 		case SDL_KEYDOWN:
 		case SDL_KEYUP:
+			keytranslate(&ev);
 			keymatrix_SDL2event(matrix, &ev);
 			break;
 		}
@@ -460,6 +561,8 @@ static int romload(const char *path, uint8_t *mem, unsigned int base, unsigned i
 	int fd;
 	int size;
 	const char *p = strrchr(path, '.');
+	if (p && strcmp(p, ".nas") == 0)
+		return nas_load(path, mem, base, maxsize);
 	if (p && strcmp(p, ".nal") == 0)
 		return nas_load(path, mem, base, maxsize);
 	fd = open(path, O_RDONLY);
@@ -474,7 +577,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int base, unsigned i
 
 static void usage(void)
 {
-	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-b basic] [-r rom] [-m] [-d debug]\n");
+	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-b basic] [-c] [-r rom] [-m] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -485,10 +588,12 @@ int main(int argc, char *argv[])
 	int opt;
 	char *rom_path = "nassys3.nal";
 	char *basic_path = NULL;
+	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
 	int romsize;
 	unsigned int maxmem = 0;
+	static unsigned int need_fdc = 0;
 
-	while ((opt = getopt(argc, argv, "123b:d:fmr:")) != -1) {
+	while ((opt = getopt(argc, argv, "123b:cd:fmr:A:B:C:D:")) != -1) {
 		switch (opt) {
 		case '1':
 			nascom_ver = 1;
@@ -497,8 +602,27 @@ int main(int argc, char *argv[])
 		case '3':
 			nascom_ver = 2;
 			break;
+		case 'A':
+			fdc_path[0] = optarg;
+			need_fdc = 1;
+			break;
+		case 'B':
+			fdc_path[1] = optarg;
+			need_fdc = 1;
+			break;
+		case 'C':
+			fdc_path[2] = optarg;
+			need_fdc = 1;
+			break;
+		case 'D':
+			fdc_path[3] = optarg;
+			need_fdc = 1;
+			break;
 		case 'b':
 			basic_path = optarg;
+			break;
+		case 'c':
+			cpmmap = 1;
 			break;
 		case 'd':
 			trace = atoi(optarg);
@@ -521,31 +645,46 @@ int main(int argc, char *argv[])
 	while (optind < argc)
 		romload(argv[optind++], base_mem, 0, 0xFFFF);
 
-	/* Start with the nascom 1 setup */
-	/* NASBUG low 1K, optional firmware 2nd 1K */
-	is_rom = 0x03;
-	/* Video RAM 3rd 1K, user 4th 1K */
-	/* These are implemented as 4 banks of 8 x 1K SRAM so video contention
-	   and noise is specific to 800-BFF */
-	is_present = 0x0F;
-	is_base = 0x0F;
-
-	romsize = romload(rom_path, base_mem, 0x0000, 2048);
-	if (romsize != 1024 && romsize != 2048) {
-		fprintf(stderr, "nascom: invalid ROM size '%s'.\n", rom_path);
-		exit(EXIT_FAILURE);
-	}
-	if (basic_path) {
-		if (romload(basic_path, base_mem + 0xE000, 0xE000, 0x2000)) {
-			is_present |= 0xFFULL << 56;
-			is_base |= 0xFFULL << 56;
-			is_rom |= 0xFFULL << 56;
+	if (cpmmap) {
+		vidbase = 0xF800;
+		if (romload(rom_path, base_mem + 0xF000, 0xF000, 0x800) != 0x800) {
+			fprintf(stderr, "nascom: invalid bootstrap ROM size\n");
+			exit(1);
 		}
-	}
-	if (nascom_ver == 2 || maxmem) {
-		/* Plug in the RAM */
-		is_present |= 0xFF << 4;
-		is_base |= 0xFF << 4;
+		/* Assume a full 64K card is present */
+		is_present = 0xFFFFFFFFFFFFFFFFULL;
+		is_base = 0xFFFFFFFFFFFFFFFFULL;
+		/* Only the F000-F7FF space is ROM */
+		is_rom = 0x3ULL << 60;
+		nascom_ver = 2;
+		need_fdc = 1;
+	} else {
+		/* Start with the nascom 1 setup */
+		/* NASBUG low 1K, optional firmware 2nd 1K */
+		is_rom = 0x03;
+		/* Video RAM 3rd 1K, user 4th 1K */
+		/* These are implemented as 4 banks of 8 x 1K SRAM so video contention
+		   and noise is specific to 800-BFF */
+		is_present = 0x0F;
+		is_base = 0x0F;
+
+		romsize = romload(rom_path, base_mem, 0x0000, 2048);
+		if (romsize != 1024 && romsize != 2048) {
+			fprintf(stderr, "nascom: invalid ROM size '%s'.\n", rom_path);
+			exit(EXIT_FAILURE);
+		}
+		if (basic_path) {
+			if (romload(basic_path, base_mem + 0xE000, 0xE000, 0x2000)) {
+				is_present |= 0xFFULL << 56;
+				is_base |= 0xFFULL << 56;
+				is_rom |= 0xFFULL << 56;
+			}
+		}
+		if (nascom_ver == 2 || maxmem) {
+			/* Plug in the RAM */
+			is_present |= 0xFF << 4;
+			is_base |= 0xFF << 4;
+		}
 	}
 	/* TODO: Strictly speaking it's a switch */
 	if (nascom_ver == 2)
@@ -556,6 +695,15 @@ int main(int argc, char *argv[])
 		is_base |= 0xFFFFFFFFFFFFULL << 8;
 	}
 
+	if (need_fdc) {
+		unsigned i;
+		fdc = wd17xx_create();
+		for (i = 0; i < 4; i++) {
+			if (fdc_path[i])
+				wd17xx_attach(fdc, i, fdc_path[i], 2, 77, 10, 512);
+		}
+		wd17xx_trace(fdc, trace & TRACE_FDC);
+	}
 	matrix = keymatrix_create(9, 7, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
 	atexit(SDL_Quit);
@@ -622,6 +770,10 @@ int main(int argc, char *argv[])
 	cpu_z80.memWrite = mem_write;
 	cpu_z80.trace = nascom_trace;
 
+	/* Emulate the jump logic */
+	if (cpmmap)
+		cpu_z80.PC = 0xF000;
+	
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host
