@@ -10,6 +10,8 @@ extern void wd17xx_command(struct wd17xx *fdc, uint8_t val);
 extern uint8_t wd17xx_status(struct wd17xx *fdc);
 extern uint8_t wd17xx_status_noclear(struct wd17xx *fdc);
 extern void wd17xx_set_drive(struct wd17xx *fdc, unsigned int drive);
+extern void wd17xx_no_drive(struct wd17xx *fdc);
+extern void wd17xx_set_side(struct wd17xx *fdc, unsigned int side);
 extern struct wd17xx *wd17xx_create(void);
 extern void wd17xx_free(struct wd17xx *fdc);
 extern void wd17xx_detach(struct wd17xx *fdc, int dev);

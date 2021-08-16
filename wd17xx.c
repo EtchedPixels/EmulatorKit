@@ -48,7 +48,7 @@ struct wd17xx {
 
 static void wd17xx_diskseek(struct wd17xx *fdc)
 {
-	off_t pos = (fdc->track & 0x7F) * fdc->spt[fdc->drive] * fdc->sides[fdc->drive];
+	off_t pos = fdc->track * fdc->spt[fdc->drive] * fdc->sides[fdc->drive];
 	pos += fdc->sector - 1;
 	if (fdc->sides[fdc->drive] == 2 && fdc->side)
 		pos += fdc->spt[fdc->drive];
@@ -194,7 +194,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->intrq = 1;
 		fdc->track = fdc->buf[0];
 		fdc->status = INDEX;
-		if ((fdc->buf[0] & 0x7F) >= fdc->tracks[fdc->drive]) {
+		if (fdc->buf[0] >= fdc->tracks[fdc->drive]) {
 			fdc->status |= SEEKERR;
 			if (v & 0x08)
 				fdc->status |= HEADLOAD;
@@ -205,8 +205,43 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (v & 0x08)
 			fdc->status |= HEADLOAD;
 		break;
+	case 0x20:	/* step */
+	case 0x30:
+		if (fdc->track < fdc->buf[0])
+			fdc->track++;
+		else if (fdc->track < fdc->buf[0])
+			fdc->track--;
+		fdc->status = INDEX;
+		if (fdc->track == 0)
+			fdc->status |= TRACK0;
+		if (v & 0x08)
+			fdc->status |= HEADLOAD;
+		fdc->intrq = 1;
+		break;
+	case 0x40:	/* step in */
+	case 0x50:
+		/* We really need to keep track of true head and logical
+		   head position TODO */
+		if (fdc->track < 128)
+			fdc->track++;
+		fdc->status = INDEX;
+		if (v & 0x08)
+			fdc->status |= HEADLOAD;
+		fdc->intrq = 1;
+		break;
+	case 0x60:	/* step out */
+	case 0x70:
+		if (fdc->track)
+			fdc->track--;
+		fdc->status = INDEX;
+		if (fdc->track == 0)
+			fdc->status |= TRACK0;
+		if (v & 0x08)
+			fdc->status |= HEADLOAD;
+		fdc->intrq = 1;
+		break;
 	case 0x80:	/* Read sector */
-		if ((fdc->track & 0x7F) >= fdc->tracks[fdc->drive] ||
+		if (fdc->track >= fdc->tracks[fdc->drive] ||
 			fdc->sector > fdc->spt[fdc->drive] ||
 			fdc->sector == 0) {
 			fdc->status = INDEX | RECNFERR;
@@ -224,7 +259,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->status |= BUSY | DRQ;
 		break;
 	case 0xA0:	/* Write sector */
-		if ((fdc->track & 0x7F) >= fdc->tracks[fdc->drive] ||
+		if (fdc->track >= fdc->tracks[fdc->drive] ||
 			fdc->sector > fdc->spt[fdc->drive] ||
 			fdc->sector == 0) {
 			fdc->status = INDEX | RECNFERR;
@@ -245,7 +280,20 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		}
 		fdc->buf[1] = fdc->side;
 		fdc->buf[2] = 1;
-		fdc->buf[3] = 0x02;	/* FIXME: should be length encoding */
+		switch(fdc->spt[fdc->drive]) {
+		case 128:
+			fdc->buf[3] = 0x00;
+			break;
+		case 256:
+			fdc->buf[3] = 0x01;
+			break;
+		case 512:
+			fdc->buf[3] = 0x02;
+			break;
+		case 1024:
+			fdc->buf[3] = 0x03;
+			break;
+		}
 		fdc->buf[4] = 0xFA;
 		fdc->buf[5] = 0xAF;
 		/* Hardware weirdness */
@@ -254,12 +302,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		break;
 	case 0xD0:	/* Force interrupt : handled above */
 		break;
-	case 0x20:	/* step */
-	case 0x30:
-	case 0x40:	/* step out */
-	case 0x50:
-	case 0x60:	/* step out */
-	case 0x70:
 	case 0x90:	/* read multi */
 	case 0xB0:	/* write multi */
 	case 0xE0:	/* read track */

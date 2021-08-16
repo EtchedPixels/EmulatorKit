@@ -7,9 +7,6 @@
  *	Add the NASCOM2 control, shift and lf/ch etc
  *	Native keymap mode
  *	Fix disk write
- *	Emulate fdc command C4
- *	Emulate disk status bytes
- *	Emulate the disk drive selection
  */
 
 #include <stdio.h>
@@ -24,6 +21,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 #include <SDL2/SDL.h>
 
@@ -212,8 +210,8 @@ static SDL_Keycode keyboard[] = {
 	SDLK_k, SDLK_m, SDLK_7, SDLK_e, SDLK_s, SDLK_u, SDLK_DOWN,
 	SDLK_l, SDLK_COMMA, SDLK_8, SDLK_w, SDLK_a, SDLK_i, SDLK_RIGHT,
 	SDLK_SEMICOLON, SDLK_PERIOD, SDLK_9, SDLK_3, SDLK_q, SDLK_o, SDLK_GREATER,
-	SDLK_COLON, SDLK_SLASH, SDLK_0, SDLK_2, SDLK_1, SDLK_p, SDLK_RIGHTBRACKET,
-	SDLK_g, SDLK_v, SDLK_4, SDLK_c, SDLK_SPACE, SDLK_r, SDLK_LEFTBRACKET,
+	SDLK_COLON, SDLK_SLASH, SDLK_0, SDLK_2, SDLK_1, SDLK_p, SDLK_LEFTBRACKET,
+	SDLK_g, SDLK_v, SDLK_4, SDLK_c, SDLK_SPACE, SDLK_r, SDLK_RIGHTBRACKET,
 	SDLK_BACKSPACE, SDLK_RETURN, SDLK_MINUS, SDLK_LCTRL, SDLK_LSHIFT, SDLK_AT, 0/* FIXME */
 };
 
@@ -262,6 +260,7 @@ static void uart_transmit(uint8_t val)
  */
 
 static uint8_t fdc_latch;
+static unsigned int fdc_motor;
 
 static void lucas_fdc_write(uint16_t addr, uint8_t val)
 {
@@ -294,6 +293,8 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 		else
 			wd17xx_no_drive(fdc);
 		wd17xx_set_side(fdc, !!(fdc_latch & 0x10));
+		/* Turn on the motor for 10 seconds */
+		fdc_motor = 2000;
 		/* TODO: D6 is density select */
 		break;
 	case 0x05:	/* No write on 0xE5 */
@@ -325,7 +326,7 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 		   to the DRQ pin on the 1793 */
 		r = wd17xx_status_noclear(fdc);
 		/* Fudge ready with NOTREADY signal */
-		if (!(r & 0x80))		/* NOTREADY */
+		if (!fdc_motor)			/* NOTREADY */
 			rx |= 0x02;		/* if ready set high */
 		if (r & 0x02)			/* If DRQ set bit 7 */
 			rx |= 0x80;
@@ -515,6 +516,42 @@ static void exit_cleanup(void)
 	tcsetattr(0, TCSADRAIN, &saved_term);
 }
 
+struct diskgeom {
+	const char *name;
+	unsigned int size;
+	unsigned int sides;
+	unsigned int tracks;
+	unsigned int spt;
+	unsigned int secsize;
+};
+
+struct diskgeom disktypes[] = {
+	{ "CP/M 77 track DSDD", 788480, 2, 77, 10, 512 },
+	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512 },
+	{ "NAS-DOS DSDD", 655360, 2, 80, 16, 256 },
+	{ "NAS-DOS SSDD", 327680, 1, 80, 16, 256 },
+	{NULL,}
+};
+
+static struct diskgeom *guess_format(const char *path)
+{
+	struct diskgeom *d = disktypes;
+	struct stat s;
+	off_t size;
+	if (stat(path, &s) == -1) {
+		perror(path);
+		exit(1);
+	}
+	size = s.st_size;
+	while(d->name) {
+		if (d->size == size)
+			return d;
+		d++;
+	}
+	fprintf(stderr, "nascom: unknown disk format size %ld.\n", (long)size);
+	exit(1);
+}
+
 /* Lots of nascom stuff is in this weird format of its own */
 
 static void nasform(const char *buf, const char *path)
@@ -605,12 +642,13 @@ int main(int argc, char *argv[])
 	int opt;
 	char *rom_path = "nassys3.nal";
 	char *basic_path = NULL;
+	char *eprom_path = NULL;
 	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
 	int romsize;
 	unsigned int maxmem = 0;
 	static unsigned int need_fdc = 0;
 
-	while ((opt = getopt(argc, argv, "123b:cd:fmr:A:B:C:D:")) != -1) {
+	while ((opt = getopt(argc, argv, "123b:cd:e:fmr:A:B:C:D:")) != -1) {
 		switch (opt) {
 		case '1':
 			nascom_ver = 1;
@@ -643,6 +681,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'd':
 			trace = atoi(optarg);
+			break;
+		case 'e':
+			eprom_path = optarg;
 			break;
 		case 'f':
 			fast = 1;
@@ -697,6 +738,13 @@ int main(int argc, char *argv[])
 				is_rom |= 0xFFULL << 56;
 			}
 		}
+		if (eprom_path) {
+			if (romload(eprom_path, base_mem + 0xD000, 0xD000, 0x1000)) {
+				is_present |= 0xFULL << 52;
+				is_base |= 0xFULL << 52;
+				is_rom |= 0xFULL << 52;
+			}
+		}
 		if (nascom_ver == 2 || maxmem) {
 			/* Plug in the RAM */
 			is_present |= 0xFF << 4;
@@ -716,8 +764,11 @@ int main(int argc, char *argv[])
 		unsigned i;
 		fdc = wd17xx_create();
 		for (i = 0; i < 4; i++) {
-			if (fdc_path[i])
-				wd17xx_attach(fdc, i, fdc_path[i], 2, 77, 10, 512);
+			if (fdc_path[i]) {
+				struct diskgeom *d = guess_format(fdc_path[i]);
+				printf("[Drive %c, %s.]\n", 'A' + i, d->name);
+				wd17xx_attach(fdc, i, fdc_path[i], d->sides, d->tracks, d->spt, d->secsize);
+			}
 		}
 		wd17xx_trace(fdc, trace & TRACE_FDC);
 	}
@@ -806,6 +857,11 @@ int main(int argc, char *argv[])
 		ui_event();
 		nascom_rasterize();
 		nascom_render();
+		if (fdc_motor) {
+			fdc_motor--;
+			if (fdc_motor == 0 && (trace & TRACE_FDC))
+				fprintf(stderr, "fdc: motor timeout.\n");
+		}
 //		if ((~irqstat & irqmask) & 0x0F) {
 //			Z80INT(&cpu_z80, 0xFF);
 //		}
