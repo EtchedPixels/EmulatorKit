@@ -282,6 +282,19 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "fdc: latch set to %x\n", fdc_latch);
 		fdc_latch = val;
+		/* Now figure out what it actually means */
+		if (fdc_latch & 1)
+			wd17xx_set_drive(fdc, 0);
+		else if (fdc_latch & 2)
+			wd17xx_set_drive(fdc, 1);
+		else if (fdc_latch & 4)
+			wd17xx_set_drive(fdc, 2);
+		else if (fdc_latch & 8)
+			wd17xx_set_drive(fdc, 3);
+		else
+			wd17xx_no_drive(fdc);
+		wd17xx_set_side(fdc, !!(fdc_latch & 0x10));
+		/* TODO: D6 is density select */
 		break;
 	case 0x05:	/* No write on 0xE5 */
 		break;
@@ -305,17 +318,21 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 			fprintf(stderr, "fdc: latch read as %x\n", fdc_latch & 0x5F);
 		return fdc_latch & 0x5F;
 	case 0x05:
+		/* This input comes from IC8 and IC8. IC7 provides 00YX where
+		   X is INTRQ from the 1793 and Y is a 10s timer, which we don't
+		   emulate right now and inverted feeds the 1793 ready
+		   IC8 provides the upper bits only bit 7 is used and corresponds
+		   to the DRQ pin on the 1793 */
 		r = wd17xx_status_noclear(fdc);
-		if (r & 0x80)
-			rx = 0x02;
-		if (r & 0x02)
+		/* Fudge ready with NOTREADY signal */
+		if (!(r & 0x80))		/* NOTREADY */
+			rx |= 0x02;		/* if ready set high */
+		if (r & 0x02)			/* If DRQ set bit 7 */
 			rx |= 0x80;
-		if (wd17xx_intrq(fdc))
+		if (wd17xx_intrq(fdc))		/* If INTRQ set bit 0 */
 			rx |= 0x01;
-		rx ^= 0x43;
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "fdc: status read as %x\n", rx);
-		/* Should check intq etc */
 		return rx;
 	}
 	return 0xFF;
