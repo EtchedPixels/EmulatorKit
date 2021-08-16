@@ -1,6 +1,15 @@
 /*
  *	NASCOM emulator
  *
+ *	Z80 CPU at 2MHz (NASCOM 1) or 4MHz (NASCOM 2)
+ *	Keyboard 0x00
+ *	6402 UART (emulated for serial I/O but not yet tape) 0x01/0x02
+ *	Z80 PIO (not emulated) at 0x04
+ *	Nascom floppy disk controller 0xE0
+ *	Gemini GM106 RTC at 0x20
+ *
+ *	Various memory configurations
+ *
  *	TODO:
  *	NMI circuit
  *	Fix the keyboard shift and lower case handling
@@ -29,6 +38,7 @@
 
 #include "nasfont.h"
 
+#include "58174.h"
 #include "wd17xx.h"
 
 #include "libz80/z80.h"
@@ -54,7 +64,7 @@ static unsigned int cpmmap;
 static uint16_t vidbase = 0x0800;
 
 static struct wd17xx *fdc;
-
+static struct mm58174 *rtc;
 static uint8_t kbd_row;
 
 static unsigned int nascom_ver = 1;
@@ -70,6 +80,7 @@ volatile int emulator_done;
 #define TRACE_BANK	0x000010
 #define TRACE_KEY	0x000020
 #define TRACE_FDC	0x000040
+#define TRACE_RTC	0x000080
 
 static int trace = 0;
 
@@ -294,7 +305,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 			wd17xx_no_drive(fdc);
 		wd17xx_set_side(fdc, !!(fdc_latch & 0x10));
 		/* Turn on the motor for 10 seconds */
-		fdc_motor = 2000;
+		fdc_motor = 1000;
 		/* TODO: D6 is density select */
 		break;
 	case 0x05:	/* No write on 0xE5 */
@@ -371,8 +382,11 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 			z80pio_write(addr & 3, val);
 			break;
 	}
+	/* GM816 clock module */
+	if (rtc && port >= 0x20 && port <= 0x2F)
+		mm58174_write(rtc, port & 0x0F, val);
 	/* Settable by jumpers but all software used 0xE0 */
-	if (fdc && port >= 0xE0 && port <= 0xE5)
+	else if (fdc && port >= 0xE0 && port <= 0xE5)
 		lucas_fdc_write(addr & 0x07, val);
 }
 
@@ -397,6 +411,9 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 		case 0x07:
 			return z80pio_read(addr & 3);
 	}
+	/* GM816 clock module */
+	if (rtc && port >= 0x20 && port <= 0x2F)
+		return mm58174_read(rtc, port & 0x0F);
 	if (fdc && port >= 0xE0 && port <= 0xE5)
 		return lucas_fdc_read(addr & 0x07);
 	return 0xFF;
@@ -631,7 +648,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int base, unsigned i
 
 static void usage(void)
 {
-	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-b basic] [-c] [-r rom] [-m] [-d debug]\n");
+	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-b basic] [-c] [-e eprom] [-r rom] [-m] [-R] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -645,10 +662,11 @@ int main(int argc, char *argv[])
 	char *eprom_path = NULL;
 	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
 	int romsize;
+	unsigned int hasrtc = 0;
 	unsigned int maxmem = 0;
 	static unsigned int need_fdc = 0;
 
-	while ((opt = getopt(argc, argv, "123b:cd:e:fmr:A:B:C:D:")) != -1) {
+	while ((opt = getopt(argc, argv, "123b:cd:e:fmr:A:B:C:D:R")) != -1) {
 		switch (opt) {
 		case '1':
 			nascom_ver = 1;
@@ -693,6 +711,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'm':
 			maxmem = 1;
+			break;
+		case 'R':
+			hasrtc = 1;
 			break;
 		default:
 			usage();
@@ -772,6 +793,11 @@ int main(int argc, char *argv[])
 		}
 		wd17xx_trace(fdc, trace & TRACE_FDC);
 	}
+	/* GM816 RTC emulation */
+	if (hasrtc) {
+		rtc = mm58174_create();
+		mm58174_trace(rtc, trace & TRACE_RTC);
+	}
 	matrix = keymatrix_create(9, 7, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
 	atexit(SDL_Quit);
@@ -849,6 +875,7 @@ int main(int argc, char *argv[])
 
 	while (!emulator_done) {
 		int i;
+		/* Each cycle we do 20000 or 40000 T states */
 		for (i = 0; i < 100; i++) {
 			Z80ExecuteTStates(&cpu_z80, tstates);
 		}
@@ -862,10 +889,14 @@ int main(int argc, char *argv[])
 			if (fdc_motor == 0 && (trace & TRACE_FDC))
 				fprintf(stderr, "fdc: motor timeout.\n");
 		}
-//		if ((~irqstat & irqmask) & 0x0F) {
-//			Z80INT(&cpu_z80, 0xFF);
-//		}
-		/* Do 5ms of I/O and delays */
+		if (rtc) {
+			mm58174_tick(rtc);
+			if (mm58174_irqpending(rtc))
+				Z80INT(&cpu_z80, 0xFF);
+			else
+				Z80NOINT(&cpu_z80);
+		}
+		/* Do 10ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 	}
