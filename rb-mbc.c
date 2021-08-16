@@ -222,7 +222,7 @@ static uint8_t io_read(int unused, uint16_t addr)
     if (trace & TRACE_IO)
         fprintf(stderr, "read %02x\n", addr);
     addr &= 0xFF;
-    if (addr >= 0x60 && addr <= 0x67) 	/* Aliased */
+    if (ppide && addr >= 0x60 && addr <= 0x67) 	/* Aliased */
         return ppide_read(ppide, addr & 3);
     if (addr >= 0x68 && addr < 0x70)
         return uart16x50_read(uart, addr & 7);
@@ -238,7 +238,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
     if (trace & TRACE_IO)
         fprintf(stderr, "write %02x <- %02x\n", addr & 0xFF, val);
     addr &= 0xFF;
-    if (addr >= 0x60 && addr <= 0x67)	/* Aliased */
+    if (ppide && addr >= 0x60 && addr <= 0x67)	/* Aliased */
         ppide_write(ppide, addr & 3, val);
     else if (addr >= 0x68 && addr < 0x70)
         uart16x50_write(uart, addr & 7, val);
@@ -327,8 +327,11 @@ int main(int argc, char *argv[])
     }
     for (i = 0; i < 32; i++) {
         if (read(fd, rom[i], 32768) != 32768) {
-            fprintf(stderr, "rb-mbc: banked rom image should be 1024K.\n");
-            exit(EXIT_FAILURE);
+            if (i < 16) {
+                fprintf(stderr, "rb-mbc: banked rom image should be 512K or 1024K.\n");
+                exit(EXIT_FAILURE);
+            } else
+                memset(rom[i], 0xFF, 32768);
         }
     }
     close(fd);
