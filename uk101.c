@@ -20,7 +20,6 @@
 #include "6502.h"
 #include "acia.h"
 #include "keymatrix.h"
-#include "nasfont.h"
 
 #define CWIDTH 8
 #define CHEIGHT 16
@@ -34,6 +33,7 @@ struct keymatrix *matrix;
 struct acia *acia;
 
 static uint8_t mem[65536];
+static uint8_t font[2048];
 
 static unsigned int video_upgrade;
 
@@ -164,13 +164,15 @@ static SDL_Keycode keyboard[] = {
 
 static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 {
-	uint8_t *fp = &nascom_font_raw[16 * c];
+	uint8_t *fp = &font[8 * c];
 	uint32_t *pixp;
 	unsigned int rows, pixels;
 
 	pixp = texturebits + x * CWIDTH + 48 * CWIDTH * y * CHEIGHT;
 	for (rows = 0; rows < CHEIGHT; rows++) {
-		uint8_t bits = *fp++;
+		uint8_t bits = *fp;
+		if (rows & 1)
+			fp++;
 		for (pixels = 0; pixels < CWIDTH; pixels++) {
 			if (bits & 0x80)
 				*pixp++ = 0xFFD0D0D0;
@@ -185,14 +187,13 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 		
 static void raster_char_vu(unsigned int y, unsigned int x, uint8_t c)
 {
-	uint8_t *fp = &nascom_font_raw[16 * c];
+	uint8_t *fp = &font[8 * c];
 	uint32_t *pixp;
 	unsigned int rows, pixels;
 
 	pixp = texturebits + x * CWIDTH + 48 * CWIDTH * y * CHEIGHT / 2;
 	for (rows = 0; rows < CHEIGHT / 2; rows++) {
 		uint8_t bits = *fp++;
-		fp++;
 		for (pixels = 0; pixels < CWIDTH; pixels++) {
 			if (bits & 0x80)
 				*pixp++ = 0xFFD0D0D0;
@@ -207,7 +208,7 @@ static void raster_char_vu(unsigned int y, unsigned int x, uint8_t c)
 		
 static void uk101_rasterize(void)
 {
-	unsigned int lptr = 0xD008;
+	unsigned int lptr = 0xD00C;
 	unsigned int lines, cols;
 	uint8_t *ptr;
 	unsigned int nlines = video_upgrade ? 32 : 16;
@@ -300,7 +301,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
 
 static void usage(void)
 {
-	fprintf(stderr, "uk101: [-f] [-b basic] [-r rom] [-d debug]\n");
+	fprintf(stderr, "uk101: [-f] [-2] [-b basic] [-r monitor] [-F font] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -311,9 +312,10 @@ int main(int argc, char *argv[])
 	int opt;
 	char *rom_path = "uk101mon.rom";
 	char *basic_path = "uk101basic.rom";
+	char *font_path = "uk101font.rom";
 	int romsize;
 
-	while ((opt = getopt(argc, argv, "2b:d:fr:v")) != -1) {
+	while ((opt = getopt(argc, argv, "2b:d:fr:vF:")) != -1) {
 		switch (opt) {
 		case '2':
 			tstates = 200;
@@ -329,6 +331,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'F':
+			font_path = optarg;
 			break;
 		case 'r':
 			rom_path = optarg;
@@ -354,6 +359,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "uk101: invalid ROM size '%s'.\n", basic_path);
 		exit(EXIT_FAILURE);
 	}
+	romload(font_path, font, 2048);
 
 	matrix = keymatrix_create(8, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
@@ -434,6 +440,7 @@ int main(int argc, char *argv[])
 		ui_event();
 		uk101_rasterize();
 		uk101_render();
+		acia_timer(acia);
 		/* Do 10ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
