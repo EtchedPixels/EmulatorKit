@@ -68,6 +68,7 @@ static struct mm58174 *rtc;
 static uint8_t kbd_row;
 
 static unsigned int nascom_ver = 1;
+static unsigned int fdc_gemini;
 
 static Z80Context cpu_z80;
 static uint8_t fast;
@@ -260,14 +261,49 @@ static void uart_transmit(uint8_t val)
 }
 
 /*
+ *	Gemini SASI/SCSI - pretty much bit bang control, byte wide data.
+ *	For now we don't do anything with it other than return suitable
+ *	values to make the fdc drivers detect the right card.
+ */
+
+static void gemini_scsi_write(uint8_t addr, uint8_t val)
+{
+	if (!fdc_gemini)
+		return;
+}
+
+static uint8_t gemini_scsi_read(uint8_t addr)
+{
+	uint8_t r = 0;
+	if (!fdc_gemini)
+		return 0xFF;
+
+	switch(addr) {
+	case 0x05:
+		/* Top bit is 1 for an 849, 0 for an 829 */
+		if (fdc_gemini == 829)
+			r = 0xE0;
+		/* 6/5 not used
+		   4 busy, 3 /msg, 2 c/d, 1 i/o 0 /req */
+		return r;
+	case 0x06:
+		return 0xFF;		/* SCSI data r/w, generartes auto ACK */
+	}
+}
+
+/*
  *	Port offsets
  *	0 : FDC status / command
  *	1 : FDC track
  *	2 : FDC sector
  *	3 : FDC data
  *
- *	4 : Control latch
+ *	4 : Control latch / readback
  *	5 : Status on NREADY INTRQ
+ *
+ *	Gemini cards  have status readback on 4 instead and SASI/SCSI on 5/6
+ *
+ *	Non lucas is a WIP as we need to teach the wd17xx emulation things
  */
 
 static uint8_t fdc_latch;
@@ -292,23 +328,59 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "fdc: latch set to %x\n", fdc_latch);
 		fdc_latch = val;
-		/* Now figure out what it actually means */
-		if (fdc_latch & 1)
-			wd17xx_set_drive(fdc, 0);
-		else if (fdc_latch & 2)
-			wd17xx_set_drive(fdc, 1);
-		else if (fdc_latch & 4)
-			wd17xx_set_drive(fdc, 2);
-		else if (fdc_latch & 8)
-			wd17xx_set_drive(fdc, 3);
-		else
-			wd17xx_no_drive(fdc);
-		wd17xx_set_side(fdc, !!(fdc_latch & 0x10));
-		/* Turn on the motor for 10 seconds */
-		fdc_motor = 1000;
-		/* TODO: D6 is density select */
+		/* For our purposes the 849A is the same */
+		if (fdc_gemini == 849) {
+			/* WD2793 */
+			/* Fudge a bit - the 849 can handle 8 drives */
+			if (val & 4)
+				wd17xx_set_no_drive(fdc);
+			else
+				wd17xx_set_drive(fdc, val & 3);
+			wd17xx_set_side(fdc, !!(val & 0x08));
+			/* 0x10 is density which we ignore (MFM/FM)
+			   0x20 is 5/8 inch - ie data rate (8" SD is 5" DD
+			        8" DD is 5"/3.5" HD
+			   0x40 is unused
+			   0x80 is the speed control for 5.25 HD 1.2MB */
+		} else if (fdc_gemini == 829) {
+			if (fdc_latch & 1)
+				wd17xx_set_drive(fdc, 0);
+			else if (fdc_latch & 2)
+				wd17xx_set_drive(fdc, 1);
+			else if (fdc_latch & 4)
+				wd17xx_set_drive(fdc, 2);
+			else if (fdc_latch & 8)
+				wd17xx_set_drive(fdc, 3);
+			else
+				wd17xx_no_drive(fdc);
+			/* 0x10 is density, 0x20 is 5.25/8" data rate */
+			/* 0x40/80 not used */
+			/* Side is absent as this card uses a WD1797 which
+			   controls the side select itself */
+		} else {
+			/* WD1793 */
+			/* Now figure out what it actually means */
+			if (fdc_latch & 1)
+				wd17xx_set_drive(fdc, 0);
+			else if (fdc_latch & 2)
+				wd17xx_set_drive(fdc, 1);
+			else if (fdc_latch & 4)
+				wd17xx_set_drive(fdc, 2);
+			else if (fdc_latch & 8)
+				wd17xx_set_drive(fdc, 3);
+			else
+				wd17xx_no_drive(fdc);
+			wd17xx_set_side(fdc, !!(fdc_latch & 0x10));
+			/* Turn on the motor for 10 seconds */
+			fdc_motor = 1000;
+			/* TODO: D6 is density select */
+		}
 		break;
 	case 0x05:	/* No write on 0xE5 */
+		gemini_scsi_write(addr, val;);
+		break;
+	case 0x06:
+		gemini_scsi_write(addr, val);
 		break;
 	}
 }
@@ -326,15 +398,34 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 	case 0x03:
 		return wd17xx_read_data(fdc);
 	case 0x04:
-		if (trace & TRACE_FDC)
-			fprintf(stderr, "fdc: latch read as %x\n", fdc_latch & 0x5F);
-		return fdc_latch & 0x5F;
+		if (fdc_gemini) {
+			/* Gemini doesn't support the latch readback but puts
+			   a status byte here much like E5 on the Lucas board */
+			if (!fdc_motor)
+				r |= 0x02;
+			if (wd17xx_intrq(fdc))
+				r |= 0x01;
+			if (wd17xx_status_noclear(fdc) & 0x02)	/* DRQ */
+				r |= 0x80;
+			return r;
+		} else {
+			if (trace & TRACE_FDC)
+				fprintf(stderr, "fdc: latch read as %x\n", fdc_latch & 0x5F);
+				return fdc_latch & 0x5F;
+		}
+		break;
 	case 0x05:
+		/* This differs on the Gemini controllers */
+		if (fdc_gemini)
+			return gemini_scsi_read(addr);
 		/* This input comes from IC8 and IC8. IC7 provides 00YX where
 		   X is INTRQ from the 1793 and Y is a 10s timer, which we don't
 		   emulate right now and inverted feeds the 1793 ready
 		   IC8 provides the upper bits only bit 7 is used and corresponds
-		   to the DRQ pin on the 1793 */
+		   to the DRQ pin on the 1793. All of this magic is so that a single
+		   in to this port tells you whether to grab a byte from the FDC
+		   or write one fast.. that's to allow you to use 8" DD floppies at
+		   2MHz */
 		r = wd17xx_status_noclear(fdc);
 		/* Fudge ready with NOTREADY signal */
 		if (!fdc_motor)			/* NOTREADY */
@@ -346,6 +437,8 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "fdc: status read as %x\n", rx);
 		return rx;
+	case 0x06:
+		return gemini_scsi_read(addr);
 	}
 	return 0xFF;
 }
@@ -386,7 +479,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	if (rtc && port >= 0x20 && port <= 0x2F)
 		mm58174_write(rtc, port & 0x0F, val);
 	/* Settable by jumpers but all software used 0xE0 */
-	else if (fdc && port >= 0xE0 && port <= 0xE5)
+	else if (fdc && port >= 0xE0 && port <= 0xE7)
 		lucas_fdc_write(addr & 0x07, val);
 }
 
@@ -412,9 +505,12 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 			return z80pio_read(addr & 3);
 	}
 	/* GM816 clock module */
-	if (rtc && port >= 0x20 && port <= 0x2F)
+	if (rtc && port >= 0x20 && port <= 0x2F) {
+		if ((port & 0x0F) == 0x0F)
+			Z80NMI_Clear(&cpu_z80);
 		return mm58174_read(rtc, port & 0x0F);
-	if (fdc && port >= 0xE0 && port <= 0xE5)
+	}
+	if (fdc && port >= 0xE0 && port <= 0xE7)
 		return lucas_fdc_read(addr & 0x07);
 	return 0xFF;
 }
@@ -890,11 +986,10 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "fdc: motor timeout.\n");
 		}
 		if (rtc) {
+			/* Annoyingly the 58174 on the GM816 is wired to NMI */
 			mm58174_tick(rtc);
 			if (mm58174_irqpending(rtc))
-				Z80INT(&cpu_z80, 0xFF);
-			else
-				Z80NOINT(&cpu_z80);
+				Z80NMI(&cpu_z80);
 		}
 		/* Do 10ms of I/O and delays */
 		if (!fast)
