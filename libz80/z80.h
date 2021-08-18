@@ -108,6 +108,9 @@ typedef struct
 
 	byte nmi_req;
 
+	/* If true, the NMI line is low - used to manage edge triggering */
+	byte nmi_low;
+
 	/* If true, a maskable interrupt has been requested. */
 
 	byte int_req;
@@ -168,8 +171,11 @@ void Z80INT (Z80Context* ctx, byte value);
 void Z80NOINT(Z80Context* ctx);
 
 
-/** Generates a non-maskable interrupt. */
+/** Lower the NMI line (edge trigger is managed internally) */
 void Z80NMI (Z80Context* ctx);
+
+/** Raise the NMI line */
+void Z80NMI_Clear (Z80Context* ctx);
 
 
 #endif

@@ -891,8 +891,17 @@ void Z80NOINT (Z80Context* ctx)
 	ctx->int_req = 0;
 }
 
+/* NMI is edge triggered */
+
 void Z80NMI (Z80Context* ctx)
 {
+	if (ctx->nmi_low)
+		return;
 	ctx->nmi_req = 1;
+	ctx->nmi_low = 1;
 }
 
+void Z80NMI_Clear(Z80Context *ctx)
+{
+	ctx->nmi_low = 0;
+}
