@@ -2478,10 +2478,12 @@ static void io_write_2(uint16_t addr, uint8_t val)
 			printf("[LED on]\n");
 		return;
 	case 0x20:
-		if (val & 1)
-			printf("[RTS high]\n");
-		else
-			printf("[RTS low]\n");
+		if (trace & TRACE_UART) {
+			if (val & 1)
+				fprintf(stderr, "[RTS high]\n");
+			else
+				fprintf(stderr, "[RTS low]\n");
+		}
 		known = 1;
 		break;
 	case 0x28:
