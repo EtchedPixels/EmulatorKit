@@ -336,13 +336,35 @@ void e6809_write8(unsigned addr, unsigned char val)
 	}
 }
 
+static const char *make_flags(uint8_t cc)
+{
+	static char buf[9];
+	char *p = "EFHINZVC";
+	char *d = buf;
+
+	while(*p) {
+		if (cc & 0x80)
+			*d++ = *p;
+		else
+			*d++ = '-';
+		cc <<= 1;
+		p++;
+	}
+	*d = 0;
+	return buf;
+}
+
 /* Called each new instruction issue */
 void e6809_instruction(unsigned pc)
 {
 	char buf[80];
+	struct reg6809 *r = e6809_get_regs();
 	if (trace & TRACE_CPU) {
 		d6809_disassemble(buf, pc);
-		fprintf(stderr, "%04X: %s\n", pc, buf);
+		fprintf(stderr, "%04X: %-16.16s | ", pc, buf);
+		fprintf(stderr, "%s %02X:%02X %04X %04X %04X %04X\n",
+			make_flags(r->cc),
+			r->a, r->b, r->x, r->y, r->u, r->s);
 	}
 }
 
