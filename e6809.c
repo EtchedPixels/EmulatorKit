@@ -2630,3 +2630,17 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 	return cycles;
 }
 
+struct reg6809 *e6809_get_regs(void)
+{
+	static struct reg6809 r;
+	r.x = reg_x;
+	r.y = reg_y;
+	r.u = reg_u;
+	r.s = reg_s;
+	r.pc = reg_pc;
+	r.a = reg_a;
+	r.b = reg_b;
+	r.dp = reg_dp;
+	r.cc = reg_cc;
+	return &r;
+}
