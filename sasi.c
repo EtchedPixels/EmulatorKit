@@ -591,6 +591,12 @@ void sasi_bus_control(struct sasi_bus *bus, uint8_t val)
 
 uint8_t sasi_bus_state(struct sasi_bus *bus)
 {
+    /* This is a bit of a fudge for now. We need to track this based upon
+       the device being in a transfer state */
+    if (bus->state != BUS_IDLE && bus->state != BUS_RESET)
+        bus->control |= SASI_REQ;
+    else
+        bus->control &= ~SASI_REQ;
     return bus->control;
 }
 
