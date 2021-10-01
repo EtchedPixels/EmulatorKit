@@ -44,6 +44,8 @@
 #include "libz80/z80.h"
 #include "z80dis.h"
 
+#include "sasi.h"
+
 #define CWIDTH 8
 #define CHEIGHT 15
 
@@ -66,9 +68,16 @@ static uint16_t vidbase = 0x0800;
 static struct wd17xx *fdc;
 static struct mm58174 *rtc;
 static uint8_t kbd_row;
+static struct sasi_bus *sasi;
+static uint8_t sasi_en;
 
 static unsigned int nascom_ver = 1;
 static unsigned int fdc_gemini;
+
+#define NASFDC		1
+#define GM829		2
+#define GM849		3
+#define GM849A		4
 
 static Z80Context cpu_z80;
 static uint8_t fast;
@@ -261,33 +270,70 @@ static void uart_transmit(uint8_t val)
 }
 
 /*
- *	Gemini SASI/SCSI - pretty much bit bang control, byte wide data.
- *	For now we don't do anything with it other than return suitable
- *	values to make the fdc drivers detect the right card.
+ *	 Gemini SASI/SCSI
  */
 
 static void gemini_scsi_write(uint8_t addr, uint8_t val)
 {
 	if (!fdc_gemini)
 		return;
+	if (!sasi)
+		return;
+	/* 1 = E5 = control */
+	if (addr & 1) {
+		uint8_t r = 0;
+		if (val & 0x01) /* /ATN */
+			;
+		if (!(val & 0x02)) /* /SEL */
+			r |= SASI_SEL;
+		if (!(val & 0x04)) /* /RST */
+			r |= SASI_RST;
+		sasi_en = !!(val & 0x08); /* 0 for output 1 for other master */
+		/* The 849 pulses SEL on write of 1, then 849A latches it */
+		sasi_bus_control(sasi, r);
+		if (fdc_gemini != GM849A)
+			sasi_bus_control(sasi, 0);
+	} else {
+		/* This auto acks a pending req so no magic needed */
+		if (fdc_gemini == GM829 || sasi_en)
+			sasi_write_data(sasi, val);
+	}
 }
 
 static uint8_t gemini_scsi_read(uint8_t addr)
 {
 	uint8_t r = 0;
+	uint8_t st;
 	if (!fdc_gemini)
 		return 0xFF;
 
 	switch(addr) {
 	case 0x05:
 		/* Top bit is 1 for an 849, 0 for an 829 */
-		if (fdc_gemini == 829)
+		if (fdc_gemini == GM829)
 			r = 0xE0;
+		if (sasi) {
+			st = sasi_bus_state(sasi);
+			if (!(st & SASI_REQ))
+				r |= 1;
+			if (st & SASI_IO)
+				r |= 2;
+			if (st & SASI_CD)
+				r |= 4;
+			if (!(st & SASI_MSG))
+				r |= 8;
+			if (!(st & SASI_BSY))
+				r |= 16;
+		}
 		/* 6/5 not used
 		   4 busy, 3 /msg, 2 c/d, 1 i/o 0 /req */
 		return r;
 	case 0x06:
+		if (fdc_gemini == GM829 || sasi_en)
+			return sasi_read_data(sasi);
 		return 0xFF;		/* SCSI data r/w, generartes auto ACK */
+	default:
+		return 0xFF;
 	}
 }
 
@@ -333,7 +379,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 			/* WD2793 */
 			/* Fudge a bit - the 849 can handle 8 drives */
 			if (val & 4)
-				wd17xx_set_no_drive(fdc);
+				wd17xx_no_drive(fdc);
 			else
 				wd17xx_set_drive(fdc, val & 3);
 			wd17xx_set_side(fdc, !!(val & 0x08));
@@ -342,7 +388,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 			        8" DD is 5"/3.5" HD
 			   0x40 is unused
 			   0x80 is the speed control for 5.25 HD 1.2MB */
-		} else if (fdc_gemini == 829) {
+		} else if (fdc_gemini == GM829) {
 			if (fdc_latch & 1)
 				wd17xx_set_drive(fdc, 0);
 			else if (fdc_latch & 2)
@@ -377,7 +423,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 		}
 		break;
 	case 0x05:	/* No write on 0xE5 */
-		gemini_scsi_write(addr, val;);
+		gemini_scsi_write(addr, val);
 		break;
 	case 0x06:
 		gemini_scsi_write(addr, val);
@@ -387,7 +433,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 
 static uint8_t lucas_fdc_read(uint16_t addr)
 {
-	uint8_t r, rx = 0x00;
+	uint8_t r = 0, rx = 0x00;
 	switch(addr) {
 	case 0x00:
 		return wd17xx_status(fdc);
@@ -409,9 +455,10 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 				r |= 0x80;
 			return r;
 		} else {
-			if (trace & TRACE_FDC)
+			if (trace & TRACE_FDC) {
 				fprintf(stderr, "fdc: latch read as %x\n", fdc_latch & 0x5F);
 				return fdc_latch & 0x5F;
+			}
 		}
 		break;
 	case 0x05:
