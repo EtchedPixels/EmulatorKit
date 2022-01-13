@@ -33,6 +33,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 
 #include "system.h"
 #include "libz80/z80.h"

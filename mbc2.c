@@ -21,6 +21,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/select.h>
 #include "libz80/z80.h"
 
 static uint8_t ram[131072];
