@@ -29,6 +29,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 #include <m68k.h>
 #include "acia.h"
 #include "ide.h"

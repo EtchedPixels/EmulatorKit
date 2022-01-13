@@ -26,6 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 #include "d6809.h"
 #include "e6809.h"
 #include "ide.h"

@@ -29,6 +29,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 #include "intel_8085_emulator.h"
 #include "acia.h"
 #include "16x50.h"

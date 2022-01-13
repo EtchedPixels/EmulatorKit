@@ -21,6 +21,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 
 #include "system.h"
 #include "libz180/z180.h"
