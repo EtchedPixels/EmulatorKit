@@ -121,6 +121,9 @@ tiny68k.o: tiny68k.c m68k/lib68k.a
 z80mc:	z80mc.o sdcard.o libz80/libz80.o
 	cc -g3 z80mc.o sdcard.o libz80/libz80.o -o z80mc
 
+z180-mini-itx:	z180-mini-itx.o rc2014_noui.o z180_io.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 z180-mini-itx.o rc2014_noui.o z180_io.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o z180-mini-itx
+
 flexbox: flexbox.o 6800.o acia.o ide.o
 	cc -g3 flexbox.o 6800.o acia.o ide.o -o flexbox
 
