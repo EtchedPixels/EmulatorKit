@@ -14,6 +14,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/select.h>
 #include "libz80/z80.h"
 #include "ppide.h"
 

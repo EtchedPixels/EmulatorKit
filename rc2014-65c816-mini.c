@@ -21,6 +21,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 #include <lib65816/cpu.h>
 #include <lib65816/cpuevent.h>
 #include "acia.h"

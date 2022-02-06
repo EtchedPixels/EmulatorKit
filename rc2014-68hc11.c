@@ -25,6 +25,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 #include "6800.h"
 #include "ide.h"
 #include "ppide.h"

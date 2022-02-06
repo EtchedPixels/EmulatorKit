@@ -21,6 +21,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 #include "6502.h"
 #include "16x50.h"
 #include "acia.h"
