@@ -20,7 +20,7 @@
  *	5: Mouse Data
  *	4: Mouse Clock
  *	3: ROM Enable
- *	2: External Memory Enable (active low)
+ *	2: DC (was External Memory Enable (active low))
  *	1: SCL
  *	0: SDA
  *
@@ -40,7 +40,7 @@
  *	6: Keyboard Clock In
  *	5: Mouse Data In
  *	4: Mouse Clock In
- *	3: DC		- routed to some SPI ports
+ *	3: EXTMEM  - active low (was DC)
  *	2: CSEL2	}
  *	1: CSEL1	}	SPI device select
  *	0: CSEL0	}
@@ -63,6 +63,8 @@
 #include "lib765/include/765.h"
 #include "z180_io.h"
 
+#include "i82c55a.h"
+#include "ps2.h"
 #include "rtc_bitbang.h"
 #include "sdcard.h"
 #include "z80dis.h"
@@ -72,10 +74,9 @@
 
 static uint8_t ram[1024 * 1024];	/* 1MB RAM */
 static uint8_t rom[512 * 1024];		/* 512K ROM */
-static uint8_t port_a = 0xFF;
-static uint8_t port_b = 0xFF;
-static uint8_t port_c = 0xFF;
-static uint8_t port_ctl = 0x9B;
+static uint8_t port_a;
+static uint8_t port_b;
+static uint8_t port_c;
 
 static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
@@ -85,6 +86,9 @@ static struct sdcard *sdcard;
 static FDC_PTR fdc;
 static FDRV_PTR drive_a, drive_b;
 static struct z180_io *io;
+struct ps2 *ps2;
+struct zxkey *zxkey;
+struct i82c55a *ppi;
 
 static uint8_t ide = 0;
 static struct ide_controller *ide0;
@@ -108,6 +112,8 @@ volatile int emulator_done;
 #define TRACE_FDC	0x000080
 #define TRACE_SPI	0x000100
 #define TRACE_IDE	0x000200
+#define TRACE_PS2	0x000400
+#define TRACE_PPI	0x000800
 
 static int trace = 0;
 
@@ -120,7 +126,7 @@ static void reti_event(void);
 uint8_t z180_phys_read(int unused, uint32_t addr)
 {
 	if (addr & 0x80000) {
-		if (port_a & 0x04)
+		if (port_c & 0x08)
 			return ram[addr & 0xFFFFF];
 		else
 			return 0xFF;
@@ -135,7 +141,7 @@ void z180_phys_write(int unused, uint32_t addr, uint8_t val)
 {
 	addr &= 0xFFFFF;
 	if (addr & 0x80000) {
-		if (port_a & 0x04)
+		if (port_c & 0x08)
 			ram[addr] = val;
 		return;
 	}
@@ -411,8 +417,6 @@ static void diag_write(uint8_t val)
 	write(1, x, 12);
 }
 
-/* The 82C55 has 3 modes but we only really model mode 0 */
-
 static void ppi_recalc(void)
 {
 	/* Model the SD card on CSIO and chip select line 0 */
@@ -425,71 +429,39 @@ static void ppi_recalc(void)
 			sd_spi_lower_cs(sdcard);
 		old_cs = new_cs;
 	}
+	ps2_set_lines(ps2, !!(port_a & 0x40), !!(port_a & 0x80));
 }
 
-static uint8_t ppi_read(uint8_t addr)
+void i82c55a_output(struct i82c55a *ppi, int port, uint8_t data)
 {
-	switch(addr) {
-		case 0:
-			if (port_ctl & 0x10)		/* Port A is input */
-				return 0xFF;		/* For now */
-			else
-				return port_a;
-		case 1:
-			if (port_ctl & 0x02)		/* Port B is input */
-				return 0xFF;		/* TODO: model SDA/SCL */
-			else
-				return port_b;
-		case 2: {
-			/* This one has nybble size control */
-			uint8_t r;
-			if (port_ctl & 0x01)		/* Port C lower */
-				r = 0x0F;
-			else
-				r = port_c & 0x0F;
-			if (port_ctl & 0x08)		/* Port C upper */
-				r |= 0xF0;		/* No keyboard model yet */
-			else
-				r |= port_c & 0xF0;
-			return r;
-			}
-		case 3:
-			return port_ctl;
-		default:
-			fprintf(stderr, "Invalid PPI offset.\n");
-			return 0xFF;
-	}
-}
-
-static void ppi_write(uint8_t addr, uint8_t val)
-{
-	switch(addr) {
-		case 0:
-			port_a = val;
-			break;
-		case 1:
-			port_b = val;
-			break;
-		case 2:
-			port_c = val;
-			break;
-		case 3:
-			/* Bit 7 controls mode set or bit level control */
-			if (val & 0x80)
-				port_ctl = val;
-			else {
-				unsigned int bit = val & 1;
-				val >>= 1;
-				val &= 0x07;
-				port_c &= ~(1 << val);
-				if (bit)
-					port_c |= 1 << val;
-			}
-			break;
-		default:
-			fprintf(stderr, "Invalid PPI offset.\n");
+	switch(port) {
+	case 0:
+		port_a = data;
+		break;
+	case 1:
+		port_b = data;
+		break;
+	case 2:
+		port_c = data;
+		break;
 	}
 	ppi_recalc();
+}
+
+uint8_t i82c55a_input(struct i82c55a *ppi, int port)
+{
+	uint8_t r;
+	/* We only model port C */
+	if (port != 2)
+		return 0xFF;
+
+	r = 0x0F;		/* Inputs floating */
+	r |= 0x30;		/* No mouse */
+	if (ps2_get_clock(ps2))
+		r |= 0x40;
+	if (ps2_get_data(ps2))
+		r |= 0x80;
+	return r;
 }
 
 static uint8_t my_ide_read(uint16_t addr)
@@ -520,7 +492,7 @@ uint8_t io_read(int unused, uint16_t addr)
 	if (addr >= 0x70 && addr < 0x77) 
 		return fdc_read(addr & 7);
 	if (addr >= 0x78 && addr <= 0x7F)
-		return ppi_read(addr & 3);
+		return i82c55a_read(ppi, addr & 3);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -543,7 +515,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	else if (addr >= 0x70 && addr < 0x78)
 		fdc_write(addr & 7, val);
 	else if (addr >= 0x78 && addr <= 0x7F)
-		ppi_write(addr & 3, val);
+		i82c55a_write(ppi, addr & 3, val);
 	else if (addr == 0x0D)
 		diag_write(val);
 	else if (addr == 0xFD) {
@@ -712,6 +684,15 @@ int main(int argc, char *argv[])
 	fdc_setdrive(fdc, 0, drive_a);
 	fdc_setdrive(fdc, 1, drive_b);
 
+	ps2 = ps2_create(18);
+	ps2_trace(ps2, trace & TRACE_PS2);
+
+	ppi = i82c55a_create();
+	i82c55a_trace(ppi, trace & TRACE_PPI);
+
+	zxkey = zxkey_create();
+
+
 	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
@@ -764,6 +745,8 @@ int main(int argc, char *argv[])
 				states -= tstate_steps;
 			}
 			fdc_tick(fdc);
+			/* We want to run UI events regularly it seems */
+			ui_event();
 		}
 
 		/* Do 20ms of I/O and delays */
