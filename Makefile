@@ -7,7 +7,7 @@ all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc
 
-sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101
+sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -121,8 +121,11 @@ tiny68k.o: tiny68k.c m68k/lib68k.a
 z80mc:	z80mc.o sdcard.o libz80/libz80.o
 	cc -g3 z80mc.o sdcard.o libz80/libz80.o -o z80mc
 
-z180-mini-itx:	z180-mini-itx.o rc2014_noui.o z180_io.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 z180-mini-itx.o rc2014_noui.o z180_io.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o z180-mini-itx
+z180-mini-itx: z180-mini-itx.o rc2014_noui.o z180_io.o i82c55a.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 z180-mini-itx.o rc2014_noui.o z180_io.o i82c55a.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o z180-mini-itx
+
+z180-mini-itx_sdl2: z180-mini-itx.o rc2014_sdlui.o z180_io.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 z180-mini-itx.o rc2014_sdlui.o z180_io.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a -lSDL2  -o z180-mini-itx_sdl2
 
 flexbox: flexbox.o 6800.o acia.o ide.o
 	cc -g3 flexbox.o 6800.o acia.o ide.o -o flexbox
