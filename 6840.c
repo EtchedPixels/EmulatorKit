@@ -84,7 +84,7 @@ static void m6840_calc_outputs(struct m6840 *ptm)
 /* Count a timer in 16 or 8x8 bit mode */
 static void m6840_timer_count(struct ptm_timer *p, int restart)
 {
-    if (p->ctrl & 0x04) {
+    if (!(p->ctrl & 0x04)) {
         /* The check occurs before the count down */
         if (p->timer == 0) {
             p->event = 1;
@@ -204,6 +204,8 @@ static void m6840_soft_reset(struct m6840 *ptm)
     ptm->timer[1].timer = ptm->timer[0].wlatch;
     ptm->timer[2].timer = ptm->timer[0].wlatch;
     m6840_calc_irq(ptm);
+    if (ptm->trace)
+        fprintf(stderr, "[PTM] Reset.\n");
 }
 
 void m6840_reset(struct m6840 *ptm)
@@ -221,15 +223,20 @@ uint8_t m6840_read(struct m6840 *ptm, uint8_t addr)
     addr &= 7;
     if (addr == 0)
         return 0xFF;		/* Probably tri-stated */
-    if (addr == 1)
+    if (addr == 1) {
+        if (ptm->trace)
+            fprintf(stderr, "[PTM]: Read status register %02X\n", ptm->sr);
         return ptm->sr;
+    }
     if (addr & 1)
         return ptm->lsb;
     addr >>= 1;
     p = &ptm->timer[addr];
     ptm->lsb = p->timer;
-    ptm->sr &= ~(1 << addr);	/* And clear the interrupt */
+    ptm->sr &= ~(1 << (addr - 1));	/* And clear the interrupt */
     m6840_calc_irq(ptm);
+    if (ptm->trace)
+        fprintf(stderr, "[PTM] Read timer %d IRQ now %02X\n", addr, ptm->sr);
     return p->timer >> 8;
 }
 
@@ -245,6 +252,8 @@ void m6840_write(struct m6840 *ptm, uint8_t addr, uint8_t val)
             p = &ptm->timer[addr];
             p->wlatch = (ptm->msb << 8) | val;
             /* Writing the timer also clears the interrupt if CR3/4 are 0 */
+            if (ptm->trace)
+                fprintf(stderr, "[PTM] Timer %d set to %d\n", addr, p->wlatch);
             if ((p->ctrl & 0x18) == 0x00) {
                 p->timer = p->wlatch;
                 p->output = 0;
@@ -255,10 +264,15 @@ void m6840_write(struct m6840 *ptm, uint8_t addr, uint8_t val)
         }
         return;
     }
-    if (addr == 0 && (ptm->timer[2].ctrl & 0x1))
-        addr = 3;
-    else
-        addr = 1;
+    if (addr == 0) {
+        if (ptm->timer[2].ctrl & 0x1)
+            addr = 1;
+        else
+            addr = 3;
+    } else
+        addr = 2;
+    if (ptm->trace)
+        fprintf(stderr, "[PTM] Control %d set to %02X\n", addr, val);
     ptm->timer[addr].ctrl = val;
     /* Effects of control changes */
     if (addr == 1 && (val & 1))

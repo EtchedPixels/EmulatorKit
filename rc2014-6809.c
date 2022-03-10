@@ -155,14 +155,14 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
-/* Clock timer 2 off timer 1 */
+/* Clock timer 3 off timer 2 */
 void m6840_output_change(struct m6840 *m, uint8_t outputs)
 {
 	static int old = 0;
-	if ((outputs ^ old) & 1) {
-		/* timer 1 high to low -> clock timer 2 */
-		if (!(outputs & 1))
-			m6840_external_clock(ptm, 2);
+	if ((outputs ^ old) & 2) {
+		/* timer 2 high to low -> clock timer 3 */
+		if (!(outputs & 2))
+			m6840_external_clock(ptm, 3);
 	}
 	old = outputs;
 }
@@ -548,13 +548,16 @@ int main(int argc, char *argv[])
 	   is loaded though */
 
 	while (!done) {
-		unsigned int i;
+		unsigned int i, j;
 		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 100; i++) {
 			while(cycles < clockrate)
 				cycles += e6809_sstep(live_irq, 0);
 			m6840_tick(ptm, cycles);
+			for (j = 0; j < cycles; j++)
+				m6840_external_clock(ptm, 2);
 			cycles -= clockrate;
+			recalc_interrupts();
 		}
 		/* Drive the  serial */
 		uart16x50_event(uart);
