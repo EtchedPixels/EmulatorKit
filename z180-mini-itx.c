@@ -4,8 +4,8 @@
  *	Z180 at 18.432Hz
  *	1MB RAM / 512KB ROM
  *	CSIO to SPI with multiple device mux/demux for obnoxious devices
- *	78-7F: 82C55
- *	70-77: FDC
+ *	40-47: 82C55	}
+ *	48-4F: FDC	} Moved from prototype
  *
  *	Extmem low disables onboard high RAM
  *	ROMen high enables low 512K ROM else RAM
@@ -445,6 +445,8 @@ void i82c55a_output(struct i82c55a *ppi, int port, uint8_t data)
 		port_c = data;
 		break;
 	}
+	if (trace & TRACE_PPI)
+		fprintf(stderr,"[PPI %02X %02X %02X]\n", port_a, port_b, port_c);
 	ppi_recalc();
 }
 
@@ -489,9 +491,9 @@ uint8_t io_read(int unused, uint16_t addr)
 	addr &= 0xFF;
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
-	if (addr >= 0x70 && addr < 0x77) 
+	if (addr >= 0x48 && addr <= 0x4F)
 		return fdc_read(addr & 7);
-	if (addr >= 0x78 && addr <= 0x7F)
+	if (addr >= 0x40 && addr <= 0x47)
 		return i82c55a_read(ppi, addr & 3);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -512,9 +514,9 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
-	else if (addr >= 0x70 && addr < 0x78)
+	else if (addr >= 0x48 && addr <= 0x4F)
 		fdc_write(addr & 7, val);
-	else if (addr >= 0x78 && addr <= 0x7F)
+	else if (addr >= 0x40 && addr <= 0x47)
 		i82c55a_write(ppi, addr & 3, val);
 	else if (addr == 0x0D)
 		diag_write(val);
@@ -575,7 +577,7 @@ int main(int argc, char *argv[])
 	while (p < ram + sizeof(ram))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "d:fF:lRS:i:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:fF:lr:RS:i:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -605,6 +607,12 @@ int main(int argc, char *argv[])
 		case 'i':	/* Model a plugged in CF adapter for debugging convenience on the ROM */
 			idepath = optarg;
 			ide = 1;
+			break;
+		case 'A':
+			patha = optarg;
+			break;
+		case 'B':
+			pathb = optarg;
 			break;
 		default:
 			usage();
