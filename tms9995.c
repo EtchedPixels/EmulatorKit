@@ -137,6 +137,7 @@ static void tms9995_word_read(struct tms9995 *tms);
 static void tms9995_command_completed(struct tms9995 *tms);
 static void tms9995_trigger_decrementer(struct tms9995 *tms);
 static void tms9995_build_command_lookup_table(struct tms9995 *tms);
+static void tms9995_disassemble(struct tms9995 *tms);
 
 /****************************************************************************
     Some small helpers
@@ -150,6 +151,7 @@ static bool is_onchip(struct tms9995 *tms, uint16_t addr)
 		return true;
 	if ((addr & 0xFFFC) == 0xFFFC)
 		return true;
+	/* FIXME: decrementer */
 	return false;
 }
 
@@ -180,6 +182,11 @@ void tms9995_trace(struct tms9995 *tms, bool onoff)
 	tms->trace = onoff;
 }
 
+void tms9995_itrace(struct tms9995 *tms, bool onoff)
+{
+	tms->itrace = onoff;
+}
+
 enum {
 	TMS9995_PC=0, TMS9995_WP, TMS9995_STATUS, TMS9995_IR,
 	TMS9995_R0, TMS9995_R1, TMS9995_R2, TMS9995_R3,
@@ -207,7 +214,7 @@ void tms9995_device_start(struct tms9995 *tms)
 	tms->index = 0;
 
 
-	if (tms->trace) fprintf(stderr, "Variant = %s, Overflow int = %s\n", tms->mp9537? "MP9537 (no on-chip RAM)" : "standard (with on-chip RAM)", tms->check_overflow? "check" : "no check");
+	if (tms->itrace) fprintf(stderr, "Variant = %s, Overflow int = %s\n", tms->mp9537? "MP9537 (no on-chip RAM)" : "standard (with on-chip RAM)", tms->check_overflow? "check" : "no check");
 }
 
 char const *const tms9995_s_statename[20] =
@@ -968,14 +975,14 @@ void tms9995_execute_run(struct tms9995 *tms, unsigned int cycles)
 
 	if (tms->reset) tms9995_service_interrupt(tms);
 
-	if (tms->trace) fprintf(stderr, "calling execute_run for %d cycles\n", tms->icount);
+	if (tms->itrace) fprintf(stderr, "calling execute_run for %d cycles\n", tms->icount);
 	do
 	{
 		// Normal operation
 		if (tms->check_ready && tms->ready == false)
 		{
 			// We are in a wait state
-			if (tms->trace) fprintf(stderr, "wait\n");
+			if (tms->itrace) fprintf(stderr, "wait\n");
 			// The clock output should be used to change the state of an outer
 			// device which operates the READY line
 			tms9995_pulse_clock(tms, 1);
@@ -985,7 +992,7 @@ void tms9995_execute_run(struct tms9995 *tms, unsigned int cycles)
 			if (tms->check_hold && tms->hold_requested)
 			{
 				tms9995_set_hold_state(tms, true);
-				if (tms->trace) fprintf(stderr, "HOLD state\n");
+				if (tms->itrace) fprintf(stderr, "HOLD state\n");
 				tms9995_pulse_clock(tms, 1);
 			}
 			else
@@ -994,7 +1001,7 @@ void tms9995_execute_run(struct tms9995 *tms, unsigned int cycles)
 
 				tms->check_ready = false;
 
-				if (tms->trace) fprintf(stderr, "main loop, operation %s, MPC = %d\n", opname[tms->command], tms->MPC);
+				if (tms->itrace) fprintf(stderr, "main loop, operation %s, MPC = %d\n", opname[tms->command], tms->MPC);
 				uint8_t* program = (uint8_t *)s_command[tms->index].prog;
 				s_microoperation[program[tms->MPC]](tms);
 
@@ -1010,7 +1017,7 @@ void tms9995_execute_run(struct tms9995 *tms, unsigned int cycles)
 		}
 	} while (tms->icount>0 && !tms->reset);
 
-	if (tms->trace) fprintf(stderr, "cycles expired; will return soon.\n");
+	if (tms->itrace) fprintf(stderr, "cycles expired; will return soon.\n");
 }
 
 /**************************************************************************/
@@ -1028,7 +1035,7 @@ void tms9995_execute_set_input(struct tms9995 *tms, int irqline, bool state)
 	{
 		if (state)
 		{
-			if (tms->trace)
+			if (tms->itrace)
 				fprintf(stderr, "RESET interrupt line; READY=%d\n", tms->ready_bufd);
 			tms9995_reset_line(tms, true);
 		}
@@ -1038,7 +1045,7 @@ void tms9995_execute_set_input(struct tms9995 *tms, int irqline, bool state)
 		if (irqline == INPUT_LINE_NMI)
 		{
 			tms->nmi_active = (state==true);
-			if (tms->trace) fprintf(stderr, "NMI interrupt line state=%d\n", state);
+			if (tms->itrace) fprintf(stderr, "NMI interrupt line state=%d\n", state);
 		}
 		else
 		{
@@ -1047,11 +1054,11 @@ void tms9995_execute_set_input(struct tms9995 *tms, int irqline, bool state)
 				// *active means that the signal is still present on the input.
 				// The latch can only be reset when this signal is clear.
 				tms->int1_active = (state==true);
-				if (tms->trace) fprintf(stderr, "Line INT1 state=%d\n", state);
+				if (tms->itrace) fprintf(stderr, "Line INT1 state=%d\n", state);
 				// Latch the INT
 				if (state==true)
 				{
-					if (tms->trace) fprintf(stderr, "Latch INT1\n");
+					if (tms->itrace) fprintf(stderr, "Latch INT1\n");
 					tms->flag[2] = true;
 				}
 			}
@@ -1059,21 +1066,21 @@ void tms9995_execute_set_input(struct tms9995 *tms, int irqline, bool state)
 			{
 				if (irqline == INT_9995_INT4)
 				{
-					if (tms->trace) fprintf(stderr, "Line INT4/EC state=%d\n", state);
+					if (tms->itrace) fprintf(stderr, "Line INT4/EC state=%d\n", state);
 					if (tms->flag[0]==false)
 					{
 						tms->int4_active = (state==true);
-						if (tms->trace) fprintf(stderr, "set as interrupt\n");
+						if (tms->itrace) fprintf(stderr, "set as interrupt\n");
 						// Latch the INT
 						if (state==true)
 						{
-							if (tms->trace) fprintf(stderr, "Latch INT4\n");
+							if (tms->itrace) fprintf(stderr, "Latch INT4\n");
 							tms->flag[4] = true;
 						}
 					}
 					else
 					{
-						if (tms->trace) fprintf(stderr, "set as event count\n");
+						if (tms->itrace) fprintf(stderr, "set as event count\n");
 						tms9995_trigger_decrementer(tms);
 					}
 				}
@@ -1112,7 +1119,7 @@ static void tms9995_pulse_clock(struct tms9995 *tms, int count)
 		tms->ready = tms->ready_bufd && !tms->request_auto_wait_state;                // get the latched READY state
 		tms->icount--;                         // This is the only location where we count down the cycles.
 
-		if (tms->trace) {
+		if (tms->itrace) {
 			if (tms->check_ready)
 				fprintf(stderr, "tms9995_pulse_clock, READY=%d, auto_wait=%d\n", tms->ready_bufd? 1:0, tms->auto_wait? 1:0);
 			else
@@ -1136,7 +1143,7 @@ static void tms9995_pulse_clock(struct tms9995 *tms, int count)
 void tms9995_hold_line(struct tms9995 *tms, bool state)
 {
 	tms->hold_requested = state;
-	if (tms->trace) fprintf(stderr, "set HOLD = %d\n", state);
+	if (tms->itrace) fprintf(stderr, "set HOLD = %d\n", state);
 }
 
 /*
@@ -1149,12 +1156,12 @@ void tms9995_ready_line(struct tms9995 *tms, bool state)
 	{
 		if (tms->reset)
 		{
-			if (tms->trace) fprintf(stderr, "Ignoring READY=%d change due to pending RESET\n", state);
+			if (tms->itrace) fprintf(stderr, "Ignoring READY=%d change due to pending RESET\n", state);
 		}
 		else
 		{
 			tms->ready_bufd = state;
-			if (tms->trace) fprintf(stderr, "set READY = %d\n", tms->ready_bufd? 1 : 0);
+			if (tms->itrace) fprintf(stderr, "set READY = %d\n", tms->ready_bufd? 1 : 0);
 		}
 	}
 }
@@ -1196,7 +1203,7 @@ static void tms9995_decode(struct tms9995 *tms, uint16_t inst)
 	while (!complete)
 	{
 		ix = (opcode >> 12) & 0x000f;
-		if (tms->trace) fprintf(stderr, "Check next hex digit of instruction %x\n", ix);
+		if (tms->itrace) fprintf(stderr, "Check next hex digit of instruction %x\n", ix);
 		if (table->next_digit[ix] != NULL)
 		{
 			table = table->next_digit[ix];
@@ -1221,7 +1228,7 @@ static void tms9995_decode(struct tms9995 *tms, uint16_t inst)
 		tms->pre_command = decoded->id;
 		tms->pre_index = program_index;
 		tms->pre_byteop = ((decoded->format == 1) && ((inst & 0x1000)!=0));
-		if (tms->trace) fprintf(stderr, "Command decoded as id %d, %s, base opcode %04x\n", decoded->id, opname[decoded->id], decoded->opcode);
+		if (tms->itrace) fprintf(stderr, "Command decoded as id %d, %s, base opcode %04x\n", decoded->id, opname[decoded->id], decoded->opcode);
 		tms->pass = 1;
 	}
 }
@@ -1241,7 +1248,7 @@ static void tms9995_int_prefetch_and_decode(struct tms9995 *tms)
 		// Check interrupt lines
 		if (tms->nmi_active)
 		{
-			if (tms->trace) fprintf(stderr, "Checking interrupts ... NMI active\n");
+			if (tms->itrace) fprintf(stderr, "Checking interrupts ... NMI active\n");
 			tms->int_pending |= PENDING_NMI;
 			tms->idle_state = false;
 			tms->PC = (tms->PC + 2) & 0xfffe;     // we have not prefetched the next instruction
@@ -1267,10 +1274,10 @@ static void tms9995_int_prefetch_and_decode(struct tms9995 *tms)
 				if (tms->idle_state)
 				{
 					tms->idle_state = false;
-					if (tms->trace) fprintf(stderr, "Interrupt occurred, terminate IDLE state\n");
+					if (tms->itrace) fprintf(stderr, "Interrupt occurred, terminate IDLE state\n");
 				}
 				tms->PC = tms->PC + 2;        // PC must be advanced (see flow chart), but no prefetch
-				if (tms->trace) fprintf(stderr, "Interrupts pending; no prefetch; advance PC to %04x\n", tms->PC);
+				if (tms->itrace) fprintf(stderr, "Interrupts pending; no prefetch; advance PC to %04x\n", tms->PC);
 				return;
 			}
 			else
@@ -1278,7 +1285,7 @@ static void tms9995_int_prefetch_and_decode(struct tms9995 *tms)
 				// No pending interrupts
 				if (tms->idle_state)
 				{
-					if (tms->trace) fprintf(stderr, "IDLE state\n");
+					if (tms->itrace) fprintf(stderr, "IDLE state\n");
 					// We are IDLE, stay in the loop and do not advance the PC
 					tms->pass = 2;
 					tms9995_pulse_clock(tms, 1);
@@ -1308,7 +1315,7 @@ static void tms9995_prefetch_and_decode(struct tms9995 *tms)
 		tms->value_copy = tms->current_value;
 		tms->iaq = true;
 		tms->address = tms->PC;
-		if (tms->trace) fprintf(stderr, "** Prefetching new instruction at %04x **\n", tms->PC);
+		if (tms->itrace) fprintf(stderr, "** Prefetching new instruction at %04x **\n", tms->PC);
 	}
 
 	tms9995_word_read(tms); // changes tms->mem_phase
@@ -1321,7 +1328,7 @@ static void tms9995_prefetch_and_decode(struct tms9995 *tms)
 		tms->current_value = tms->value_copy; // restore tms->current_value
 		tms->PC = (tms->PC + 2) & 0xfffe;     // advance PC
 		tms->iaq = false;
-		if (tms->trace) fprintf(stderr, "++ Prefetch done ++\n");
+		if (tms->itrace) fprintf(stderr, "++ Prefetch done ++\n");
 	}
 }
 
@@ -1352,7 +1359,7 @@ static void tms9995_next_command(struct tms9995 *tms)
 		// This is a preset for opcodes which do not need an opcode address derivation
 		tms->address = tms->WP + ((tms->IR & 0x000f)<<1);
 		tms->MPC = -1; 
-		if (tms->trace) {
+		if (tms->itrace) {
 			fprintf(stderr, "===== %04x: Op=%04x (%s)\n", tms->PC-2, tms->IR, opname[tms->command]);
 
 			// Mark logged address as interrupt service
@@ -1363,7 +1370,8 @@ static void tms9995_next_command(struct tms9995 *tms)
 		}
 
 		tms->PC_debug = tms->PC - 2;
-//FIXME		tms9995_disassemble(tms);
+		if (tms->trace)
+			tms9995_disassemble(tms);
 		tms->first_cycle = tms->icount;
 	}
 }
@@ -1374,7 +1382,7 @@ static void tms9995_next_command(struct tms9995 *tms)
 static void tms9995_command_completed(struct tms9995 *tms)
 {
 	// Pseudo state at the end of the current instruction cycle sequence
-	if (tms->trace)
+	if (tms->itrace)
 	{
 		// logerror("+++++ Instruction %04x (%s) completed", IR, opname[tms->command]);
 		int cycles =  tms->first_cycle - tms->icount;
@@ -1429,7 +1437,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 		// The auto-wait state generation is turned on when the READY line is cleared
 		// on RESET.
 		tms->auto_wait = !tms->ready_bufd;
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "RESET; automatic wait state creation is %s\n", tms->auto_wait? "enabled":"disabled");
 		// We reset the READY flag, or the CPU will not start
 		tms->ready_bufd = true;
@@ -1441,7 +1449,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 			vectorpos = 0x0008;
 			tms->intmask = 0x0001;
 			tms->PC = (tms->PC + 2) & 0xfffe;
-			if (tms->trace) fprintf(stderr, "** MID pending\n");
+			if (tms->itrace) fprintf(stderr, "** MID pending\n");
 			tms->mid_active = false;
 		}
 		else
@@ -1451,7 +1459,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 				vectorpos = 0xfffc;
 				tms->int_pending &= ~PENDING_NMI;
 				tms->intmask = 0;
-				if (tms->trace) fprintf(stderr, "** NMI pending\n");
+				if (tms->itrace) fprintf(stderr, "** NMI pending\n");
 			}
 			else
 			{
@@ -1464,7 +1472,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 					// to clear it right here, without considering the line state
 					tms->flag[2] = false;
 					tms->intmask = 0;
-					if (tms->trace) fprintf(stderr, "** INT1 pending\n");
+					if (tms->itrace) fprintf(stderr, "** INT1 pending\n");
 				}
 				else
 				{
@@ -1473,7 +1481,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 						vectorpos = 0x0008;
 						tms->int_pending &= ~PENDING_OVERFLOW;
 						tms->intmask = 0x0001;
-						if (tms->trace) fprintf(stderr, "** OVERFL pending\n");
+						if (tms->itrace) fprintf(stderr, "** OVERFL pending\n");
 					}
 					else
 					{
@@ -1483,7 +1491,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 							tms->intmask = 0x0002;
 							tms->int_pending &= ~PENDING_DECR;
 							tms->flag[3] = false;
-							if (tms->trace) fprintf(stderr, "** DECR pending\n");
+							if (tms->itrace) fprintf(stderr, "** DECR pending\n");
 						}
 						else
 						{
@@ -1492,7 +1500,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 							tms->int_pending &= ~PENDING_LEVEL4;
 							// See above for clearing the latch
 							tms->flag[4] = false;
-							if (tms->trace) fprintf(stderr, "** INT4 pending\n");
+							if (tms->itrace) fprintf(stderr, "** INT4 pending\n");
 						}
 					}
 				}
@@ -1500,7 +1508,7 @@ static void tms9995_service_interrupt(struct tms9995 *tms)
 		}
 	}
 
-	if (tms->trace)
+	if (tms->itrace)
 		fprintf(stderr, "*** triggered an interrupt with vector %04x/%04x\n", vectorpos, vectorpos+2);
 
 	// just for debugging purposes
@@ -1553,7 +1561,7 @@ void tms9995_mem_read(struct tms9995 *tms)
 
 	if ((tms->address & 0xfffe)==0xfffa && !tms->mp9537)
 	{
-		if (tms->trace) fprintf(stderr, "read dec=%04x\n", tms->decrementer_value);
+		if (tms->itrace) fprintf(stderr, "read dec=%04x\n", tms->decrementer_value);
 		// Decrementer mapped into the address space
 		tms->current_value = tms->decrementer_value;
 		if (tms->byteop)
@@ -1575,7 +1583,7 @@ void tms9995_mem_read(struct tms9995 *tms)
 		// byte operations (e.g. when retrieving the index register)
 		if (tms->word_access || !tms->byteop) tms->address &= 0xfffe;
 
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "read onchip memory (single pass, address %04x)\n", tms->address);
 
 		// Ignore the READY state
@@ -1618,7 +1626,7 @@ void tms9995_mem_read(struct tms9995 *tms)
 			else tms->pass = 2;
 
 			tms->check_hold = false;
-			if (tms->trace) fprintf(stderr, "set address bus %04x\n", tms->address & 0xfffe);
+			if (tms->itrace) fprintf(stderr, "set address bus %04x\n", tms->address & 0xfffe);
 			tms->request_auto_wait_state = tms->auto_wait;
 			tms9995_pulse_clock(tms, 1);
 			break;
@@ -1626,13 +1634,13 @@ void tms9995_mem_read(struct tms9995 *tms)
 			// Sample the value on the data bus (high byte)
 			if (tms->word_access || !tms->byteop) address &= 0xfffe;
 			value = tms9995_readb(tms, address);
-			if (tms->trace)
+			if (tms->itrace)
 				fprintf(stderr, "memory read byte %04x -> %02x\n", tms->address & 0xfffe, value);
 			tms->current_value = (value << 8) & 0xff00;
 			break;
 		case 3:
 			// Set address + 1 (unless byte command)
-			if (tms->trace) fprintf(stderr, "set address bus %04x\n", tms->address | 1);
+			if (tms->itrace) fprintf(stderr, "set address bus %04x\n", tms->address | 1);
 			tms->request_auto_wait_state = tms->auto_wait;
 			tms9995_pulse_clock(tms, 1);
 			break;
@@ -1640,7 +1648,7 @@ void tms9995_mem_read(struct tms9995 *tms)
 			// Read low byte
 			value = tms9995_readb(tms, tms->address | 1);
 			tms->current_value |= value;
-			if (tms->trace)
+			if (tms->itrace)
 				fprintf(stderr, "memory read byte %04x -> %02x, complete word = %04x\n", tms->address | 1, value, tms->current_value);
 			tms->check_hold = true;
 			break;
@@ -1709,7 +1717,7 @@ static void tms9995_mem_write(struct tms9995 *tms)
 		{
 			tms->starting_count_storage_register = tms->decrementer_value = tms->current_value;
 		}
-		if (tms->trace) fprintf(stderr, "Setting dec=%04x [tms->PC=%04x]\n", tms->current_value, tms->PC);
+		if (tms->itrace) fprintf(stderr, "Setting dec=%04x [tms->PC=%04x]\n", tms->current_value, tms->PC);
 		tms9995_pulse_clock(tms, 1);
 		return;
 	}
@@ -1721,7 +1729,7 @@ static void tms9995_mem_write(struct tms9995 *tms)
 		// byte operations (e.g. when retrieving the index register)
 		if (tms->word_access || !tms->byteop) tms->address &= 0xfffe;
 
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "write to onchip memory (single pass, address %04x, value=%04x)\n", tms->address, tms->current_value);
 
 		// An on-chip memory access is also visible to the outside world ([1], 2.3.1.2)
@@ -1754,7 +1762,7 @@ static void tms9995_mem_write(struct tms9995 *tms)
 			else tms->pass = 2;
 
 			tms->check_hold = false;
-			if (tms->trace)
+			if (tms->itrace)
 				fprintf(stderr, "memory write byte %04x <- %02x\n", address, (tms->current_value >> 8)&0xff);
 			tms9995_writeb(tms, address, (tms->current_value >> 8)&0xff);
 			tms->request_auto_wait_state = tms->auto_wait;
@@ -1766,7 +1774,7 @@ static void tms9995_mem_write(struct tms9995 *tms)
 			break;
 		case 3:
 			// Set address + 1 (unless byte command)
-			if (tms->trace) fprintf(stderr, "memory write byte %04x <- %02x\n", tms->address | 1, tms->current_value & 0xff);
+			if (tms->itrace) fprintf(stderr, "memory write byte %04x <- %02x\n", tms->address | 1, tms->current_value & 0xff);
 			tms9995_writeb(tms, tms->address | 1, tms->current_value & 0xff);
 			tms->request_auto_wait_state = tms->auto_wait;
 			tms9995_pulse_clock(tms, 1);
@@ -1807,7 +1815,7 @@ static void tms9995_return_with_address(struct tms9995 *tms)
 	tms->index = tms->caller_index;
 	tms->MPC = tms->caller_MPC; // will be increased on return
 	tms->address = tms->current_value + tms->address_add;
-	if (tms->trace) fprintf(stderr, "+++ return from operand address derivation +++\n");
+	if (tms->itrace) fprintf(stderr, "+++ return from operand address derivation +++\n");
 	// no clock pulse
 }
 
@@ -1821,7 +1829,7 @@ static void tms9995_return_with_address_copy(struct tms9995 *tms)
 	tms->index = tms->caller_index;
 	tms->MPC = tms->caller_MPC; // will be increased on return
 	tms->address = tms->address_saved;
-	if (tms->trace) fprintf(stderr, "+++ return from operand address derivation (auto inc) +++\n");
+	if (tms->itrace) fprintf(stderr, "+++ return from operand address derivation (auto inc) +++\n");
 	// no clock pulse
 }
 
@@ -1861,7 +1869,7 @@ static void tms9995_return_with_address_copy(struct tms9995 *tms)
 
 static void tms9995_cru_output_operation(struct tms9995 *tms)
 {
-	if (tms->trace) fprintf(stderr, "CRU output operation, address %04x, value %d\n", tms->cru_address, tms->cru_value & 0x01);
+	if (tms->itrace) fprintf(stderr, "CRU output operation, address %04x, value %d\n", tms->cru_address, tms->cru_value & 0x01);
 
 	if (tms->cru_address == 0x1fda)
 	{
@@ -1876,7 +1884,7 @@ static void tms9995_cru_output_operation(struct tms9995 *tms)
 		{
 			tms->check_ready = false;
 			// FLAG2, FLAG3, and FLAG4 are read-only
-			if (tms->trace) fprintf(stderr, "set CRU address %04x to %d\n", tms->cru_address, tms->cru_value&1);
+			if (tms->itrace) fprintf(stderr, "set CRU address %04x to %d\n", tms->cru_address, tms->cru_value&1);
 			if ((tms->cru_address != 0x1ee4) && (tms->cru_address != 0x1ee6) && (tms->cru_address != 0x1ee8))
 				tms->flag[(tms->cru_address>>1)&0x000f] = (tms->cru_value & 0x01);
 		}
@@ -1948,7 +1956,7 @@ static void tms9995_cru_input_operation(struct tms9995 *tms)
 		}
 	}
 
-	if (tms->trace) fprintf(stderr, "CRU input operation, address %04x, value %d\n", tms->cru_address, crubit ? 1 : 0);
+	if (tms->itrace) fprintf(stderr, "CRU input operation, address %04x, value %d\n", tms->cru_address, crubit ? 1 : 0);
 
 	if (crubit)
 		tms->cru_value |= 0x8000;
@@ -1972,13 +1980,13 @@ static void tms9995_trigger_decrementer(struct tms9995 *tms)
 	if (tms->starting_count_storage_register>0) // null will turn off the decrementer
 	{
 		tms->decrementer_value--;
-		if (tms->trace) fprintf(stderr, "dec=%04x\n", tms->decrementer_value);
+		if (tms->itrace) fprintf(stderr, "dec=%04x\n", tms->decrementer_value);
 		if (tms->decrementer_value==0)
 		{
 			tms->decrementer_value = tms->starting_count_storage_register;
 			if (tms->flag[1]==true)
 			{
-				if (tms->trace) fprintf(stderr, "decrementer flags interrupt\n");
+				if (tms->itrace) fprintf(stderr, "decrementer flags interrupt\n");
 				tms->flag[3] = true;
 			}
 		}
@@ -2026,12 +2034,12 @@ static void tms9995_operand_address_subprogram(struct tms9995 *tms)
 	{
 		if (tms->regnumber != 0)
 		{
-			if (tms->trace) fprintf(stderr, "indexed addressing\n");
+			if (tms->itrace) fprintf(stderr, "indexed addressing\n");
 			tms->MPC = 16; // indexed
 		}
 		else
 		{
-			if (tms->trace) fprintf(stderr, "symbolic addressing\n");
+			if (tms->itrace) fprintf(stderr, "symbolic addressing\n");
 			tms->address = tms->PC;
 			tms->PC = (tms->PC + 2) & 0xfffe;
 		}
@@ -2041,7 +2049,7 @@ static void tms9995_operand_address_subprogram(struct tms9995 *tms)
 	tms->mem_phase = 1;
 	tms->address_add = 0;
 	tms->MPC--;      // will be increased in the mail loop
-	if (tms->trace) fprintf(stderr, "*** Operand address derivation; address=%04x; index=%d\n", tms->address, tms->MPC+1);
+	if (tms->itrace) fprintf(stderr, "*** Operand address derivation; address=%04x; index=%d\n", tms->address, tms->MPC+1);
 }
 
 /*
@@ -2183,7 +2191,7 @@ static void tms9995_alu_add_s_sxc(struct tms9995 *tms)
 	{
 		tms9995_set_status_parity(tms, (uint8_t)(dest_new>>8));
 	}
-	if (tms->trace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+	if (tms->itrace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 	// No clock pulse (will be done by prefetch)
 }
 
@@ -2230,7 +2238,7 @@ static void tms9995_alu_blwp(struct tms9995 *tms)
 	case 4:
 		tms->PC = tms->current_value & 0xfffe;
 		n = 0;
-		if (tms->trace) fprintf(stderr, "Context switch (blwp): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
+		if (tms->itrace) fprintf(stderr, "Context switch (blwp): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
 		break;
 	}
 	tms->inst_state++;
@@ -2251,7 +2259,7 @@ static void tms9995_alu_c(struct tms9995 *tms)
 		tms9995_set_status_parity(tms, (uint8_t)(tms->source_value>>8));
 	}
 	tms9995_compare_and_set_lae(tms, tms->source_value, tms->current_value);
-	if (tms->trace) fprintf(stderr, "ST = %04x (val1=%04x, val2=%04x)\n", tms->ST, tms->source_value, tms->current_value);
+	if (tms->itrace) fprintf(stderr, "ST = %04x (val1=%04x, val2=%04x)\n", tms->ST, tms->source_value, tms->current_value);
 }
 
 /*
@@ -2262,12 +2270,12 @@ static void tms9995_alu_ci(struct tms9995 *tms)
 	// We have the register value in tms->source_value, the register address in tms->address_saved
 	// and the immediate value in tms->current_value
 	tms9995_compare_and_set_lae(tms, tms->source_value, tms->current_value);
-	if (tms->trace) fprintf(stderr, "ST = %04x (val1=%04x, val2=%04x)\n", tms->ST, tms->source_value, tms->current_value);
+	if (tms->itrace) fprintf(stderr, "ST = %04x (val1=%04x, val2=%04x)\n", tms->ST, tms->source_value, tms->current_value);
 }
 
 static void tms9995_alu_clr_seto(struct tms9995 *tms)
 {
-	if (tms->trace) fprintf(stderr, "clr/seto: Setting values for address %04x\n", tms->address);
+	if (tms->itrace) fprintf(stderr, "clr/seto: Setting values for address %04x\n", tms->address);
 	switch (tms->command)
 	{
 	case CLR:
@@ -2476,7 +2484,7 @@ static void tms9995_alu_external(struct tms9995 *tms)
 
 	if (tms->command == IDLE)
 	{
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "Entering IDLE state\n");
 		tms->idle_state = true;
 	}
@@ -2484,7 +2492,7 @@ static void tms9995_alu_external(struct tms9995 *tms)
 	if (tms->command == RSET)
 	{
 		tms->ST &= 0xfff0;
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "RSET, new ST = %04x\n", tms->ST);
 	}
 
@@ -2529,7 +2537,7 @@ static void tms9995_alu_f3(struct tms9995 *tms)
 				tms9995_compare_and_set_lae(tms, tms->current_value, 0);
 			}
 		}
-		if (tms->trace) fprintf(stderr, "ST = %04x\n", tms->ST);
+		if (tms->itrace) fprintf(stderr, "ST = %04x\n", tms->ST);
 		break;
 	}
 	tms->inst_state++;
@@ -2565,7 +2573,7 @@ static void tms9995_alu_imm_arithm(struct tms9995 *tms)
 	tms->current_value = (uint16_t)(dest_new & 0xffff);
 	tms9995_compare_and_set_lae(tms, tms->current_value, 0);
 	tms->address = tms->address_saved;
-	if (tms->trace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+	if (tms->itrace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 }
 
 /*
@@ -2621,11 +2629,11 @@ static void tms9995_alu_jump(struct tms9995 *tms)
 
 	if (!cond)
 	{
-		if (tms->trace) fprintf(stderr, "Jump condition false\n");
+		if (tms->itrace) fprintf(stderr, "Jump condition false\n");
 	}
 	else
 	{
-		if (tms->trace) fprintf(stderr, "Jump condition true\n");
+		if (tms->itrace) fprintf(stderr, "Jump condition true\n");
 		tms->PC = (tms->PC + (displacement<<1)) & 0xfffe;
 	}
 }
@@ -2645,7 +2653,7 @@ static void tms9995_alu_ldcr(struct tms9995 *tms)
 	case 1:
 		// We have read the byte or word into tms->current_value.
 		tms9995_compare_and_set_lae(tms, tms->current_value, 0);
-		if (tms->trace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+		if (tms->itrace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 
 		// Parity is computed from the complete byte, even when less than
 		// 8 bits are transferred (see [1]).
@@ -2677,7 +2685,7 @@ static void tms9995_alu_li(struct tms9995 *tms)
 	// The immediate value is still in tms->current_value
 	tms->address = tms->address_saved;
 	tms9995_compare_and_set_lae(tms, tms->current_value, 0);
-	if (tms->trace) fprintf(stderr, "tms->ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+	if (tms->itrace) fprintf(stderr, "tms->ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 }
 
 static void tms9995_alu_limi_lwpi(struct tms9995 *tms)
@@ -2686,13 +2694,13 @@ static void tms9995_alu_limi_lwpi(struct tms9995 *tms)
 	if (tms->command == LIMI)
 	{
 		tms->ST = (tms->ST & 0xfff0) | (tms->current_value & 0x000f);
-		if (tms->trace) fprintf(stderr, "LIMI sets ST = %04x\n", tms->ST);
+		if (tms->itrace) fprintf(stderr, "LIMI sets ST = %04x\n", tms->ST);
 		tms9995_pulse_clock(tms, 1);     // needs one more than LWPI
 	}
 	else
 	{
 		tms->WP = tms->current_value & 0xfffe;
-		if (tms->trace) fprintf(stderr, "LWPI sets new WP = %04x\n", tms->WP);
+		if (tms->itrace) fprintf(stderr, "LWPI sets new WP = %04x\n", tms->WP);
 	}
 }
 
@@ -2705,13 +2713,13 @@ static void tms9995_alu_lst_lwp(struct tms9995 *tms)
 	if (tms->command==LST)
 	{
 		tms->ST = tms->current_value;
-		if (tms->trace) fprintf(stderr, "new ST = %04x\n", tms->ST);
+		if (tms->itrace) fprintf(stderr, "new ST = %04x\n", tms->ST);
 		tms9995_pulse_clock(tms, 1);
 	}
 	else
 	{
 		tms->WP = tms->current_value & 0xfffe;
-		if (tms->trace) fprintf(stderr, "new WP = %04x\n", tms->WP);
+		if (tms->itrace) fprintf(stderr, "new WP = %04x\n", tms->WP);
 	}
 }
 
@@ -2729,7 +2737,7 @@ static void tms9995_alu_mov(struct tms9995 *tms)
 		tms9995_set_status_parity(tms, (uint8_t)(tms->current_value>>8));
 	}
 	tms9995_compare_and_set_lae(tms, tms->current_value, 0);
-	if (tms->trace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+	if (tms->itrace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 	// No clock pulse, as next instruction is prefetch
 }
 
@@ -2822,7 +2830,7 @@ static void tms9995_alu_rtwp(struct tms9995 *tms)
 		// Just for debugging purposes
 		tms->log_interrupt = false;
 
-		if (tms->trace) fprintf(stderr, "Context switch (rtwp): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
+		if (tms->itrace) fprintf(stderr, "Context switch (rtwp): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
 		break;
 	}
 	tms->inst_state++;
@@ -2876,7 +2884,7 @@ static void tms9995_alu_shift(struct tms9995 *tms)
 		}
 		else
 		{
-			if (tms->trace) fprintf(stderr, "Shift operation gets count from R0\n");
+			if (tms->itrace) fprintf(stderr, "Shift operation gets count from R0\n");
 		}
 		tms9995_pulse_clock(tms, 1);
 		tms9995_pulse_clock(tms, 1);
@@ -2922,7 +2930,7 @@ static void tms9995_alu_shift(struct tms9995 *tms)
 		if (check_ov) tms9995_set_status_bit(tms, ST_OV, overflow); // only SLA
 		tms9995_compare_and_set_lae(tms, tms->current_value, 0);
 		tms->address = tms->address_saved;        // Register address
-		if (tms->trace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+		if (tms->itrace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 		break;
 	}
 	tms->inst_state++;
@@ -3020,7 +3028,7 @@ static void tms9995_alu_single_arithm(struct tms9995 *tms)
 	tms->current_value = dest_new & 0xffff;
 	tms9995_compare_and_set_lae(tms, tms->current_value, 0);
 
-	if (tms->trace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+	if (tms->itrace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 	// No clock pulse, as next instruction is prefetch
 }
 
@@ -3058,7 +3066,7 @@ static void tms9995_alu_stcr(struct tms9995 *tms)
 			tms->current_value <<= 8;
 		}
 		else n += 8;
-		if (tms->trace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
+		if (tms->itrace) fprintf(stderr, "ST = %04x (val=%04x)\n", tms->ST, tms->current_value);
 		break;
 	}
 	tms->inst_state++;
@@ -3098,7 +3106,7 @@ static void tms9995_alu_tb(struct tms9995 *tms)
 		break;
 	case 2:
 		tms9995_set_status_bit(tms, ST_EQ, tms->cru_value!=0);
-		if (tms->trace) fprintf(stderr, "ST = %04x\n", tms->ST);
+		if (tms->itrace) fprintf(stderr, "ST = %04x\n", tms->ST);
 		break;
 	}
 	tms->inst_state++;
@@ -3163,7 +3171,7 @@ static void tms9995_alu_xop(struct tms9995 *tms)
 	case 6:
 		tms->PC = tms->current_value & 0xfffe;
 		tms9995_set_status_bit(tms, ST_X, true);
-		if (tms->trace) fprintf(stderr, "Context switch (xop): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
+		if (tms->itrace) fprintf(stderr, "Context switch (xop): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
 		break;
 	}
 	tms->inst_state++;
@@ -3182,7 +3190,7 @@ static void tms9995_alu_int(struct tms9995 *tms)
 	case 0:
 		tms->PC = (tms->PC - 2) & 0xfffe;
 		tms->address_saved = tms->address;
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "interrupt service (0): Prepare to read vector\n");
 		break;
 	case 1:
@@ -3191,34 +3199,34 @@ static void tms9995_alu_int(struct tms9995 *tms)
 		tms->WP = tms->current_value & 0xfffe;       // new WP
 		tms->current_value = tms->ST;
 		tms->address = (tms->WP + 30)&0xfffe;
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "interrupt service (1): Read new WP = %04x, save ST to %04x\n", tms->WP, tms->address);
 		break;
 	case 2:
 		tms->address = (tms->WP + 28)&0xfffe;
 		tms->current_value = tms->PC;
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "interrupt service (2): Save PC to %04x\n", tms->address);
 		break;
 	case 3:
 		tms->address = (tms->WP + 26)&0xfffe;
 		tms->current_value = tms->source_value;   // old WP
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "interrupt service (3): Save WP to %04x\n", tms->address);
 		break;
 	case 4:
 		tms->address = (tms->address_saved + 2) & 0xfffe;
-		if (tms->trace)
+		if (tms->itrace)
 			fprintf(stderr, "interrupt service (4): Read PC from %04x\n", tms->address);
 		break;
 	case 5:
 		tms->PC = tms->current_value & 0xfffe;
 		tms->ST = (tms->ST & 0xfe00) | tms->intmask;
-		if (tms->trace) fprintf(stderr, "Context switch (int): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
+		if (tms->itrace) fprintf(stderr, "Context switch (int): WP=%04x, PC=%04x, ST=%04x\n", tms->WP, tms->PC, tms->ST);
 
 		if (((tms->int_pending & PENDING_MID)!=0) && tms->nmi_active)
 		{
-			if (tms->trace)
+			if (tms->itrace)
 				fprintf(stderr, "interrupt service (6): NMI active after context switch\n");
 			tms->int_pending &= ~PENDING_MID;
 			tms->address = 0xfffc;
@@ -3229,7 +3237,7 @@ static void tms9995_alu_int(struct tms9995 *tms)
 		{
 			if (tms->from_reset)
 			{
-				if (tms->trace)
+				if (tms->itrace)
 					fprintf(stderr, "interrupt service (6): RESET completed\n");
 				// We came from the RESET interrupt
 				tms->from_reset = false;
@@ -3300,3 +3308,274 @@ static const ophandler s_microoperation[45] =
 	tms9995_alu_xop,
 	tms9995_alu_int
 };
+
+/* Disassembler */
+
+/* Op decode table */
+
+static const char *opnames0[] = {
+    "SZC %s,%d",
+    "SZCB %s,%d",
+    "S %s,%d",
+    "SB %s,%d",
+    "C %s,%d",
+    "CB %s,%d",
+    "A %s,%d",
+    "AB %s,%d",
+    "MOV %s,%d",
+    "MOVB %s,%d",
+    "SOC %s,%d",
+    "SOCB %s,%d"
+};
+
+static const char *opnames1[] = {
+    "COC %s,%W",
+    "CZC %s,%W",
+    "XOR %s,%W",
+    "XOP %x,%s ",
+    "LDCR %x,%s",
+    "STCR %x,%s",
+    "MPY %x,%s",
+    "DIV %x,%s"
+};
+
+static const char *opnames2[] = {
+    "JMP %d",
+    "JLT %8",
+    "JLE %8",
+    "JEQ %8",
+    "JHE %8",
+    "JGT %8",
+    "JNE %8",
+    "JNC %8",
+    "JOC %8",
+    "JNO %8",
+    "JL %8",
+    "JH %8",
+    "JOP %8",
+    "SBO %8",
+    "SBZ %8",
+    "TB %8"
+};
+
+static const char *opnames8[] = {
+    "SRA %S,%w",
+    "SRL %S,%w",
+    "SLA %S,%w",
+    "SRC %S,%w"
+};
+
+static const char *opnames9[] = {
+    "BLWP %s",
+    "B %s",
+    "X %s",
+    "CLR %s",
+    "NEG %s",
+    "INV %s",
+    "INC %s",
+    "INCT %s",
+    "DEC %s",
+    "DECT %s",
+    "BL %s",
+    "SWPB %s",
+    "SETO %s",
+    "ABS %s",
+    NULL,
+    NULL
+};
+
+static const char *opnames10[] = {
+    "LI %w,%i",
+    "AI %w,%i",
+    "ANDI %w,%i",
+    "ORI %w,%i",
+    "CI %w,%i",
+    "STWP %w",
+    "STST %w",
+    "LWPI %i",
+    "LIMI %i",
+    NULL,
+    "IDLE",	/* No arguments */
+    "RSET",	/* No arguments */
+    "RTWP",	/* No arguments */
+    "CKON",	/* No arguments */
+    "CKOF",	/* No arguments */
+    "LREX"	/* No arguments */
+};
+
+static const char *opnames11[] = {
+    NULL,
+    NULL, //"BIND",
+    "DIVS %s",
+    "MPYS %s"
+};
+
+static const char *opnames12[] = {
+    "LST %w",
+    "LWP %w",
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+};
+
+struct opset {
+    uint16_t min;
+    uint16_t shift;
+    const char **name;
+};
+
+struct opset ops[] = {
+    {	0x4000, 12,	opnames0	},
+    {	0x2000,	10,	opnames1	},
+    {	0x1000, 8,	opnames2	},
+    {	0x0E40, 6,	NULL		},
+    {	0x0E00, 4,	NULL		},
+    {	0x0C40, 6,	NULL		},
+    {	0x0C10, 4,	NULL		},
+    {	0x0C00, 0,	NULL		},
+    {	0x0800, 8,	opnames8	},
+    {	0x0400,	6,	opnames9	},
+    {	0x0200,	5,	opnames10	},
+    {	0x0100, 6,	opnames11	},
+    {	0x0080,	4,	opnames12	},
+    {	0,		}
+};
+
+
+static uint16_t idata[3];
+static uint16_t iptr;
+
+static struct opset *tms9995_get_op(uint16_t ip)
+{
+    struct opset *p = ops;
+    while(p->min) {
+        if (ip >= p->min)
+            return p;
+        p++;
+    }
+    return NULL;
+}
+
+static uint16_t next_word(void)
+{
+    return idata[iptr++];
+}
+
+static char *decode_addr(char *p, uint8_t bits)
+{
+    uint8_t v = bits & 0x0F;
+    switch(bits & 0x30) {
+    case 0x00:	/* R */
+        p += sprintf(p, "R%d", v);
+        break;
+    case 0x10:
+        p += sprintf(p, "*R%d", v);
+        break;
+    case 0x20:
+        p += sprintf(p, "@%04X", next_word());
+        if (v)
+            p += sprintf(p, "(R%d)", v);
+        break;
+    case 0x30:
+        p += sprintf(p, "*R%d+", v);
+        break;
+    }
+    return p;
+}
+
+static char *decode_op(struct opset *op, uint16_t ip)
+{
+    static char buf[128];
+    char *out = buf;
+    uint16_t inst;
+    const char *name = NULL;
+
+    if (op) {
+        inst = (ip - op->min) >> op->shift;
+        if (op->name)
+            name = op->name[inst];
+    }
+
+    if (name == NULL) {
+        sprintf(buf, "ILLEGAL %04X", ip);
+        return buf;
+    }
+    /* TODO; a first *name byte to say 'non inst must be zero' */
+    while(*name) {
+        if (*name != '%') {
+            *out++ = *name++;
+            continue;
+        }
+        switch(*++name) {
+            case 'w':
+                out += sprintf(out, "R%d", ip & 0x0F);
+                break;
+            case 'W':
+                out += sprintf(out, "R%d", (ip >> 6) & 0x0F);
+            case 's':
+                out = decode_addr(out, ip);
+                break;
+            case 'd':
+                out = decode_addr(out, ip >> 6);
+                break;
+            case 'a':
+                out = decode_addr(out, ip >> 4);
+                break;
+            case 'x':
+                out += sprintf(out, "%d", (ip >> 6) & 0x0F);
+                break;
+            case '8':
+                out += sprintf(out, "%d", (int)(int8_t)ip);
+                break;
+            case 'S':
+                out += sprintf(out, "%d", (ip >> 4) & 0x0F);
+                break;
+            case 'i':
+                out += sprintf(out, "%04X", next_word());
+                break;
+        }
+        name++;
+    }
+    *out = 0;
+    return buf;
+}
+
+static uint16_t tms9995_debug_read(struct tms9995 *tms, uint16_t addr)
+{
+    if (is_onchip(tms, addr))
+        return (tms->onchip_memory[addr & 0xFE] << 8) |
+                tms->onchip_memory[(addr & 0xFE) | 1];
+    return (tms9995_readb_debug(tms, addr & 0xFFFE) << 8) |
+                tms9995_readb_debug(tms, addr | 1);
+}
+
+
+static void tms9995_disassemble(struct tms9995 *tms)
+{
+    struct opset *op;
+    uint16_t ir;
+    uint16_t addr = tms->PC_debug;
+    unsigned int i;
+
+    iptr = 0;
+    idata[0] = tms9995_debug_read(tms, addr);
+    idata[1] = tms9995_debug_read(tms, addr + 2);
+    idata[2] = tms9995_debug_read(tms, addr + 4);
+
+    ir = next_word();
+    op = tms9995_get_op(ir);
+
+    for (i = 0; i < 16; i++) {
+        fprintf(stderr, "R%d %04x ", i, tms9995_read_workspace_register_debug(tms, i));
+        if ((i & 3) == 3) {
+            fprintf(stderr, "\n");
+            if (i != 15)
+                fprintf(stderr, "\t\t");
+        } else
+            fprintf(stderr, " | ");
+    }
+    fprintf(stderr, "%04X: %s\n\t\t", tms->PC_debug, decode_op(op, ir));
+}

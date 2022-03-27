@@ -228,6 +228,7 @@ struct tms9995 {
 
 	// Tracing
 	bool	trace;
+	bool	itrace;
 };
 
 /* The decode tables. Each node has 16 entries which can point to a subtable
