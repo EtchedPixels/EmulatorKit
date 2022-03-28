@@ -3335,12 +3335,12 @@ static const char *opnames1[] = {
     "XOP %x,%s ",
     "LDCR %x,%s",
     "STCR %x,%s",
-    "MPY %x,%s",
-    "DIV %x,%s"
+    "MPY %s,%W",
+    "DIV %s,%W"
 };
 
 static const char *opnames2[] = {
-    "JMP %d",
+    "JMP %8",
     "JLT %8",
     "JLE %8",
     "JEQ %8",
@@ -3515,6 +3515,7 @@ static char *decode_op(struct opset *op, uint16_t ip)
                 break;
             case 'W':
                 out += sprintf(out, "R%d", (ip >> 6) & 0x0F);
+                break;
             case 's':
                 out = decode_addr(out, ip);
                 break;
