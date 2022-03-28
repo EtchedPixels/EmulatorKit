@@ -3359,10 +3359,10 @@ static const char *opnames2[] = {
 };
 
 static const char *opnames8[] = {
-    "SRA %S,%w",
-    "SRL %S,%w",
-    "SLA %S,%w",
-    "SRC %S,%w"
+    "SRA %w,%S",
+    "SRL %w,%S",
+    "SLA %w,%S",
+    "SRC %w,%S"
 };
 
 static const char *opnames9[] = {
