@@ -3207,6 +3207,10 @@ int main(int argc, char *argv[])
 	/* We run 365 cycles per I/O check, do that 50 times then poll the
 	   slow stuff and nap for 20ms to get 50Hz on the TMS99xx */
 	while (!emulator_done) {
+		if (cpu_z80.halted) {
+			emulator_done = 1;
+			break;
+		}
 		int i;
 		/* 36400 T states for base RC2014 - varies for others */
 		for (i = 0; i < 50; i++) {
