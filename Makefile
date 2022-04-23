@@ -97,8 +97,8 @@ rc2014-ns32k: rc2014-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o
 	$(MAKE) --directory ns32k && \
 	cc -g3 rc2014-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.c -o rc2014-ns32k
 
-rc2014-tms9995: rc2014-tms9995.o tms9995.o ide.o ppide.o w5100.o rtc_bitbang.o 16x50.o
-	cc -g3 rc2014-tms9995.o ide.o ppide.o w5100.o rtc_bitbang.o 16x50.o tms9995.o -o rc2014-tms9995
+rc2014-tms9995: rc2014-tms9995.o tms9995.o ide.o ppide.o w5100.o rtc_bitbang.o 16x50.o tms9902.o
+	cc -g3 rc2014-tms9995.o ide.o ppide.o w5100.o rtc_bitbang.o 16x50.o tms9902.o tms9995.o -o rc2014-tms9995
 
 rc2014-z280: rc2014-z280.o ide.o libz280/libz80.o
 	cc -g3 rc2014-z280.o ide.o libz280/libz80.o -o rc2014-z280

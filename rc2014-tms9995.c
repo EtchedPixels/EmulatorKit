@@ -22,6 +22,7 @@
 #include "16x50.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
+#include "tms9902.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
@@ -41,6 +42,7 @@ struct rtc *rtcdev;
 struct uart16x50 *uart;
 
 struct tms9995 *tms;
+struct tms9902 *tmsser;
 
 /* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
    rate and get 115200 baud - which is pushing it admittedly! */
@@ -66,6 +68,7 @@ static volatile int done;
 #define TRACE_CPU	128
 #define TRACE_IRQ	256
 #define TRACE_UART	512
+#define TRACE_TMS9902	1024
 
 static int trace = 0;
 
@@ -308,11 +311,15 @@ void tms9995_writeb(struct tms9995 *tms, uint16_t addr, uint8_t val)
 
 uint8_t tms9995_read_cru(struct tms9995 *tms, uint16_t addr)
 {
+	if (addr >= 0x1000 && addr <= 0x10ff)
+		tms9902_cru_read(tmsser, addr);
 	return 0;
 }
 
 void tms9995_write_cru(struct tms9995 *tms, uint16_t addr, uint8_t bit)
 {
+	if (addr >= 0x1000 && addr <= 0x10ff)
+		tms9902_cru_write(tmsser, addr, bit); 
 }
 
 static struct termios saved_term, term;
@@ -342,6 +349,7 @@ int main(int argc, char *argv[])
 	int rom = 1;
 	char *rompath = "rc2014-tms9995.rom";
 	char *idepath;
+	int tmsin = 0;
 
 	while ((opt = getopt(argc, argv, "1abBd:fi:I:r:Rw")) != -1) {
 		switch (opt) {
@@ -377,6 +385,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 't':
+			tmsin = 1;
 			break;
 		default:
 			usage();
@@ -448,7 +459,11 @@ int main(int argc, char *argv[])
 
 	uart = uart16x50_create();
 	uart16x50_trace(uart, trace & TRACE_UART);
-	uart16x50_set_input(uart, 1);
+	uart16x50_set_input(uart, !tmsin);
+
+	tmsser = tms9902_create();
+	tms9902_trace(tmsser, trace & TRACE_TMS9902);
+	tms9902_set_input(tmsser, tmsin);
 
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
