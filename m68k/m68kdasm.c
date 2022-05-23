@@ -325,13 +325,13 @@ static char* make_signed_hex_str_32(uint val)
 /* make string of immediate value */
 static char* get_imm_str_s(uint size)
 {
-	static char str[15];
+	static char str[32];
 	if(size == 0)
-		snprintf(str, 15, "#%s", make_signed_hex_str_8(read_imm_8()));
+		snprintf(str, 32, "#%s", make_signed_hex_str_8(read_imm_8()));
 	else if(size == 1)
-		snprintf(str, 15, "#%s", make_signed_hex_str_16(read_imm_16()));
+		snprintf(str, 32, "#%s", make_signed_hex_str_16(read_imm_16()));
 	else
-		snprintf(str, 15, "#%s", make_signed_hex_str_32(read_imm_32()));
+		snprintf(str, 32, "#%s", make_signed_hex_str_32(read_imm_32()));
 	return str;
 }
 
