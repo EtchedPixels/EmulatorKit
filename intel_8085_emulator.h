@@ -40,4 +40,6 @@ extern int i8085_exec(int cycles);
 
 extern FILE *i8085_log;
 
+extern void i8085_load_symbols(const char *path);
+
 #endif

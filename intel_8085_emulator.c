@@ -36,6 +36,8 @@
 #include <string.h>
 #include "intel_8085_emulator.h"
 
+static char *i8085_disassemble(uint16_t addr);
+
 #define reg16_PSW (((uint16_t)reg8[A] << 8) | (uint16_t)reg8[FLAGS])
 #define reg16_BC (((uint16_t)reg8[B] << 8) | (uint16_t)reg8[C])
 #define reg16_DE (((uint16_t)reg8[D] << 8) | (uint16_t)reg8[E])
@@ -430,9 +432,10 @@ int i8085_exec(int cycles) {
 		opcode = i8085_read(reg_PC);
 		
 		if (i8085_log)
-			fprintf(i8085_log, "%04X : %02x %02X %02X : %6s %02X %04X %04X %04X %04X\n",
+			fprintf(i8085_log, "%04X : %02X %02X %02X : %6s %02X %04X %04X %04X %04X %s\n",
 				reg_PC, i8085_debug_read(reg_PC), i8085_debug_read(reg_PC + 1), i8085_debug_read(reg_PC + 2),
-				i8085_flags(reg8[FLAGS]), reg8[A], reg16_BC, reg16_DE, reg16_HL, reg_SP);
+				i8085_flags(reg8[FLAGS]), reg8[A], reg16_BC, reg16_DE, reg16_HL, reg_SP,
+					i8085_disassemble(reg_PC));
 		
 		reg_PC++;
 
@@ -1220,4 +1223,270 @@ int i8085_exec(int cycles) {
 
 	}
 	return cycles;
+}
+
+/*
+ *	8085 disassembler - added by Alan Cox 2022
+ */
+
+
+struct i8085_addr {
+	unsigned addr;
+	struct i8085_addr *next;
+	char name[16];
+	char type;
+};
+
+static struct i8085_addr *sym[0x40];
+
+static unsigned ahash(unsigned addr)
+{
+	return (addr >> 6) & 0x3F;
+}
+
+static struct i8085_addr *i8085_addr_find(unsigned addr)
+{
+	unsigned hash = ahash(addr);
+	struct i8085_addr *a = sym[hash];
+	while(a) {
+		if (a->addr == addr)
+			return a;
+		a = a->next;
+	}
+	return NULL;
+}
+
+static void i8085_add_symbol(unsigned addr, char type, char *name)
+{
+	struct i8085_addr *a = malloc(sizeof(struct i8085_addr));
+	unsigned hash = ahash(addr);
+	strncpy(a->name, name, 16);
+	a->addr = addr;
+	a->type = type;
+	a->next = sym[hash];
+	sym[hash] = a;
+}
+
+void i8085_load_symbols(const char *path)
+{
+	char buf[64];
+	unsigned addr;
+	char type;
+	char name[16];
+	FILE *fp = fopen(path, "r");
+	if (fp == NULL) {
+		perror(path);
+		return;
+	}
+	while(fgets(buf, 63, fp) != NULL) {
+		if (sscanf(buf, "%x %c %16s", &addr, &type, name) == 3)
+			i8085_add_symbol(addr, type, name);
+		else
+			fprintf(stderr, "format error %s\n", buf);
+	}
+	fclose(fp);
+}
+
+static char opbuf[32];
+
+static char rname[8] = { "bcdehlma" };
+static char *rpair_s[4] = { "bc", "de", "hl", "sp" };
+static char *rpair_p[4] = { "bc", "de", "hl", "psw" };
+static char *cc[8] = { "nz", "z", "nc", "c", "po", "pe", "p", "m" };
+
+static char *blk00[] = {
+	"nop", "dsub", "arhl", "rdel", "rim", "ldhi", "sim", "ldsi"
+};
+
+static char *blk02[] = {
+	"ldax b", "stax b", "ldax d", "stax d",
+	"shld", "lhld", "sta", "lda"
+};
+
+static char *blk07[] = {
+	"rlc", "rrc", "ral", "rar",
+	"daa", "cma", "stc", "cmc"
+};
+
+static char *idrw(unsigned addr)
+{
+	static char buf[16];
+	struct i8085_addr *a;
+	unsigned v = i8085_debug_read(addr);
+	v |= i8085_debug_read(addr + 1) << 8;
+	a = i8085_addr_find(v);
+	if (a)
+		return a->name;
+	else {
+		sprintf(buf, "%04X", v);
+		return buf;
+	}
+}
+
+static void dis0(uint8_t op, uint16_t addr)
+{
+	unsigned y = (op >> 3) & 7;
+	switch(op & 7) {
+		case 0:
+			/* Real mix */
+			if (y == 5 || y == 7)
+				sprintf(opbuf, "%s %02X", blk00[y], i8085_debug_read(addr));
+			else
+				strcpy(opbuf, blk00[y]);
+			break;
+		case 1:
+			if (y & 1)
+				sprintf(opbuf, "dad %s", rpair_s[y >> 1]);
+			else
+				sprintf(opbuf, "lxi %s, %s", rpair_s[y >> 1], idrw(addr));
+			break;
+		case 2:
+			if (y & 4)
+				sprintf(opbuf, "%s %s", blk02[y],
+					idrw(addr));
+			else
+				strcpy(opbuf, blk02[y]);
+			break;
+		case 3:
+			if (!(y & 1))
+				sprintf(opbuf, "inx %s", rpair_s[y >> 1]);
+			else
+				sprintf(opbuf, "dcx %s", rpair_s[y >> 1]);
+			break;
+		case 4:
+			sprintf(opbuf, "inr %c", rname[y]);
+			break;
+		case 5:
+			sprintf(opbuf, "dcr %c", rname[y]);
+			break;
+		case 6:
+			sprintf(opbuf, "mvi %c,%02X", rname[y],
+				i8085_debug_read(addr));
+			break;
+		case 7:
+			strcpy(opbuf, blk07[y]);
+			break;
+	}
+}
+
+static void dis1(uint8_t op, uint16_t addr)
+{
+	if (op == 0x76)
+		strcpy(opbuf, "hlt");
+	else
+		sprintf(opbuf, "mov %c,%c", rname[(op >> 3) & 7], rname[op & 7]);
+}
+
+static char *aluop[] = {
+	"add", "adc", "sub", "sbb", "ana", "xra", "ora", "cmp"
+};
+
+static char *aluim[] = {
+	"adi", "aci", "sui", "sbi", "ani", "xri", "ori", "cmi"
+};
+
+static void dis2(uint8_t op, uint16_t addr)
+{
+	sprintf(opbuf, "%s %c", aluop[(op >> 3) & 7], rname[op & 7]);
+}
+
+static char *blk31[] = {
+	"ret", "shlx", "pchl", "sphl"
+};
+
+static void dis3(uint8_t op, uint16_t addr)
+{
+	unsigned y = (op >> 3) & 7;
+	switch(op & 7) {
+	case 0:
+		sprintf(opbuf, "r%s", cc[y]);
+		break;
+	case 1:
+		if ((y & 1) == 0)
+			sprintf(opbuf, "pop %s", rpair_p[y >> 1]);
+		else
+			strcpy(opbuf, blk31[y >> 1]);
+		break;
+	case 2:
+		sprintf(opbuf, "j%s %s", cc[y], idrw(addr));
+		break;
+	case 3:
+		/* This one appears to have been the dumping ground */
+		switch(y) {
+		case 0:
+			sprintf(opbuf, "jmp %s", idrw(addr));
+			break;
+		case 1:
+			strcpy(opbuf, "rstv");
+			return;
+		case 2:
+			sprintf(opbuf, "out %02X", i8085_debug_read(addr));
+			return;
+		case 3:
+			sprintf(opbuf, "in %02X", i8085_debug_read(addr));
+			return;
+		case 4:
+			strcpy(opbuf, "xthl");
+			return;
+		case 5:
+			strcpy(opbuf, "xchg");
+			return;
+		case 6:
+			strcpy(opbuf, "di");
+			return;
+		case 7:
+			strcpy(opbuf, "ei");
+			return;
+		}
+		break;
+	case 4:
+		sprintf(opbuf, "c%s", cc[y]);
+		break;
+	case 5:
+		if (!(y & 1)) {
+			sprintf(opbuf, "push %s", rpair_p[y >> 1]);
+			break;
+		}
+		switch(y >> 1) {
+		case 0:
+			sprintf(opbuf, "call %s", idrw(addr));
+			break;
+		case 1:
+			sprintf(opbuf, "jnx %s", idrw(addr));
+			break;
+		case 2:
+			strcpy(opbuf, "lhlx");
+			break;
+		case 3:
+			sprintf(opbuf, "jx %s", idrw(addr));
+			break;
+		}
+		break;
+	case 6:
+		sprintf(opbuf, "%s %02X", aluim[y], i8085_debug_read(addr));
+		break;
+	case 7:
+		sprintf(opbuf, "rst %d", y);
+		break;
+	}
+}
+
+static char *i8085_disassemble(uint16_t addr)
+{
+	uint8_t op = i8085_debug_read(addr++);
+	switch (op & 0xC0) {
+	case 0x00:
+		dis0(op, addr);
+		break;
+	case 0x40:
+		dis1(op, addr);
+		break;
+	case 0x80:
+		dis2(op, addr);
+		break;
+	case 0xC0:
+		dis3(op, addr);
+		break;
+	}
+	return opbuf;
 }

@@ -363,7 +363,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-8085: [-1] [-a] [-b] [-B] [-e rombank] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-e rombank] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014-8085: [-1] [-a] [-b] [-B] [-e rombank] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-e rombank] [-w] [-d debug] [-S symbols]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -379,7 +379,7 @@ int main(int argc, char *argv[])
 	int acia_input;
 	int uart_16550a = 0;
 
-	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:RwS:")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -425,6 +425,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 'S':
+			i8085_load_symbols(optarg);
 			break;
 		default:
 			usage();
