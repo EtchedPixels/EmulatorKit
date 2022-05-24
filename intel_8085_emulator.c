@@ -1440,7 +1440,7 @@ static void dis3(uint8_t op, uint16_t addr)
 		}
 		break;
 	case 4:
-		sprintf(opbuf, "c%s", cc[y]);
+		sprintf(opbuf, "c%s %s", cc[y], idrw(addr));
 		break;
 	case 5:
 		if (!(y & 1)) {
