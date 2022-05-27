@@ -89,6 +89,7 @@ struct ppide *ppide_create(const char *name)
         fprintf(stderr, "Out of memory.\n");
         exit(1);
     }
+    ppide->trace = 0;
     ppide_reset(ppide);
     return ppide;
 }
