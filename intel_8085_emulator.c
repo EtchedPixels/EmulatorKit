@@ -1299,7 +1299,7 @@ static char *blk00[] = {
 };
 
 static char *blk02[] = {
-	"ldax b", "stax b", "ldax d", "stax d",
+	"stax b", "ldax b", "stax d", "ldax d",
 	"shld", "lhld", "sta", "lda"
 };
 
