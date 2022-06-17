@@ -208,6 +208,7 @@ void duart_reset(struct duart *d)
 	d->acr = 0xFF;
 	d->isr = 0;
 	d->imr = 0;
+        d->ivr = 0xF;
 	d->port[0].mrp = 0;
 	d->port[0].sr = 0x00;
 	d->port[1].mrp = 0;
