@@ -2692,7 +2692,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-a] [-A] [-b] [-c] [-f] [- idepath] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
+	fprintf(stderr, "rc2014: [-a] [-A] [-b] [-c] [-f] [-i idepath] [-R] [-m mainboard] [-r rompath] [-e rombank] [-s] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
