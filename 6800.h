@@ -190,7 +190,7 @@ struct m6800 {
 #define CPU_6800	0
 #define CPU_6803	1
 #define	CPU_6303	2
-#define CPU_6A01	3	/* NAMCO 6301 variant with op 12/13 */
+#define CPU_6XA1	3	/* NAMCO 6301 variant with op 12/13 */
 #define	CPU_68HC11	4	/* May need a special type for some types */
     int intio;
 #define INTIO_NONE	0
