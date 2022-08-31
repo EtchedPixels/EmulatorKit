@@ -195,8 +195,9 @@ static uint8_t clock_count[256][4] = {
     /* 0x10 */
     { 2, 2, 1, 1 },			/* SBA */
     { 2, 2, 1, 1 },			/* CBA */
-    { 0, 2, 0, 0 },			/* Undoc SBC B from A */
-    { 0, 2, 0, 0 },			/* Undoc SUB B+1 from A, 68HC11: BRCLR dir */
+    /* Timing for NAMCO guessed on these two FIXME */
+    { 0, 2, 0, 4 },			/* Undoc SBC B from A. NAMCO Add ,S to X */
+    { 0, 2, 0, 4 },			/* Undoc SUB B+1 from A, NAMCO Add ,S t X, 68HC11: BRCLR dir */
     { 2, 2, 1, 1 },			/* undoc NBA, undoc B = A - !C,  68HC11: BRSET dir */
     { 0, 0, 0, 0 },			/* 68HC11: BCLR dir */
     { 2, 2, 1, 1 },			/* TAB */
@@ -2075,6 +2076,10 @@ static int m6800_execute_one(struct m6800 *cpu)
             cpu->a = m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a - cpu->b - CARRY);
             return clocks;
         }
+        if (cpu->type == CPU_6XA1) {
+            cpu->x += m6800_do_read(cpu, cpu->s + 1);
+            return clocks;
+        }
         data8 = m6800_do_read(cpu, m6800_do_read(cpu, cpu->pc++));
         if((data8 & m6800_do_read(cpu, cpu->pc++)) == data8)
             m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
@@ -2085,6 +2090,10 @@ static int m6800_execute_one(struct m6800 *cpu)
         if (cpu->type == CPU_6803) {
             /* 6803 undoc - SUB B + 1from A */
             cpu->a = m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a - cpu->b - 1);
+            return clocks;
+        }
+        if (cpu->type == CPU_6XA1) {
+            cpu->x += m6800_do_read(cpu, cpu->s + 1);
             return clocks;
         }
         data8 = m6800_do_read(cpu, m6800_do_read(cpu, cpu->pc++));
