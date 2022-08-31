@@ -245,34 +245,34 @@ static uint8_t clock_count[256][4] = {
     { 12, 12, 12 },			/* SWI */
     /* 0x40 A form */
     { 2, 2, 1 },			/* NEGA */
-    { 0, 0, 0 },
-    { 0, 0, 0 },
+    { 0, 2, 0 },			/* TSTA alias on 6803 */
+    { 0, 2, 0 },			/* Undoc negate variant on 6803 */
     { 2, 2, 1 },			/* COMA */
     { 2, 2, 1 },			/* LSRA */
-    { 0, 0, 0 },
+    { 0, 2, 0 },			/* undoc LSRA alias on 6803 */
     { 2, 2, 1 },			/* RORA */
     { 2, 2, 1 },			/* ASRA */
     { 2, 2, 1 },			/* ASLA */
     { 2, 2, 1 },			/* ROLA */
     { 2, 2, 1 },			/* DECA */
-    { 0, 0, 0 },
+    { 0, 2, 0 },			/* undoc DECA alias on 6803 */
     { 2, 2, 1 },			/* INCA */
     { 2, 2, 1 },			/* TSTA */
     { 255, 255, 255 },			/* HCF / T */
     { 2, 2, 1 },			/* CLRA */
     /* 0x50 B form */
     { 2, 2, 1 },			/* NEGB */
-    { 0, 0, 0 },
-    { 0, 0, 0 },
+    { 0, 2, 0 },			/* TSTB alias undoc */
+    { 0, 2, 0 },			/* undoc negate variant on 6803 */
     { 2, 2, 1 },			/* COMB */
     { 2, 2, 1 },			/* LSRB */
-    { 0, 0, 0 },
+    { 0, 2, 0 },			/* LSRB alias, undoc */
     { 2, 2, 1 },			/* RORB */
     { 2, 2, 1 },			/* ASRB */
     { 2, 2, 1 },			/* ASLB */
     { 2, 2, 1 },			/* ROLB */
     { 2, 2, 1 },			/* DECB */
-    { 0, 0, 0 },
+    { 0, 2, 0 },			/* DECB alias undoc */
     { 2, 2, 1 },			/* INCB */
     { 2, 2, 1 },			/* TSTB */
     { 2, 2, 1 },			/* HCF / T */
@@ -2438,12 +2438,19 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x40:	/* NEGA */
         cpu->a = m6800_maths8_noh(cpu, 0, cpu->a, -cpu->a);
         return clocks;
+    case 0x41:	/* undoc TSTA alias */
+        m6800_logic8(cpu, cpu->a);
+        cpu->p &= ~P_C;
+        return clocks;
+    case 0x42:	/* negate including carry */
+        cpu->a = m6800_maths8_noh(cpu, 0, cpu->a, -cpu->a - CARRY);
     case 0x43:	/* COMA */
         cpu->a = ~cpu->a;
         m6800_logic8(cpu, cpu->a);
         cpu->p |= P_C;
         return clocks;
     case 0x44:	/* LSRA */
+    case 0x45:	/* LSRA alias on 6803 */
         tmp8 = cpu->a & 0x01;
         cpu->a >>= 1;
         m6800_shift8(cpu, cpu->a, tmp8);
@@ -2474,10 +2481,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_shift8(cpu, cpu->a, tmp8);
         return clocks;
     case 0x4A: 	/* DECA */
+    case 0x4B:	/* DECA alias undoc */
         /* Weird as they don't affect C */
         cpu->a--;
         m6800_logic8(cpu, cpu->a);
-        if (cpu->a == 0x7F)	/* DEC from 0x80) */
+        if (cpu->a == 0x7F)	/* DEC from 0x80 */
             cpu->p |= P_V;
         return clocks;
     case 0x4C:	/* INCA */
@@ -2502,12 +2510,20 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x50:	/* NEGB */
         cpu->b = m6800_maths8_noh(cpu, 0, cpu->b, -cpu->b);
         return clocks;
+    case 0x51:	/* undoc alias of TSTB */
+        m6800_logic8(cpu, cpu->b);
+        cpu->p &= ~P_C;
+        return clocks;
+    case 0x52:	/* NEGB variant with carry - undoc */
+        cpu->b = m6800_maths8_noh(cpu, 0, cpu->b, -cpu->b - CARRY);
+        return clocks;
     case 0x53:	/* COMB */
         cpu->b = ~cpu->b;
         m6800_logic8(cpu, cpu->b);
         cpu->p |= P_C;
         return clocks;
     case 0x54:	/* LSRB */
+    case 0x55:	/* alias of LSRB undoc */
         tmp8 = cpu->b & 1;
         cpu->b >>= 1;
         m6800_shift8(cpu, cpu->b, tmp8);
@@ -2538,6 +2554,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_shift8(cpu, cpu->b, tmp8);
         return clocks;
     case 0x5A: 	/* DECB */
+    case 0x5B:	/* alias of DECB undoc */
         /* Weird as the don't affect C */
         cpu->b--;
         m6800_logic8(cpu, cpu->b);
