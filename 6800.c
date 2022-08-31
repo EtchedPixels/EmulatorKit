@@ -53,7 +53,39 @@
  *	Special mode and vectors
  *	Test with something like Buffalo ?
  *	interrupt enable 1 clock delay on CLI and TAP
+ *
+ *	6803 undocumenteds we need to dig into adding
+ *
+ *	02		if C is set A = 255, else A = 0 (no flag effect)
+ *	03		A = 0xFF
+ *	12		A = A - B - carry
+ *	13		A = A - B - 1
+ *	14		B = A - !C
+ *	15/1D		A = B - 1
+ *	18 or 1A	A += B but different C/H behaviour
+ *	1E		B = A
+ *	1F		A = B, set carry
+ *	41		TSTA variant
+ *	42/52/62/72	negate with carry (SBC from 0) on byte
+ *			42 A 52 B
+ *	45		LSR A
+ *	4B		DEC A
+ *	51		TSTB variant
+ *	55		LSR B
+ *	5B		DEC B
+ *	61		TST x variant
+ *	62		negate x
+ *	65		LSR x
+ *	6B		DEC x
+ *	71		TST M
+ *	72		NEG M
+ *	75		LSR m
+ *	7B		DEC m
+ *
+ *	The NAMCO processors (60A1, 63A1) also add
+ *	12/13		addx 1,sp
  *	
+ *	For 6800 see Byte 12/77 article
  */
 
 
@@ -138,14 +170,16 @@ static const uint8_t dummy_bootrom[256] = {
  *
  *	The 68HC11 is a somewhat extended CPU but basically a 6803 with
  *	extras, and lacking the 6303 pipelining.
+ *
+ *	Timing for undocumented instructions is uncertain. Needs confirming
  */
 
 
 static uint8_t clock_count[256][4] = {
     { 0, 0, 0 },
     { 2, 2, 1 }, 			/* NOP */
-    { 0, 0, 0 },			/* 68HC11: IDIV */
-    { 0, 0, 0 },			/* 68HC11: FDIV */
+    { 0, 2, 0 },			/* undoc SEX 68HC11: IDIV */
+    { 0, 2, 0 },			/* undoc LDA 255, 68HC11: FDIV */
     { 0, 3, 1 },			/* LSRD */
     { 0, 3, 1 },			/* ASLD */
     { 2, 2, 1 },			/* TAP */
@@ -161,20 +195,20 @@ static uint8_t clock_count[256][4] = {
     /* 0x10 */
     { 2, 2, 1 },			/* SBA */
     { 2, 2, 1 },			/* CBA */
-    { 0, 0, 0 },
-    { 0, 0, 0 },			/* 68HC11: BRCLR dir */
-    { 0, 0, 0 },			/* 68HC11: BRSET dir */
+    { 0, 2, 0 },			/* Undoc SBC B from A */
+    { 0, 2, 0 },			/* Undoc SUB B+1 from A, 68HC11: BRCLR dir */
+    { 2, 2, 1 },			/* undoc NBA, undoc B = A - !C,  68HC11: BRSET dir */
     { 0, 0, 0 },			/* 68HC11: BCLR dir */
     { 2, 2, 1 },			/* TAB */
     { 2, 2, 1 },			/* TBA */
-    { 0, 0, 2 },			/* 6303: XGDX  (Y prefix on HC11) */
+    { 0, 2, 2 },			/* Undoc add 6303: XGDX  (Y prefix on HC11) */
     { 2, 2, 1 },			/* DAA */
-    { 0, 0, 4 },			/* SLP , 68HC11: prefix 1A */
+    { 0, 2, 4 },			/* Undoc add, SLP , 68HC11: prefix 1A */
     { 2, 2, 1 },			/* ABA */
     { 0, 0, 0 },
     { 0, 0, 0 },			/* 68HC11: BCLR indexed */
-    { 0, 0, 0 },			/* 68HC11: BRSET indexed */
-    { 0, 0, 0 },			/* 68HC11: BRCLR indexed */
+    { 0, 2, 0 },			/* Undoc TAB 68HC11: BRSET indexed */
+    { 0, 2, 0 },			/* Undoc TBA set carry, 68HC11: BRCLR indexed */
     /* 0x20 */
     { 4, 3, 3 },			/* BRA */
     { 4, 3, 3 },			/* BRN - undocumented on 6800 */
@@ -285,7 +319,7 @@ static uint8_t clock_count[256][4] = {
     { 2, 2, 2 },			/* ANDA */
     { 2, 2, 2 },			/* BITA */
     { 2, 2, 2 },			/* LDAA */
-    { 0, 0, 0 },
+    { 3, 3, 3 },			/* STAA immed (timing uncertain) */
     { 2, 2, 2 },			/* EORA */
     { 2, 2, 2 },			/* ADCA */
     { 2, 2, 2 },			/* ORAA */
@@ -293,7 +327,7 @@ static uint8_t clock_count[256][4] = {
     { 4, 4, 3 },			/* CPX */
     { 8, 6, 5 },			/* BSR */
     { 3, 3, 3 },			/* LDS */
-    { 0, 0, 0 },			/* 68HC11 only: XGDX */
+    { 3, 3, 3 },			/* STS immed (timing uncertain) 68HC11 only: XGDX */
     /* 90: A ops, dir */
     { 3, 3, 3 },			/* SUBA */
     { 3, 3, 3 },			/* CMPA */
@@ -308,7 +342,7 @@ static uint8_t clock_count[256][4] = {
     { 3, 3, 3 },			/* ORAA */
     { 3, 3, 3 },			/* ADDA */
     { 5, 5, 4 },			/* CPX */
-    { 0, 5, 5 },			/* JSR */
+    { 1, 5, 5 },			/* JSR  (HCF on 6800)*/
     { 4, 4, 4 },			/* LDS */
     { 4, 4, 4 },			/* STS */
     /* A0: A ops, indexed */
@@ -353,7 +387,7 @@ static uint8_t clock_count[256][4] = {
     { 2, 2, 2 },			/* ANDB */
     { 2, 2, 2 },			/* BITB */
     { 2, 2, 2 },			/* LDAB */
-    { 0, 0, 0 },
+    { 2, 2, 2 },			/* STAB immed undoc */
     { 2, 2, 2 },			/* EORB */
     { 2, 2, 2 },			/* ADCB */
     { 2, 2, 2 },			/* ORAB */
@@ -361,7 +395,7 @@ static uint8_t clock_count[256][4] = {
     { 0, 3, 3 },			/* LDD */
     { 0, 0, 0 },			/* 68HC11:Prefix CD */
     { 3, 3, 3 },			/* LDX */
-    { 0, 0, 0 },			/* 68HC11: STOP */
+    { 3, 3, 3 },			/* STX undoc, 68HC11: STOP */
     /* D0: A ops, dir */
     { 3, 3, 3 },			/* SUBB */
     { 3, 3, 3 },			/* CMPB */
@@ -376,7 +410,7 @@ static uint8_t clock_count[256][4] = {
     { 3, 3, 3 },			/* ORAB */
     { 3, 3, 3 },			/* ADDB */
     { 0, 4, 4 },			/* LDD */
-    { 0, 4, 4 },			/* STD */
+    { 1, 4, 4 },			/* STD (HCF on 6800) */
     { 4, 4, 4 },			/* LDX */
     { 4, 4, 4 },			/* STX */
     /* E0: B ops, indexed */
@@ -1907,6 +1941,14 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* No flags */
         return clocks;
     case 0x02:	/* IDIV */
+        if (cpu->type == CPU_6803) {
+            /* 6803 undocumented: SEX instruction. Is sometimes used in code */
+            if (cpu->p & P_C)
+                cpu->a = 0xFF;
+            else
+                cpu->a = 0x00;
+            return clocks;
+        }
         if (cpu->x == 0) {
             /* "In the case of divide by 0 the quotient is set to $FFFF
                 and the remainder is indeterminate */
@@ -1927,6 +1969,10 @@ static int m6800_execute_one(struct m6800 *cpu)
         }
         return clocks;
     case 0x03:	/* FDIV */
+        if (cpu->type == CPU_6803) {	/* Set all bits 6803 undoc */
+            cpu->a = 0xFF;
+            return clocks;
+        }
         if (cpu->x == 0) {
             cpu->x = 0xFFFF;
             /* Note: the 68HC11 reference manual is *wrong* here - it lists Z
@@ -2024,6 +2070,11 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a - cpu->b);
         return clocks;
     case 0x12:	/* BRSET direct */
+        if (cpu->type == CPU_6803) {
+            /* 6803 undoc - SBC B from A */
+            cpu->a = m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a - cpu->b - CARRY);
+            return clocks;
+        }
         data8 = m6800_do_read(cpu, m6800_do_read(cpu, cpu->pc++));
         if((data8 & m6800_do_read(cpu, cpu->pc++)) == data8)
             m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
@@ -2031,6 +2082,11 @@ static int m6800_execute_one(struct m6800 *cpu)
             cpu->pc++;
         return clocks;
     case 0x13:	/* BRCLR direct */
+        if (cpu->type == CPU_6803) {
+            /* 6803 undoc - SUB B + 1from A */
+            cpu->a = m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a - cpu->b - 1);
+            return clocks;
+        }
         data8 = m6800_do_read(cpu, m6800_do_read(cpu, cpu->pc++));
         if(!(data8 & m6800_do_read(cpu, cpu->pc++)))
             m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
@@ -2041,6 +2097,14 @@ static int m6800_execute_one(struct m6800 *cpu)
         if (cpu->type == CPU_6800) {
             cpu->a &= cpu->b;
             m6800_logic8(cpu, cpu->a);
+            return clocks;
+        }
+        if (cpu->type == CPU_6803) {
+            /* 6803 undoc - B = A - (1 - CARRY) */
+            if (CARRY)
+                cpu->b = m6800_maths8_noh(cpu, cpu->a, 0, cpu->a);
+            else
+                cpu->b = m6800_maths8_noh(cpu, cpu->a, 0, cpu->a - 1);
             return clocks;
         }
         data8 = m6800_do_read(cpu, cpu->pc++);
@@ -2063,6 +2127,12 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, cpu->a);
         return clocks;
     case 0x18:  /* XGDX (6303) - prefix on HC11 so will never reach here */
+        if (cpu->type == CPU_6803) {
+            /* Undoc adds B to A but with different flag behaviour. Think
+               flags is right but needs a review */
+            cpu->a = m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a + cpu->b);
+            return clocks;
+        }
         tmp16 = cpu->x;
         cpu->x = (cpu->a << 8) | cpu->b;
         cpu->a = tmp16 >> 8;
@@ -2114,6 +2184,12 @@ static int m6800_execute_one(struct m6800 *cpu)
         /* FIXME: V is "not defined" on 6803 */
         return clocks;
     case 0x1A:	/* SLP (6303) */
+        if (cpu->type == CPU_6803) {
+            /* Undoc adds B to A but with different flag behaviour. Think
+               flags is right but needs a review - same as 0x18 */
+            cpu->a = m6800_maths8_noh(cpu, cpu->a, cpu->b, cpu->a + cpu->b);
+            return clocks;
+        }
         cpu->wait = 1;
         return clocks;
     case 0x1B:	/* ABA */
@@ -2155,6 +2231,11 @@ static int m6800_execute_one(struct m6800 *cpu)
             cpu->pc++;
         return clocks;
     case 0x1E:	/* BRSET indexed */
+        if (cpu->type == CPU_6803) {
+            cpu->b = cpu->a;
+            m6800_logic8(cpu, cpu->b);
+            return clocks;
+        }
         data8 = m6800_do_read(cpu, cpu->x + m6800_do_read(cpu, cpu->pc++));
         if((data8 & m6800_do_read(cpu, cpu->pc++)) == data8)
             m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
@@ -2169,6 +2250,14 @@ static int m6800_execute_one(struct m6800 *cpu)
             cpu->pc++;
         return clocks;
     case 0x1F:	/* BRCLR indexed */
+        if (cpu->type == CPU_6803) {
+            /* Undoc TBA and set C */
+            cpu->b = cpu->a;
+            /* Not sure flags are right here TODO */
+            m6800_logic8(cpu, cpu->b);
+            cpu->p |= P_C;
+            return clocks;
+        }
         data8 = m6800_do_read(cpu, cpu->x + m6800_do_read(cpu, cpu->pc++));
         if((data8 & m6800_do_read(cpu, cpu->pc++)) == 0)
             m6800_bra(cpu, m6800_do_read(cpu, cpu->pc++), 1);
@@ -2668,6 +2757,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, cpu->a);
         return clocks;
     case 0x87:	/* Undocumented: STAA immed */
+        cpu->pc++;
         m6800_do_write(cpu, cpu->pc++, cpu->a);
         return clocks;
     case 0x88:	/* EORA */
@@ -2793,6 +2883,8 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_cpx(cpu, cpu->x, tmp16, cpu->x - tmp16);
         return clocks;
     case 0x9D:	/* JSR */
+        if (cpu->type == CPU_6800)
+            m6800_hcf(cpu);
         m6800_push16(cpu, cpu->pc);
         cpu->pc = data8;
         /* No flags */
@@ -3034,6 +3126,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, cpu->b);
         return clocks;
     case 0xC7:	/* Undocumented: STAB immed */
+        cpu->pc++;
         m6800_do_write(cpu, cpu->pc++, cpu->a);
         return clocks;
     case 0xC8:	/* EORB */
@@ -3138,6 +3231,8 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic16(cpu, REG_D);
         return clocks;
     case 0xDD:	/* STD direct */
+        if (cpu->type == CPU_6800)
+            m6800_hcf(cpu);
         m6800_do_write(cpu, data8, cpu->a);
         m6800_do_write(cpu, data8 + 1, cpu->b);
         m6800_logic16(cpu, REG_D);
