@@ -2598,6 +2598,13 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data16, m6800_maths8_noh(cpu, 0, tmp8, -tmp8));
         return clocks;
     case 0x61:	/* AIM direct (6303) and also BCLR */
+        if (cpu->type == CPU_6803) {
+            /* TST undoc alias */
+            tmp8 = m6800_do_read(cpu, data16);
+            m6800_logic8(cpu, tmp8);
+            cpu->p &= ~P_C;
+            return clocks;
+        }
         /* These have strange encodings of the data */
         data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, data16);
@@ -2613,6 +2620,12 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, tmp8);
         return clocks;
     case 0x62:	/* OIM direct (6303) and also BSET */
+        if (cpu->type == CPU_6803) {
+            /* NEG x */
+            tmp8 = m6800_do_read(cpu, data16);
+            m6800_do_write(cpu, data16, m6800_maths8_noh(cpu, 0, tmp8, -tmp8 - CARRY));
+            return clocks;
+        }
         /* These have strange encodings of the data */
         data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, data16);
@@ -2621,6 +2634,12 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, tmp8);
         return clocks;
     case 0x72: /* OIM ,X (6303) and also BSET */
+        if (cpu->type == CPU_6803) {
+            /* NEG x */
+            tmp8 = m6800_do_read(cpu, data16);
+            m6800_do_write(cpu, data16, m6800_maths8_noh(cpu, 0, tmp8, -tmp8 - CARRY));
+            return clocks;
+        }
         /* These have strange encodings of the data */
         tmp8 = m6800_do_read(cpu, data16 & 0xFF);
         tmp8 |= data16 >> 8;
@@ -2645,6 +2664,15 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_shift8(cpu, tmp8, tmpc);
         return clocks;
     case 0x65:	/* EIM direct (6303) and also BTGL */
+        if (cpu->type == CPU_6803) {
+            /* Undoc aliases of LSR on 6803 */
+            tmp8 = m6800_do_read(cpu, data16);
+            tmpc = tmp8 & 0x01;
+            tmp8 >>= 1;
+            m6800_do_write(cpu, data16, tmp8);
+            m6800_shift8(cpu, tmp8, tmpc);
+            return clocks;
+        }
         /* These have strange encodings of the data */
         data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, data16);
@@ -2653,6 +2681,15 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, tmp8);
         return clocks;
     case 0x75: /* EIM ,X (6303) and also BTGL */
+        if (cpu->type == CPU_6803) {
+            /* Undoc aliases of LSR on 6803 */
+            tmp8 = m6800_do_read(cpu, data16);
+            tmpc = tmp8 & 0x01;
+            tmp8 >>= 1;
+            m6800_do_write(cpu, data16, tmp8);
+            m6800_shift8(cpu, tmp8, tmpc);
+            return clocks;
+        }
         /* These have strange encodings of the data */
         tmp8 = m6800_do_read(cpu, data16 & 0xFF);
         tmp8 = data16 >> 8;
@@ -2710,6 +2747,16 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_do_write(cpu, data16, tmp8);
         return clocks;
     case 0x6B:	/* BTST direct (6303) and TIM */
+        if (cpu->type == CPU_6803) {
+            /* Undoc aliases of DEC on 6803 */
+            /* Weird as the don't affect C */
+            tmp8 = m6800_do_read(cpu, data16) - 1;
+            m6800_logic8(cpu, tmp8);
+            if (tmp8 == 0x7F)	/* DEC from 0x80) */
+                cpu->p |= P_V;
+            m6800_do_write(cpu, data16, tmp8);
+            return clocks;
+        }
         /* These have strange encodings of the data */
         data16 = cpu->x + m6800_do_read(cpu, cpu->pc++);
         tmp8 = m6800_do_read(cpu, data16);
@@ -2717,6 +2764,16 @@ static int m6800_execute_one(struct m6800 *cpu)
         m6800_logic8(cpu, tmp8);
         return clocks;
     case 0x7B: /* BTST ,X (6303) and TIM */
+        if (cpu->type == CPU_6803) {
+            /* Undoc aliases of DEC on 6803 */
+            /* Weird as the don't affect C */
+            tmp8 = m6800_do_read(cpu, data16) - 1;
+            m6800_logic8(cpu, tmp8);
+            if (tmp8 == 0x7F)	/* DEC from 0x80) */
+                cpu->p |= P_V;
+            m6800_do_write(cpu, data16, tmp8);
+            return clocks;
+        }
         /* These have strange encodings of the data */
         tmp8 = m6800_do_read(cpu, data16 & 0xFF);
         tmp8 &= data16 >> 8;
