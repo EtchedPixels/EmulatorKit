@@ -12,11 +12,11 @@
  *	- idle serial 1
  *	- virtual disk via I/O processor
  *	- 50Hz timer
+ *	- 60Hz timer
+ *	- Interrupt timer
  *
  *	The following are not yet right
  *`	- cpu timer
- *	- 60Hz timer (it runs at 50)
- *	- timer interrupts (faked at 50Hz irrespective of settings)
  */
 
 #include <stdio.h>
@@ -38,9 +38,8 @@ static uint8_t io[256];			/* I/O shadow */
 
 static uint8_t iopage = 0xFE;
 static uint8_t hd_fd;
-
-static uint16_t tstate_steps = 100;	/* 2MHz */
 static uint8_t fast;
+static uint8_t trunning;
 
 /* Who is pulling on the interrupt line */
 
@@ -96,9 +95,10 @@ unsigned int next_char(void)
 	return c;
 }
 
-/* We do this in the 6502 loop instead. Provide a dummy for the device models */
-void recalc_interrupts(void)
+static void irqnotify(void)
 {
+	if (live_irq)
+		irq6502();
 }
 
 static void int_set(int src)
@@ -174,12 +174,12 @@ uint8_t mmio_read_6502(uint8_t addr)
 	return io[addr];
 }
 
+/* Review break v return on what is read only */
 void mmio_write_6502(uint8_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	/* So it reads back as expected by default */
-	io[addr] = val;
 	switch(addr) {
 	case 0x12:
 		write(1, &val, 1);
@@ -192,18 +192,27 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		break;			
 	case 0x63:
 		disk_write(val);
-		break;
+		return;
 	case 0x64:
 		break;
 	case 0x80:
-	case 0x81:
 		break;
+	case 0x81:
+		return;
 	case 0x82:
 		int_clear(IRQ_TIMER);
+		io[0x81] = 0;
+		trunning = 1;
 		break;
 	case 0x83:
+		/* Trigger timer now */
+		int_set(IRQ_TIMER);
+		break;
 	case 0x84:
+		trunning = 0;
+		break;
 	case 0x85:
+		trunning = 1;
 		break;
 	case 0xFF:
 		printf("trace set to %d\n", val);
@@ -216,6 +225,7 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		if (trace & TRACE_UNK)
 			fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 	}
+	io[addr] = val;
 }
 
 /* Support emulating 32K/32K at some point */
@@ -268,16 +278,6 @@ void write6502(uint16_t addr, uint8_t val)
 		fprintf(stderr, "[Discarded: ROM]\n");
 }
 
-static void poll_irq_event(void)
-{
-}
-
-static void irqnotify(void)
-{
-	if (live_irq)
-		irq6502();
-}
-
 static struct termios saved_term, term;
 
 static void cleanup(int sig)
@@ -304,6 +304,7 @@ int main(int argc, char *argv[])
 	char *rompath = "pz1.rom";
 	char *diskpath = "pz1.hd";
 	int fd;
+	unsigned c5 = 0, c6 = 0;
 
 	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
 		switch (opt) {
@@ -353,7 +354,7 @@ int main(int argc, char *argv[])
 	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
+	tc.tv_nsec = 111111L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -382,24 +383,34 @@ int main(int argc, char *argv[])
 	   matched with that. The scheme here works fine except when the host
 	   is loaded though */
 
-	/* We run 2000000 t-states per second */
-	/* We run 100 cycles per I/O check, do that 100 times then poll the
-	   slow stuff and nap for 5ms. */
+	/* Everything internally on the real system is built around a 900Hz
+	   timer so we work the same way. */
+
 	while (!done) {
-		int i;
-		for (i = 0; i < 400; i++) {
-			/* FIXME: should check return and keep adjusting */
-			exec6502(tstate_steps);
-			/* TODO; timers and other ints */
-		}
-		/* Do 20ms of I/O and delays */
+		/* 1.11ms worth of time  @ 2MHz */
+		exec6502(2222);
 		if (!fast)
 			nanosleep(&tc, NULL);
-		io[0x40]++;
-		io[0x41]++;	/* FIXME: should be 60Hz */
-		/* FIXME: should be timer rate dependent */
-		int_set(IRQ_TIMER);
-		poll_irq_event();
+		/* Run the internal timer chain */
+		c5++;
+		c6++;
+		/* Configurable interrupt timer */
+		if (trunning) {
+			io[0x81]++;
+			if (io[0x80] == io[0x81]) {
+				int_set(IRQ_TIMER);
+				io[0x81] = 0;
+			}
+		}
+		/* Process the timer chain events */
+		if (c5 == 18) {
+			io[0x40]++;
+			c5 = 0;
+		}
+		if (c6 == 15) {
+			io[0x41]++;
+			c6 = 0;
+		}
 	}
 	exit(0);
 }
