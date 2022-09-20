@@ -10,8 +10,6 @@
  *	- serial 0
  *	- idle serial 1
  *	- virtual disk via I/O processor
- *	- 50Hz timer
- *	- 60Hz timer
  *	- Interrupt timer
  *
  *	HW available in PZ1 but not (yet) used in Fuzix:
@@ -154,8 +152,9 @@ static uint8_t disk_read(void)
 
 static void disk_write(uint8_t c)
 {
-	io[PORT_FILE_STATUS] = FILE_STATUS_OK;
-	if (write(hd_fd, &c, 1) != 1)
+	if (write(hd_fd, &c, 1) == 1)
+		io[PORT_FILE_STATUS] = FILE_STATUS_OK;
+	else
 		io[PORT_FILE_STATUS] = FILE_STATUS_NOK;
 }
 
@@ -169,7 +168,7 @@ static void disk_seek(void)
 	else
 		io[PORT_FILE_STATUS] = FILE_STATUS_OK;
 }
-	
+
 /* All I/O-writes are mirrored in unbanked RAM. Some I/O-reads are returned
    from devices, most are returned from the mirror RAM.
    A very simple way to implement bank register read-back when implemented
@@ -196,7 +195,7 @@ uint8_t mmio_read_6502(uint8_t addr)
 		io[addr] = disk_read();
 		break;
 	}
-	/* Timers are updated on the fly as they tick */
+	/* Counters/timers are updated on the fly as they tick */
 	return io[addr];
 }
 
@@ -255,10 +254,9 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 	io[addr] = val;
 }
 
-/* Support emulating 32K/32K at some point */
 uint8_t do_6502_read(uint16_t addr)
 {
-	uint8_t bank = (addr & 0xC000) >> 14;
+	uint8_t bank = addr >> 14;
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) io[bank], (unsigned int) ramrom[(io[bank] << 14) + (addr & 0x3FFF)]);
 	addr &= 0x3FFF;
@@ -359,7 +357,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "pz1: OS image should be 64512 bytes.\n");
 		exit(EXIT_FAILURE);
 	}
-	/* Fix because of lazy 6502 boot code, will be fixed later */
+	/* Hack because of lazy 6502 boot code, will be fixed later */
 	memcpy(ramrom + 512 * 1024, ramrom, 65536);
 	close(fd);
 
@@ -374,8 +372,7 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* 20ms - it's a balance between nice behaviour and simulation
-	   smoothness */
+	/* 10ms sleep will get close enough to 2MHz performance */
 	tc.tv_sec = 0;
 	tc.tv_nsec = 1000000L;
 
