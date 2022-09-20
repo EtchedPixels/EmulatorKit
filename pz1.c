@@ -372,7 +372,7 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* 10ms sleep will get close enough to 2MHz performance */
+	/* 1ms sleep will get close enough to 2MHz performance */
 	tc.tv_sec = 0;
 	tc.tv_nsec = 1000000L;
 
