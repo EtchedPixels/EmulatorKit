@@ -4,9 +4,8 @@
  *	PZ1 6502 (should be 65C02 when we sort the emulation of C02 out)
  *	I/O via modern co-processor
  *
- *	This is a very early initial emulation. The following should be
- *	correct
- *
+ *	This is a simple emulation, enough to run Fuzix.
+ *	The following is roughly correct:
  *	- bank registers
  *	- serial 0
  *	- idle serial 1
@@ -15,8 +14,13 @@
  *	- 60Hz timer
  *	- Interrupt timer
  *
- *	The following are not yet right
- *`	- cpu timer
+ *	HW available in PZ1 but not (yet) used in Fuzix:
+ *	- top page memory "locked"
+ *	- SID-sound
+ *	- 50Hz counter
+ *	- 60Hz counter
+ *	- cpu cycle counter
+ *	- display character/graphics/sprite interface
  */
 
 #include <stdio.h>
@@ -33,7 +37,7 @@
 #include "6502.h"
 #include "ide.h"
 
-static uint8_t ramrom[1024 * 1024];	/* 1MB RAM */
+static uint8_t ramrom[1024 * 1024];	/* 512KiB ROM, 512KiB RAM */
 static uint8_t io[256];			/* I/O shadow */
 
 static uint8_t iopage = 0xFE;
@@ -56,6 +60,32 @@ static volatile int done;
 #define TRACE_CPU	16
 
 static int trace = 0;
+
+/* IO-ports */
+#define PORT_BANK_0            0x00
+#define PORT_BANK_1            0x01
+#define PORT_BANK_2            0x02
+#define PORT_BANK_3            0x03
+#define PORT_SERIAL_0_FLAGS    0x10
+#define PORT_SERIAL_0_IN       0x11
+#define PORT_SERIAL_0_OUT      0x12
+#define PORT_SERIAL_1_FLAGS    0x18
+#define PORT_SERIAL_1_IN       0x19
+#define PORT_SERIAL_1_OUT      0x1A
+#define PORT_FILE_CMD          0x60
+#define PORT_FILE_PRM_0        0x61
+#define PORT_FILE_PRM_1        0x62
+#define PORT_FILE_DATA         0x63
+#define PORT_FILE_STATUS       0x64
+#define PORT_IRQ_TIMER_TARGET  0x80
+#define PORT_IRQ_TIMER_COUNT   0x81
+#define PORT_IRQ_TIMER_RESET   0x82
+#define PORT_IRQ_TIMER_TRIG    0x83
+#define PORT_IRQ_TIMER_PAUSE   0x84
+#define PORT_IRQ_TIMER_CONT    0x85
+
+#define SERIAL_FLAGS_OUT_FULL      128
+#define SERIAL_FLAGS_IN_AVAIL       64
 
 unsigned int check_chario(void)
 {
@@ -115,58 +145,55 @@ static uint8_t disk_read(void)
 {
 	uint8_t c;
 	read(hd_fd, &c, 1);
+	/* Never any problem reading from file */
+	io[PORT_FILE_STATUS] = 0;
 	return c;
 }
 
 static void disk_write(uint8_t c)
 {
-	io[0x64] = 0;
+	io[PORT_FILE_STATUS] = 0;
 	if (write(hd_fd, &c, 1) != 1)
-		io[0x64] = 1;
+		io[PORT_FILE_STATUS] = 1;
 }
 
 static void disk_seek(void)
 {
-	off_t pos = (io[0x61] + (io[0x62] << 8)) << 9;
+	/* Seeks to sector (PORT_FILE_PRM_0 + (PORT_FILE_PRM_1 << 8))
+	   using 512 byte sectors */
+	off_t pos = (io[PORT_FILE_PRM_0] + (io[PORT_FILE_PRM_1] << 8)) << 9;
 	if (lseek(hd_fd, pos, SEEK_SET) < 0)
-		io[0x64] = 1;
+		io[PORT_FILE_STATUS] = 1;
 	else
-		io[0x64] = 0;
+		io[PORT_FILE_STATUS] = 0;
 }
 	
-/* FExx is the I/O range 
-
-	00-03	Bank registers
-	10	Serial flags
-	11	Serial in
-	12	Serial out
-	18-1A	Same for serial 2
-	40	50Hz Counter
-	41	60Hz Counter
-	48-4B	CPU counter
-	60-64	Filesystem interface
-	80-85	Timer
- */
-
+/* All I/O-writes are mirrored in unbanked RAM. Some I/O-reads are returned
+   from devices, most are returned from the mirror RAM.
+   A very simple way to implement bank register read-back when implemented
+   in real hardware. */
 uint8_t mmio_read_6502(uint8_t addr)
 {
 	uint8_t r;
-	/* The I/O space actually acts like a 256 byte memory block that is
-	   shared. Thus reading/writing random crap behaves like memory but
-	   is unbanked. So unlike normal I/O, we effectively update the
-	   relevant shared RAM address on the I/O and then return it */
+	
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
+
 	switch(addr) {
-	case 0x10:
+	case PORT_SERIAL_0_FLAGS:
 		r = check_chario();
 		io[addr] = (r ^ 2) << 6;
 		break;
-	case 0x11:
+	case PORT_SERIAL_0_IN:
 		if (check_chario() & 1)
 			io[addr] = next_char();
+		else
+			io[addr] = 0;
 		break;
-	case 0x63:	/* FS data */
+	case PORT_SERIAL_1_FLAGS:
+		io[addr] = 0;
+		break;
+	case PORT_FILE_DATA:
 		io[addr] = disk_read();
 		break;
 	}
@@ -181,38 +208,39 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	/* So it reads back as expected by default */
 	switch(addr) {
-	case 0x12:
+	case PORT_SERIAL_0_OUT:
 		write(1, &val, 1);
 		break;
-	case 0x60:
-		if (val == 0)
-			io[0x64] = 0;
-		if (val == 1)
-			disk_seek();	/* Seeks 0x61, 0x62 <<8 512  byte blocks */
+	case PORT_FILE_CMD:
+		if (val == 0) /* SELECT */
+			io[PORT_FILE_STATUS] = 0;
+		if (val == 1) /* SEEK */
+			disk_seek();
 		break;			
-	case 0x63:
+	case PORT_FILE_DATA:
 		disk_write(val);
-		return;
-	case 0x64:
 		break;
-	case 0x80:
-		break;
-	case 0x81:
-		return;
-	case 0x82:
+	case PORT_IRQ_TIMER_TARGET:
 		int_clear(IRQ_TIMER);
-		io[0x81] = 0;
+		io[PORT_IRQ_TIMER_COUNT] = 0;
 		trunning = 1;
 		break;
-	case 0x83:
-		/* Trigger timer now */
+	case PORT_IRQ_TIMER_COUNT:
+		return;
+	case PORT_IRQ_TIMER_RESET:
+		int_clear(IRQ_TIMER);
+		io[PORT_IRQ_TIMER_COUNT] = 0;
+		trunning = 1;
+		break;
+	case PORT_IRQ_TIMER_TRIG:
 		int_set(IRQ_TIMER);
 		break;
-	case 0x84:
+	case PORT_IRQ_TIMER_PAUSE:
 		trunning = 0;
 		break;
-	case 0x85:
+	case PORT_IRQ_TIMER_CONT:
 		trunning = 1;
+		int_clear(IRQ_TIMER);
 		break;
 	case 0xFF:
 		printf("trace set to %d\n", val);
@@ -240,13 +268,10 @@ uint8_t do_6502_read(uint16_t addr)
 
 uint8_t read6502(uint16_t addr)
 {
-	uint8_t r;
-
 	if (addr >> 8 == iopage)
 		return mmio_read_6502(addr);
 
-	r = do_6502_read(addr);
-	return r;
+	return do_6502_read(addr);
 }
 
 uint8_t read6502_debug(uint16_t addr)
@@ -304,7 +329,6 @@ int main(int argc, char *argv[])
 	char *rompath = "pz1.rom";
 	char *diskpath = "pz1.hd";
 	int fd;
-	unsigned c5 = 0, c6 = 0;
 
 	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
 		switch (opt) {
@@ -336,7 +360,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "pz1: OS image should be 64512 bytes.\n");
 		exit(EXIT_FAILURE);
 	}
-	/* For some reason it ends up in both */
+	/* Fix because of lazy 6502 boot code, will be fixed later */
 	memcpy(ramrom + 512 * 1024, ramrom, 65536);
 	close(fd);
 
@@ -387,29 +411,18 @@ int main(int argc, char *argv[])
 	   timer so we work the same way. */
 
 	while (!done) {
-		/* 1.11ms worth of time  @ 2MHz */
+		/* run 6502 @ 2MHz, do timer update @ 900Hz
+		 2000000 / 900 = 2222 cycles */
 		exec6502(2222);
 		if (!fast)
 			nanosleep(&tc, NULL);
-		/* Run the internal timer chain */
-		c5++;
-		c6++;
 		/* Configurable interrupt timer */
 		if (trunning) {
-			io[0x81]++;
-			if (io[0x80] == io[0x81]) {
+			io[PORT_IRQ_TIMER_COUNT]++;
+			if (io[PORT_IRQ_TIMER_TARGET] == io[PORT_IRQ_TIMER_COUNT]) {
 				int_set(IRQ_TIMER);
-				io[0x81] = 0;
+				trunning = 0;
 			}
-		}
-		/* Process the timer chain events */
-		if (c5 == 18) {
-			io[0x40]++;
-			c5 = 0;
-		}
-		if (c6 == 15) {
-			io[0x41]++;
-			c6 = 0;
 		}
 	}
 	exit(0);
