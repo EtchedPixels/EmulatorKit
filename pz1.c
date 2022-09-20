@@ -62,30 +62,32 @@ static volatile int done;
 static int trace = 0;
 
 /* IO-ports */
-#define PORT_BANK_0            0x00
-#define PORT_BANK_1            0x01
-#define PORT_BANK_2            0x02
-#define PORT_BANK_3            0x03
-#define PORT_SERIAL_0_FLAGS    0x10
-#define PORT_SERIAL_0_IN       0x11
-#define PORT_SERIAL_0_OUT      0x12
-#define PORT_SERIAL_1_FLAGS    0x18
-#define PORT_SERIAL_1_IN       0x19
-#define PORT_SERIAL_1_OUT      0x1A
-#define PORT_FILE_CMD          0x60
-#define PORT_FILE_PRM_0        0x61
-#define PORT_FILE_PRM_1        0x62
-#define PORT_FILE_DATA         0x63
-#define PORT_FILE_STATUS       0x64
-#define PORT_IRQ_TIMER_TARGET  0x80
-#define PORT_IRQ_TIMER_COUNT   0x81
-#define PORT_IRQ_TIMER_RESET   0x82
-#define PORT_IRQ_TIMER_TRIG    0x83
-#define PORT_IRQ_TIMER_PAUSE   0x84
-#define PORT_IRQ_TIMER_CONT    0x85
+#define PORT_BANK_0           0x00
+#define PORT_BANK_1           0x01
+#define PORT_BANK_2           0x02
+#define PORT_BANK_3           0x03
+#define PORT_SERIAL_0_FLAGS   0x10
+#define PORT_SERIAL_0_IN      0x11
+#define PORT_SERIAL_0_OUT     0x12
+#define PORT_SERIAL_1_FLAGS   0x18
+#define PORT_SERIAL_1_IN      0x19
+#define PORT_SERIAL_1_OUT     0x1A
+#define PORT_FILE_CMD         0x60
+#define PORT_FILE_PRM_0       0x61
+#define PORT_FILE_PRM_1       0x62
+#define PORT_FILE_DATA        0x63
+#define PORT_FILE_STATUS      0x64
+#define PORT_IRQ_TIMER_TARGET 0x80
+#define PORT_IRQ_TIMER_COUNT  0x81
+#define PORT_IRQ_TIMER_RESET  0x82
+#define PORT_IRQ_TIMER_TRIG   0x83
+#define PORT_IRQ_TIMER_PAUSE  0x84
+#define PORT_IRQ_TIMER_CONT   0x85
 
-#define SERIAL_FLAGS_OUT_FULL      128
-#define SERIAL_FLAGS_IN_AVAIL       64
+#define SERIAL_FLAGS_OUT_FULL  128
+#define SERIAL_FLAGS_IN_AVAIL   64
+#define FILE_STATUS_OK           0
+#define FILE_STATUS_NOK          1
 
 uint8_t check_chario(void)
 {
@@ -110,7 +112,7 @@ uint8_t check_chario(void)
 		r |= 1;
 	if (FD_ISSET(1, &o))
 		r |= 2;
-	return r;
+	return ((r ^ 2) << 6);
 }
 
 uint8_t next_char(void)
@@ -146,15 +148,15 @@ static uint8_t disk_read(void)
 	uint8_t c;
 	read(hd_fd, &c, 1);
 	/* Never any problem reading from file */
-	io[PORT_FILE_STATUS] = 0;
+	io[PORT_FILE_STATUS] = FILE_STATUS_OK;
 	return c;
 }
 
 static void disk_write(uint8_t c)
 {
-	io[PORT_FILE_STATUS] = 0;
+	io[PORT_FILE_STATUS] = FILE_STATUS_OK;
 	if (write(hd_fd, &c, 1) != 1)
-		io[PORT_FILE_STATUS] = 1;
+		io[PORT_FILE_STATUS] = FILE_STATUS_NOK;
 }
 
 static void disk_seek(void)
@@ -163,9 +165,9 @@ static void disk_seek(void)
 	   using 512 byte sectors */
 	off_t pos = (io[PORT_FILE_PRM_0] + (io[PORT_FILE_PRM_1] << 8)) << 9;
 	if (lseek(hd_fd, pos, SEEK_SET) < 0)
-		io[PORT_FILE_STATUS] = 1;
+		io[PORT_FILE_STATUS] = FILE_STATUS_NOK;
 	else
-		io[PORT_FILE_STATUS] = 0;
+		io[PORT_FILE_STATUS] = FILE_STATUS_OK;
 }
 	
 /* All I/O-writes are mirrored in unbanked RAM. Some I/O-reads are returned
@@ -174,18 +176,15 @@ static void disk_seek(void)
    in real hardware. */
 uint8_t mmio_read_6502(uint8_t addr)
 {
-	uint8_t r;
-	
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
 
 	switch(addr) {
 	case PORT_SERIAL_0_FLAGS:
-		r = check_chario();
-		io[addr] = (r ^ 2) << 6;
+		io[addr] = check_chario();
 		break;
 	case PORT_SERIAL_0_IN:
-		if (check_chario() & 1)
+		if (check_chario() & SERIAL_FLAGS_IN_AVAIL)
 			io[addr] = next_char();
 		else
 			io[addr] = 0;
@@ -212,7 +211,7 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		break;
 	case PORT_FILE_CMD:
 		if (val == 0) /* SELECT */
-			io[PORT_FILE_STATUS] = 0;
+			io[PORT_FILE_STATUS] = FILE_STATUS_OK;
 		if (val == 1) /* SEEK */
 			disk_seek();
 		break;			
