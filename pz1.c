@@ -87,11 +87,11 @@ static int trace = 0;
 #define SERIAL_FLAGS_OUT_FULL      128
 #define SERIAL_FLAGS_IN_AVAIL       64
 
-unsigned int check_chario(void)
+uint8_t check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
-	unsigned int r = 0;
+	uint8_t r = 0;
 
 	FD_ZERO(&i);
 	FD_SET(0, &i);
@@ -113,7 +113,7 @@ unsigned int check_chario(void)
 	return r;
 }
 
-unsigned int next_char(void)
+uint8_t next_char(void)
 {
 	char c;
 	if (read(0, &c, 1) != 1) {
@@ -201,12 +201,11 @@ uint8_t mmio_read_6502(uint8_t addr)
 	return io[addr];
 }
 
-/* Review break v return on what is read only */
 void mmio_write_6502(uint8_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
-	/* So it reads back as expected by default */
+
 	switch(addr) {
 	case PORT_SERIAL_0_OUT:
 		write(1, &val, 1);
@@ -226,6 +225,7 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 		trunning = 1;
 		break;
 	case PORT_IRQ_TIMER_COUNT:
+		/* This is strictly read only! */
 		return;
 	case PORT_IRQ_TIMER_RESET:
 		int_clear(IRQ_TIMER);
@@ -259,7 +259,7 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 /* Support emulating 32K/32K at some point */
 uint8_t do_6502_read(uint16_t addr)
 {
-	unsigned int bank = (addr & 0xC000) >> 14;
+	uint8_t bank = (addr & 0xC000) >> 14;
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) io[bank], (unsigned int) ramrom[(io[bank] << 14) + (addr & 0x3FFF)]);
 	addr &= 0x3FFF;
@@ -286,7 +286,7 @@ uint8_t read6502_debug(uint16_t addr)
 
 void write6502(uint16_t addr, uint8_t val)
 {
-	unsigned int bank = (addr & 0xC000) >> 14;
+	uint8_t bank = addr >> 14;
 
 	if (addr >> 8 == iopage) {
 		mmio_write_6502(addr, val);
@@ -378,7 +378,7 @@ int main(int argc, char *argv[])
 	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 111111L;
+	tc.tv_nsec = 1000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
