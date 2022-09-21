@@ -87,11 +87,11 @@ static int trace = 0;
 #define FILE_STATUS_OK           0
 #define FILE_STATUS_NOK          1
 
-uint8_t check_chario(void)
+unsigned int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
-	uint8_t r = 0;
+	unsigned int r = 0;
 
 	FD_ZERO(&i);
 	FD_SET(0, &i);
@@ -110,10 +110,10 @@ uint8_t check_chario(void)
 		r |= 1;
 	if (FD_ISSET(1, &o))
 		r |= 2;
-	return ((r ^ 2) << 6);
+	return r;
 }
 
-uint8_t next_char(void)
+unsigned int next_char(void)
 {
 	char c;
 	if (read(0, &c, 1) != 1) {
@@ -152,9 +152,8 @@ static uint8_t disk_read(void)
 
 static void disk_write(uint8_t c)
 {
-	if (write(hd_fd, &c, 1) == 1)
-		io[PORT_FILE_STATUS] = FILE_STATUS_OK;
-	else
+	io[PORT_FILE_STATUS] = FILE_STATUS_OK;
+	if (write(hd_fd, &c, 1) != 1)
 		io[PORT_FILE_STATUS] = FILE_STATUS_NOK;
 }
 
@@ -180,10 +179,10 @@ uint8_t mmio_read_6502(uint8_t addr)
 
 	switch(addr) {
 	case PORT_SERIAL_0_FLAGS:
-		io[addr] = check_chario();
+		io[addr] = (check_chario() ^ 2) << 6;
 		break;
 	case PORT_SERIAL_0_IN:
-		if (check_chario() & SERIAL_FLAGS_IN_AVAIL)
+		if (check_chario() & 1)
 			io[addr] = next_char();
 		else
 			io[addr] = 0;
@@ -256,7 +255,7 @@ void mmio_write_6502(uint8_t addr, uint8_t val)
 
 uint8_t do_6502_read(uint16_t addr)
 {
-	uint8_t bank = addr >> 14;
+	unsigned int bank = (addr & 0xC000) >> 14;
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) io[bank], (unsigned int) ramrom[(io[bank] << 14) + (addr & 0x3FFF)]);
 	addr &= 0x3FFF;
@@ -283,7 +282,7 @@ uint8_t read6502_debug(uint16_t addr)
 
 void write6502(uint16_t addr, uint8_t val)
 {
-	uint8_t bank = addr >> 14;
+	unsigned int bank = (addr & 0xC000) >> 14;
 
 	if (addr >> 8 == iopage) {
 		mmio_write_6502(addr, val);
