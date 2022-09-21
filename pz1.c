@@ -3,6 +3,7 @@
  *
  *	PZ1 6502 (should be 65C02 when we sort the emulation of C02 out)
  *	I/O via modern co-processor
+ *	512KiB RAM, no ROM, boot code inserted by I/O-processor
  *
  *	This is a simple emulation, enough to run Fuzix.
  *	The following is roughly correct:
@@ -12,7 +13,7 @@
  *	- virtual disk via I/O processor
  *	- Interrupt timer
  *
- *	HW available in PZ1 but not (yet) used in Fuzix:
+ *	HW available in real PZ1 but not used in Fuzix:
  *	- top page memory "locked"
  *	- SID-sound
  *	- 50Hz counter
@@ -35,7 +36,7 @@
 #include "6502.h"
 #include "ide.h"
 
-static uint8_t ramrom[1024 * 1024];	/* 512KiB ROM, 512KiB RAM */
+static uint8_t ram[512 * 1024];		/* 512KiB RAM */
 static uint8_t io[256];			/* I/O shadow */
 
 static uint8_t iopage = 0xFE;
@@ -257,9 +258,9 @@ uint8_t do_6502_read(uint16_t addr)
 {
 	unsigned int bank = (addr & 0xC000) >> 14;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) io[bank], (unsigned int) ramrom[(io[bank] << 14) + (addr & 0x3FFF)]);
+		fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) io[bank], (unsigned int) ram[(io[bank] << 14) + (addr & 0x3FFF)]);
 	addr &= 0x3FFF;
-	return ramrom[(io[bank] << 14) + addr];
+	return ram[(io[bank] << 14) + addr];
 }
 
 uint8_t read6502(uint16_t addr)
@@ -290,13 +291,13 @@ void write6502(uint16_t addr, uint8_t val)
 	}
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X[%02X] = %02X\n", (unsigned int) addr, (unsigned int) io[bank], (unsigned int) val);
-	if (io[bank] >= 32) {
+	if (io[bank] <= 31) {
 		addr &= 0x3FFF;
-		ramrom[(io[bank] << 14) + addr] = val;
+		ram[(io[bank] << 14) + addr] = val;
 	}
-	/* ROM writes go nowhere */
+	/* high writes go nowhere */
 	else if (trace & TRACE_MEM)
-		fprintf(stderr, "[Discarded: ROM]\n");
+		fprintf(stderr, "[Discarded: W above 512KiB]\n");
 }
 
 static struct termios saved_term, term;
@@ -347,23 +348,23 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+	/* Insert the boot code to RAM */
 	fd = open(rompath, O_RDONLY);
 	if (fd == -1) {
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, ramrom + 1024, 64512) != 64512) {
+	if (read(fd, ram + 1024, 64512) != 64512) {
 		fprintf(stderr, "pz1: OS image should be 64512 bytes.\n");
 		exit(EXIT_FAILURE);
 	}
-	/* Hack because of lazy 6502 boot code, will be fixed later */
-	memcpy(ramrom + 512 * 1024, ramrom, 65536);
 	close(fd);
 
-	io[0] = 32;
-	io[1] = 33;
-	io[2] = 34;
-	io[3] = 35;
+	/* Init the bank registers */
+	io[0] = 0;
+	io[1] = 1;
+	io[2] = 2;
+	io[3] = 3;
 
 	hd_fd = open(diskpath, O_RDWR);
 	if (hd_fd == -1) {
