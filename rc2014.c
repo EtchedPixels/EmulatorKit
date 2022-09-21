@@ -147,6 +147,8 @@ volatile int emulator_done;
 #define TRACE_ACIA	0x400000
 
 static int trace = 0;
+static FILE *tracef = 0; /* stderr may not be statically defined, so
+                            initialize to stderr in main() */
 
 static void reti_event(void);
 
@@ -155,14 +157,14 @@ static uint8_t mem_read0(uint16_t addr)
 	if (bankenable) {
 		unsigned int bank = (addr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
+			fprintf(tracef, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
 		addr &= 0x3FFF;
 		return ramrom[(bankreg[bank] << 14) + addr];
 	}
 	if (bank512 && !bankenable)
 		addr &= 0x3FFF;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
+		fprintf(tracef, "R %04X = %02X\n", addr, ramrom[addr]);
 	return ramrom[addr];
 }
 
@@ -171,21 +173,21 @@ static void mem_write0(uint16_t addr, uint8_t val)
 	if (bankenable) {
 		unsigned int bank = (addr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "W %04x[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
+			fprintf(tracef, "W %04x[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
 		if (bankreg[bank] >= 32) {
 			addr &= 0x3FFF;
 			ramrom[(bankreg[bank] << 14) + addr] = val;
 		}
 		/* ROM writes go nowhere */
 		else if (trace & TRACE_MEM)
-			fprintf(stderr, "[Discarded: ROM]\n");
+			fprintf(tracef, "[Discarded: ROM]\n");
 	} else {
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "W: %04X = %02X\n", addr, val);
+			fprintf(tracef, "W: %04X = %02X\n", addr, val);
 		if (addr >= 8192 && !bank512)
 			ramrom[addr] = val;
 		else if (trace & TRACE_MEM)
-			fprintf(stderr, "[Discarded: ROM]\n");
+			fprintf(tracef, "[Discarded: ROM]\n");
 	}
 }
 
@@ -199,7 +201,7 @@ static uint8_t mem_read108(uint16_t addr)
 	else
 		aphys = addr + 65536;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %05X = %02X\n", aphys, ramrom[aphys]);
+		fprintf(tracef, "R %05X = %02X\n", aphys, ramrom[aphys]);
 	return ramrom[aphys];
 }
 
@@ -207,17 +209,17 @@ static void mem_write108(uint16_t addr, uint8_t val)
 {
 	uint32_t aphys;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W: %04X = %02X\n", addr, val);
+		fprintf(tracef, "W: %04X = %02X\n", addr, val);
 	if (addr < 0x8000 && !(port38 & 0x01)) {
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "[Discarded: ROM]\n");
+			fprintf(tracef, "[Discarded: ROM]\n");
 		return;
 	} else if (port38 & 0x80)
 		aphys = addr + 131072;
 	else
 		aphys = addr + 65536;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W: aphys %05X\n", aphys);
+		fprintf(tracef, "W: aphys %05X\n", aphys);
 	ramrom[aphys] = val;
 }
 
@@ -231,7 +233,7 @@ static uint8_t mem_read114(uint16_t addr)
 	else
 		aphys = addr + 65536;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[aphys]);
+		fprintf(tracef, "R %04X = %02X\n", addr, ramrom[aphys]);
 	return ramrom[aphys];
 }
 
@@ -239,10 +241,10 @@ static void mem_write114(uint16_t addr, uint8_t val)
 {
 	uint32_t aphys;
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W: %04X = %02X\n", addr, val);
+		fprintf(tracef, "W: %04X = %02X\n", addr, val);
 	if (addr < 0x8000 && !(port38 & 0x01)) {
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "[Discarded: ROM]\n");
+			fprintf(tracef, "[Discarded: ROM]\n");
 		return;
 	} else if (port30 & 0x01)
 		aphys = addr + 131072;
@@ -268,14 +270,14 @@ static uint8_t mem_read64(uint16_t addr)
 	else
 		r = ramrom[bankreg[0] * 0x8000 + addr];
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04x = %02X\n", addr, r);
+		fprintf(tracef, "R %04x = %02X\n", addr, r);
 	return r;
 }
 
 static void mem_write64(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W %04x = %02X\n", addr, val);
+		fprintf(tracef, "W %04x = %02X\n", addr, val);
 	if (addr >= 0x8000)	/* Top 32K is common */
 		ramrom[addr + 65536] = val;
 	else
@@ -392,7 +394,7 @@ static uint8_t mem_readzrcc(uint16_t addr)
 	else
 		r = ramrom[bankreg[0] * 0x8000 + addr];
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04x = %02X\n", addr, r);
+		fprintf(tracef, "R %04x = %02X\n", addr, r);
 	return r;
 }
 
@@ -400,11 +402,11 @@ static void mem_writezrcc(uint16_t addr, uint8_t val)
 {
 	if (addr <= 0x40 && bankreg[1]) {
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "W %04X = %02X [ROM]\n", addr, val);
+			fprintf(tracef, "W %04X = %02X [ROM]\n", addr, val);
 		return;
 	}
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W %04X = %02X\n", addr, val);
+		fprintf(tracef, "W %04X = %02X\n", addr, val);
 	if (addr >= 0x8000)
 		ramrom[addr + 65536] = val;
 	else
@@ -455,11 +457,11 @@ static uint8_t *mmu_micro80_z84c15(uint16_t addr, int write)
 	/* CS0 low selects ROM always */
 	if (trace & TRACE_MEM) {
 		if (cs0)
-			fprintf(stderr, "R");
+			fprintf(tracef, "R");
 		if (cs1)
-			fprintf(stderr, "L");
+			fprintf(tracef, "L");
 		else
-			fprintf(stderr, "H");
+			fprintf(tracef, "H");
 	}
 	if (cs0) {
 		if (write)
@@ -477,7 +479,7 @@ static uint8_t mem_read_micro80(uint16_t addr)
 {
 	uint8_t val = *mmu_micro80_z84c15(addr, 0);
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04x = %02X\n", addr, val);
+		fprintf(tracef, "R %04x = %02X\n", addr, val);
 	return val;
 }
 
@@ -485,9 +487,9 @@ static void mem_write_micro80(uint16_t addr, uint8_t val)
 {
 	uint8_t *p = mmu_micro80_z84c15(addr, 1);
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W %04x = %02X\n", addr, val);
+		fprintf(tracef, "W %04x = %02X\n", addr, val);
 	if (p == NULL)
-		fprintf(stderr, "%04x: write to ROM of %02X attempted.\n", addr, val);
+		fprintf(tracef, "%04x: write to ROM of %02X attempted.\n", addr, val);
 	else
 		*p = val;
 }
@@ -526,7 +528,7 @@ static uint8_t mem_read_pickled128(uint16_t addr)
 {
 	uint8_t *p = mmu_pickled128(addr, 0);
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X = %02X\n", addr, *p);
+		fprintf(tracef, "R %04X = %02X\n", addr, *p);
 	return *p;
 }
 
@@ -534,11 +536,11 @@ static void mem_write_pickled128(uint16_t addr, uint8_t val)
 {
 	uint8_t *p = mmu_pickled128(addr, 1);
 	if (p == NULL) {
-		fprintf(stderr, "%04X: write to ROM of %02X attempted.\n", addr, val);
+		fprintf(tracef, "%04X: write to ROM of %02X attempted.\n", addr, val);
 		return;
 	}
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "%04X = %02X\n", addr, val);
+		fprintf(tracef, "%04X = %02X\n", addr, val);
 	*p = val;
 }
 
@@ -558,7 +560,7 @@ static uint8_t mem_read_pickled512(uint16_t addr)
 {
 	uint8_t *p = mmu_pickled512(addr, 0);
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X = %02X\n", addr, *p);
+		fprintf(tracef, "R %04X = %02X\n", addr, *p);
 	return *p;
 }
 
@@ -566,11 +568,11 @@ static void mem_write_pickled512(uint16_t addr, uint8_t val)
 {
 	uint8_t *p = mmu_pickled512(addr, 1);
 	if (p == NULL) {
-		fprintf(stderr, "%04X: write to ROM of %02X attempted.\n", addr, val);
+		fprintf(tracef, "%04X: write to ROM of %02X attempted.\n", addr, val);
 		return;
 	}
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "%04X = %02X\n", addr, val);
+		fprintf(tracef, "%04X = %02X\n", addr, val);
 	*p = val;
 }
 
@@ -686,7 +688,7 @@ static unsigned int nbytes;
 uint8_t z80dis_byte(uint16_t addr)
 {
 	uint8_t r = do_mem_read(addr, 1);
-	fprintf(stderr, "%02X ", r);
+	fprintf(tracef, "%02X ", r);
 	nbytes++;
 	return r;
 }
@@ -710,12 +712,12 @@ static void z80_trace(unsigned unused)
 		return;
 	}
 	lastpc = cpu_z80.M1PC;
-	fprintf(stderr, "%04X: ", lastpc);
+	fprintf(tracef, "%04X: ", lastpc);
 	z80_disasm(buf, lastpc);
 	while(nbytes++ < 6)
-		fprintf(stderr, "   ");
-	fprintf(stderr, "%-16s ", buf);
-	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n",
+		fprintf(tracef, "   ");
+	fprintf(tracef, "%-16s ", buf);
+	fprintf(tracef, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n",
 		cpu_z80.R1.br.A, cpu_z80.R1.br.F,
 		cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL,
 		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
@@ -882,46 +884,46 @@ static void show_settings(struct uart16x50 *uptr)
         baud = 1843200;
     baud = 1843200 / baud;
     baud /= 16;
-    fprintf(stderr, "[%d:%d",
+    fprintf(tracef, "[%d:%d",
             baud, (uptr->lcr &3) + 5);
     switch(uptr->lcr & 0x38) {
         case 0x00:
         case 0x10:
         case 0x20:
         case 0x30:
-            fprintf(stderr, "N");
+            fprintf(tracef, "N");
             break;
         case 0x08:
-            fprintf(stderr, "O");
+            fprintf(tracef, "O");
             break;
         case 0x18:
-            fprintf(stderr, "E");
+            fprintf(tracef, "E");
             break;
         case 0x28:
-            fprintf(stderr, "M");
+            fprintf(tracef, "M");
             break;
         case 0x38:
-            fprintf(stderr, "S");
+            fprintf(tracef, "S");
             break;
     }
-    fprintf(stderr, "%d ",
+    fprintf(tracef, "%d ",
             (uptr->lcr & 4) ? 2 : 1);
 
     if (uptr->lcr & 0x40)
-        fprintf(stderr, "break ");
+        fprintf(tracef, "break ");
     if (uptr->lcr & 0x80)
-        fprintf(stderr, "dlab ");
+        fprintf(tracef, "dlab ");
     if (uptr->mcr & 1)
-        fprintf(stderr, "DTR ");
+        fprintf(tracef, "DTR ");
     if (uptr->mcr & 2)
-        fprintf(stderr, "RTS ");
+        fprintf(tracef, "RTS ");
     if (uptr->mcr & 4)
-        fprintf(stderr, "OUT1 ");
+        fprintf(tracef, "OUT1 ");
     if (uptr->mcr & 8)
-        fprintf(stderr, "OUT2 ");
+        fprintf(tracef, "OUT2 ");
     if (uptr->mcr & 16)
-        fprintf(stderr, "LOOP ");
-    fprintf(stderr, "ier %02x]\n", uptr->ier);
+        fprintf(tracef, "LOOP ");
+    fprintf(tracef, "ier %02x]\n", uptr->ier);
 }
 
 static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
@@ -1052,7 +1054,7 @@ static struct z80_sio_chan sio[2];
 static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
 	if (trace & TRACE_IRQ) {
-		fprintf(stderr, "Clear intbits %d %x\n",
+		fprintf(tracef, "Clear intbits %d %x\n",
 			(int)(chan - sio), m);
 	}
 	chan->intbits &= ~m;
@@ -1070,7 +1072,7 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 	uint8_t new = (chan->intbits ^ m) & m;
 	chan->intbits |= m;
 	if ((trace & TRACE_SIO) && new)
-		fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
+		fprintf(tracef, "SIO raise int %x new = %x\n", m, new);
 	if (new) {
 		if (!sio->irq) {
 			chan->irq = 1;
@@ -1108,13 +1110,13 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 					vector |= 2;
 			}
 			if (trace & TRACE_SIO)
-				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
+				fprintf(tracef, "SIO2 interrupt %02X\n", vector);
 			chan->vector = vector;
 		} else {
 			chan->vector = vector;
 		}
 		if (trace & (TRACE_IRQ|TRACE_SIO))
-			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
+			fprintf(tracef, "New live interrupt pending is SIO (%d:%02X).\n",
 				(int)(chan - sio), chan->vector);
 		if (chan == sio)
 			live_irq = IRQ_SIOA;
@@ -1133,16 +1135,16 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
 {
 	if (trace & TRACE_SIO)
-		fprintf(stderr, "SIO %d queue %d: ", (int) (chan - sio), c);
+		fprintf(tracef, "SIO %d queue %d: ", (int) (chan - sio), c);
 	/* Receive disabled */
 	if (!(chan->wr[3] & 1)) {
-		fprintf(stderr, "RX disabled.\n");
+		fprintf(tracef, "RX disabled.\n");
 		return;
 	}
 	/* Overrun */
 	if (chan->dptr == 2) {
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "Overrun.\n");
+			fprintf(tracef, "Overrun.\n");
 		chan->data[2] = c;
 		chan->rr[1] |= 0x20;	/* Overrun flagged */
 		/* What are the rules for overrun delivery FIXME */
@@ -1150,7 +1152,7 @@ static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
 	} else {
 		/* FIFO add */
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "Queued %d (mode %d)\n", chan->dptr, chan->wr[1] & 0x18);
+			fprintf(tracef, "Queued %d (mode %d)\n", chan->dptr, chan->wr[1] & 0x18);
 		chan->data[chan->dptr++] = c;
 		chan->rr[0] |= 1;
 		switch (chan->wr[1] & 0x18) {
@@ -1226,22 +1228,22 @@ static uint8_t sio2_read(uint16_t addr)
 		if (chan == sio && (sio[0].intbits | sio[1].intbits))
 			chan->rr[0] |= 2;
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read reg %d = ", (addr & 2) ? 'b' : 'a', r);
+			fprintf(tracef, "sio%c read reg %d = ", (addr & 2) ? 'b' : 'a', r);
 		switch (r) {
 		case 0:
 		case 1:
 			if (trace & TRACE_SIO)
-				fprintf(stderr, "%02X\n", chan->rr[r]);
+				fprintf(tracef, "%02X\n", chan->rr[r]);
 			return chan->rr[r];
 		case 2:
 			if (chan != sio) {
 				if (trace & TRACE_SIO)
-					fprintf(stderr, "%02X\n", chan->rr[2]);
+					fprintf(tracef, "%02X\n", chan->rr[2]);
 				return chan->rr[2];
 			}
 		case 3:
 			/* What does the hw report ?? */
-			fprintf(stderr, "INVALID(0xFF)\n");
+			fprintf(tracef, "INVALID(0xFF)\n");
 			return 0xFF;
 		}
 	} else {
@@ -1257,7 +1259,7 @@ static uint8_t sio2_read(uint16_t addr)
 		chan->rr[0] &= 0x3F;
 		chan->rr[1] &= 0x3F;
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read data %d\n", (addr & 2) ? 'b' : 'a', c);
+			fprintf(tracef, "sio%c read data %d\n", (addr & 2) ? 'b' : 'a', c);
 		if (chan->dptr && (chan->wr[1] & 0x10))
 			sio2_raise_int(chan, INT_RX);
 		return c;
@@ -1271,7 +1273,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 	uint8_t r;
 	if (!(addr & 1)) {
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c write reg %d with %02X\n", (addr & 2) ? 'b' : 'a', chan->wr[0] & 7, val);
+			fprintf(tracef, "sio%c write reg %d with %02X\n", (addr & 2) ? 'b' : 'a', chan->wr[0] & 7, val);
 		switch (chan->wr[0] & 007) {
 		case 0:
 			chan->wr[0] = val;
@@ -1288,7 +1290,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 				break;
 			case 030:	/* Channel reset */
 				if (trace & TRACE_SIO)
-					fprintf(stderr, "[channel reset]\n");
+					fprintf(tracef, "[channel reset]\n");
 				sio2_channel_reset(chan);
 				break;
 			case 040:	/* Enable interrupt on next rx */
@@ -1320,7 +1322,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		case 7:
 			r = chan->wr[0] & 7;
 			if (trace & TRACE_SIO)
-				fprintf(stderr, "sio%c: wrote r%d to %02X\n",
+				fprintf(tracef, "sio%c: wrote r%d to %02X\n",
 					(addr & 2) ? 'b' : 'a', r, val);
 			chan->wr[r] = val;
 			if (chan != sio && r == 2)
@@ -1338,7 +1340,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		/* Should check chan->wr[5] & 8 */
 		sio2_clear_int(chan, INT_TX);
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c write data %d\n", (addr & 2) ? 'b' : 'a', val);
+			fprintf(tracef, "sio%c write data %d\n", (addr & 2) ? 'b' : 'a', val);
 		if (chan == sio)
 			write(1, &val, 1);
 		else {
@@ -1356,14 +1358,14 @@ static uint8_t my_ide_read(uint16_t addr)
 {
 	uint8_t r =  ide_read8(ide0, addr);
 	if (trace & TRACE_IDE)
-		fprintf(stderr, "ide read %d = %02X\n", addr, r);
+		fprintf(tracef, "ide read %d = %02X\n", addr, r);
 	return r;
 }
 
 static void my_ide_write(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IDE)
-		fprintf(stderr, "ide write %d = %02X\n", addr, val);
+		fprintf(tracef, "ide write %d = %02X\n", addr, val);
 	ide_write8(ide0, addr, val);
 }
 
@@ -1418,7 +1420,7 @@ static void ctc_interrupt(struct z80_ctc *c)
 			ctc_irqmask |= 1 << i;
 			recalc_interrupts();
 			if (trace & TRACE_CTC)
-				fprintf(stderr, "CTC %d wants to interrupt.\n", i);
+				fprintf(tracef, "CTC %d wants to interrupt.\n", i);
 		}
 	}
 }
@@ -1428,7 +1430,7 @@ static void ctc_reti(int ctcnum)
 	if (ctc_irqmask & (1 << ctcnum)) {
 		ctc_irqmask &= ~(1 << ctcnum);
 		if (trace & TRACE_IRQ)
-			fprintf(stderr, "Acked interrupt from CTC %d.\n", ctcnum);
+			fprintf(tracef, "Acked interrupt from CTC %d.\n", ctcnum);
 	}
 }
 
@@ -1444,7 +1446,7 @@ static int ctc_check_im2(void)
 				uint8_t vector = ctc[0].vector & 0xF8;
 				vector += 2 * i;
 				if (trace & TRACE_IRQ)
-					fprintf(stderr, "New live interrupt is from CTC %d vector %x.\n", i, vector);
+					fprintf(tracef, "New live interrupt is from CTC %d vector %x.\n", i, vector);
 				live_irq = IRQ_CTC + i;
 				Z80INT(&cpu_z80, vector);
 				return 1;
@@ -1527,38 +1529,38 @@ static void ctc_write(uint8_t channel, uint8_t val)
 	struct z80_ctc *c = ctc + channel;
 	if (c->ctrl & CTC_TCONST) {
 		if (trace & TRACE_CTC)
-			fprintf(stderr, "CTC %d constant loaded with %02X\n", channel, val);
+			fprintf(tracef, "CTC %d constant loaded with %02X\n", channel, val);
 		c->reload = val;
 		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == (CTC_TCONST|CTC_RESET)) {
 			c->count = (c->reload - 1) << 8;
 			if (trace & TRACE_CTC)
-				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
+				fprintf(tracef, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
 		c->ctrl &= ~CTC_TCONST|CTC_RESET;
 	} else if (val & CTC_CONTROL) {
 		/* We don't yet model the weirdness around edge wanted
 		   toggling and clock starts */
 		if (trace & TRACE_CTC)
-			fprintf(stderr, "CTC %d control loaded with %02X\n", channel, val);
+			fprintf(tracef, "CTC %d control loaded with %02X\n", channel, val);
 		c->ctrl = val;
 		if ((c->ctrl & (CTC_TCONST|CTC_RESET)) == CTC_RESET) {
 			c->count = (c->reload - 1) << 8;
 			if (trace & TRACE_CTC)
-				fprintf(stderr, "CTC %d constant reloaded with %02X\n", channel, val);
+				fprintf(tracef, "CTC %d constant reloaded with %02X\n", channel, val);
 		}
 		/* Undocumented */
 		if (!(c->ctrl & CTC_IRQ) && (ctc_irqmask & (1 << channel))) {
 			ctc_irqmask &= ~(1 << channel);
 			if (ctc_irqmask == 0) {
 				if (trace & TRACE_IRQ)
-					fprintf(stderr, "CTC %d irq reset.\n", channel);
+					fprintf(tracef, "CTC %d irq reset.\n", channel);
 				if (live_irq == IRQ_CTC + channel)
 					live_irq = 0;
 			}
 		}
 	} else {
 		if (trace & TRACE_CTC)
-			fprintf(stderr, "CTC %d vector loaded with %02X\n", channel, val);
+			fprintf(tracef, "CTC %d vector loaded with %02X\n", channel, val);
 		/* Only works on channel 0 */
 		if (channel == 0)
 			c->vector = val;
@@ -1569,7 +1571,7 @@ static uint8_t ctc_read(uint8_t channel)
 {
 	uint8_t val = ctc[channel].count >> 8;
 	if (trace & TRACE_CTC)
-		fprintf(stderr, "CTC %d reads %02x\n", channel, val);
+		fprintf(tracef, "CTC %d reads %02x\n", channel, val);
 	return val;
 }
 
@@ -1601,7 +1603,7 @@ static uint8_t spi_byte_sent(uint8_t val)
 {
 	uint8_t r = sd_spi_in(sdcard, val);
 	if (trace & TRACE_SPI)
-		fprintf(stderr,	"[SPI %02X:%02X]\n", val, r);
+		fprintf(tracef,	"[SPI %02X:%02X]\n", val, r);
 	return r;
 }
 
@@ -1623,14 +1625,14 @@ static void bitbang_spi(uint8_t val)
 	if ((pio_cs & 0x03) == 0x01) {		/* CS high - deselected */
 		if (!oldcs) {
 			if (trace & TRACE_SPI)
-				fprintf(stderr,	"[Raised \\CS]\n");
+				fprintf(tracef,	"[Raised \\CS]\n");
 			bits = 0;
 			oldcs = 1;
 			sd_spi_raise_cs(sdcard);
 		}
 	} else if (oldcs) {
 		if (trace & TRACE_SPI)
-			fprintf(stderr, "[Lowered \\CS]\n");
+			fprintf(tracef, "[Lowered \\CS]\n");
 		oldcs = 0;
 		sd_spi_lower_cs(sdcard);
 	}
@@ -1823,12 +1825,12 @@ static void toggle_rom(void)
 {
 	if (bankreg[0] == 0) {
 		if (trace & TRACE_ROM)
-			fprintf(stderr, "[ROM out]\n");
+			fprintf(tracef, "[ROM out]\n");
 		bankreg[0] = 34;
 		bankreg[1] = 35;
 	} else {
 		if (trace & TRACE_ROM)
-			fprintf(stderr, "[ROM in]\n");
+			fprintf(tracef, "[ROM in]\n");
 		bankreg[0] = 0;
 		bankreg[1] = 1;
 	}
@@ -1857,21 +1859,21 @@ static uint8_t sbc64_cpld_uart_rx(void)
 {
 	sbc64_cpld_status &= ~1;
 	if (trace & TRACE_CPLD)
-		fprintf(stderr, "CPLD rx %02X.\n", sbc64_cpld_char);
+		fprintf(tracef, "CPLD rx %02X.\n", sbc64_cpld_char);
 	return sbc64_cpld_char;
 }
 
 static uint8_t sbc64_cpld_uart_status(void)
 {
 //	if (trace & TRACE_CPLD)
-//		fprintf(stderr, "CPLD status %02X.\n", sbc64_cpld_status);
+//		fprintf(tracef, "CPLD status %02X.\n", sbc64_cpld_status);
 	return sbc64_cpld_status;
 }
 
 static void sbc64_cpld_uart_ctrl(uint8_t val)
 {
 	if (trace & TRACE_CPLD)
-		fprintf(stderr, "CPLD control %02X.\n", val);
+		fprintf(tracef, "CPLD control %02X.\n", val);
 }
 
 static void sbc64_cpld_uart_tx(uint8_t val)
@@ -1888,14 +1890,14 @@ static void sbc64_cpld_uart_tx(uint8_t val)
 		bitcount = 1;
 		bits = 0;
 		if (trace & TRACE_CPLD)
-			fprintf(stderr, "[start]");
+			fprintf(tracef, "[start]");
 		return;
 	}
 	/* This works because all the existing code does one write per bit */
 	if (bitcount == 9) {
 		if (val & 1) {
 			if (trace & TRACE_CPLD)
-				fprintf(stderr, "[stop]");
+				fprintf(tracef, "[stop]");
 			putchar(bits);
 			fflush(stdout);
 		} else	/* Framing error should be a stop bit */
@@ -1907,7 +1909,7 @@ static void sbc64_cpld_uart_tx(uint8_t val)
 	bits >>= 1;
 	bits |= val ? 0x80: 0x00;
 	if (trace & TRACE_CPLD)
-		fprintf(stderr, "[%d]", val);
+		fprintf(tracef, "[%d]", val);
 	bitcount++;
 }
 
@@ -1919,7 +1921,7 @@ static void sbc64_cpld_bankreg(uint8_t val)
 	val &= 3;
 	if (bankreg[0] != val) {
 		if (trace & TRACE_CPLD)
-			fprintf(stderr, "Bank set to %02X\n", val);
+			fprintf(tracef, "Bank set to %02X\n", val);
 		bankreg[0] = val;
 	}
 }
@@ -1940,7 +1942,7 @@ static uint8_t z84c15_read(uint8_t port)
 		case 3:
 			return z84c15.mcr;
 		default:
-			fprintf(stderr, "Read invalid SCRP  %d\n", z84c15.scrp);
+			fprintf(tracef, "Read invalid SCRP  %d\n", z84c15.scrp);
 			return 0xFF;
 		}
 		break;
@@ -1955,7 +1957,7 @@ static uint8_t z84c15_read(uint8_t port)
 static void z84c15_write(uint8_t port, uint8_t val)
 {
 	if (trace & TRACE_Z84C15)
-		fprintf(stderr, "z84c15: write %02X <- %02X\n",
+		fprintf(tracef, "z84c15: write %02X <- %02X\n",
 			port, val);
 	switch(port) {
 	case 0xEE:
@@ -1976,7 +1978,7 @@ static void z84c15_write(uint8_t port, uint8_t val)
 			z84c15.mcr = val;
 			break;
 		default:
-			fprintf(stderr, "Read invalid SCRP  %d\n", z84c15.scrp);
+			fprintf(tracef, "Read invalid SCRP  %d\n", z84c15.scrp);
 		}
 		break;
 	/* Watchdog: not yet emulated */
@@ -2016,37 +2018,37 @@ static void kio_write(uint8_t addr, uint8_t val)
 static void fdc_log(int debuglevel, char *fmt, va_list ap)
 {
 	if ((trace & TRACE_FDC) || debuglevel == 0)
-		vfprintf(stderr, "fdc: ", ap);
+		vfprintf(tracef, "fdc: ", ap);
 }
 
 static void fdc_write(uint8_t addr, uint8_t val)
 {
 	switch(addr) {
 	case 1:	/* Data */
-		fprintf(stderr, "FDC Data: %02X\n", val);
+		fprintf(tracef, "FDC Data: %02X\n", val);
 		fdc_write_data(fdc, val);
 		break;
 	case 2:	/* DOR */
-		fprintf(stderr, "FDC DOR %02X [", val);
+		fprintf(tracef, "FDC DOR %02X [", val);
 		if (val & 0x80)
-			fprintf(stderr, "SPECIAL ");
+			fprintf(tracef, "SPECIAL ");
 		else
-			fprintf(stderr, "AT/EISA ");
+			fprintf(tracef, "AT/EISA ");
 		if (val & 0x20)
-			fprintf(stderr, "MOEN2 ");
+			fprintf(tracef, "MOEN2 ");
 		if (val & 0x10)
-			fprintf(stderr, "MOEN1 ");
+			fprintf(tracef, "MOEN1 ");
 		if (val & 0x08)
-			fprintf(stderr, "DMA ");
+			fprintf(tracef, "DMA ");
 		if (!(val & 0x04))
-			fprintf(stderr, "SRST ");
+			fprintf(tracef, "SRST ");
 		if (!(val & 0x02))
-			fprintf(stderr, "DSEN ");
+			fprintf(tracef, "DSEN ");
 		if (val & 0x01)
-			fprintf(stderr, "DSEL1");
+			fprintf(tracef, "DSEL1");
 		else
-			fprintf(stderr, "DSEL0");
-		fprintf(stderr, "]\n");
+			fprintf(tracef, "DSEL0");
+		fprintf(tracef, "]\n");
 		fdc_write_dor(fdc, val);
 #if 0		
 		if ((val & 0x21) == 0x21)
@@ -2058,35 +2060,35 @@ static void fdc_write(uint8_t addr, uint8_t val)
 #endif			
 		break;
 	case 3:	/* DCR */
-		fprintf(stderr, "FDC DCR %02X [", val);
+		fprintf(tracef, "FDC DCR %02X [", val);
 		if (!(val & 4))
-			fprintf(stderr, "WCOMP");
+			fprintf(tracef, "WCOMP");
 		switch(val & 3) {
 		case 0:
-			fprintf(stderr, "500K MFM RPM");
+			fprintf(tracef, "500K MFM RPM");
 			break;
 		case 1:
-			fprintf(stderr, "250K MFM");
+			fprintf(tracef, "250K MFM");
 			break;
 		case 2:
-			fprintf(stderr, "250K MFM RPM");
+			fprintf(tracef, "250K MFM RPM");
 			break;
 		case 3:
-			fprintf(stderr, "INVALID");
+			fprintf(tracef, "INVALID");
 		}
-		fprintf(stderr, "]\n");
+		fprintf(tracef, "]\n");
 		fdc_write_drr(fdc, val & 3);	/* TODO: review */
 		break;
 	case 4:	/* TC */
 		fdc_set_terminal_count(fdc, 0);
 		fdc_set_terminal_count(fdc, 1);
-		fprintf(stderr, "FDC TC\n");
+		fprintf(tracef, "FDC TC\n");
 		break;
 	case 5:	/* RESET */
-		fprintf(stderr, "FDC RESET\n");
+		fprintf(tracef, "FDC RESET\n");
 		break;
 	default:
-		fprintf(stderr, "FDC bogus %02X->%02X\n", addr, val);
+		fprintf(tracef, "FDC bogus %02X->%02X\n", addr, val);
 	}
 }
 
@@ -2095,23 +2097,23 @@ static uint8_t fdc_read(uint8_t addr)
 	uint8_t val = 0x78;
 	switch(addr) {
 	case 0:	/* Status*/
-		fprintf(stderr, "FDC Read Status: ");
+		fprintf(tracef, "FDC Read Status: ");
 		val = fdc_read_ctrl(fdc);
 		break;
 	case 1:	/* Data */
-		fprintf(stderr, "FDC Read Data: ");
+		fprintf(tracef, "FDC Read Data: ");
 		val = fdc_read_data(fdc);
 		break;
 	case 4:	/* TC */
-		fprintf(stderr, "FDC TC: ");
+		fprintf(tracef, "FDC TC: ");
 		break;
 	case 5:	/* RESET */
-		fprintf(stderr, "FDC RESET: ");
+		fprintf(tracef, "FDC RESET: ");
 		break;
 	default:
-		fprintf(stderr, "FDC bogus read %02X: ", addr);
+		fprintf(tracef, "FDC bogus read %02X: ", addr);
 	}
-	fprintf(stderr, "%02X\n", val);
+	fprintf(tracef, "%02X\n", val);
 	return val;
 }
 
@@ -2140,7 +2142,7 @@ static void z512_write(uint8_t addr, uint8_t val)
 		if (val & 0x01)
 			b >>= 1;
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "Z512 SIO serial clock: %d\n", b);
+			fprintf(tracef, "Z512 SIO serial clock: %d\n", b);
 	}
 }
 
@@ -2170,7 +2172,7 @@ static void ps2_write(uint8_t val)
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
+		fprintf(tracef, "read %02x\n", addr);
 	if (copro && (addr & 0xFC) == 0xBC)
 		return z80copro_ioread(copro, addr);
 	if ((addr & 0xFF) == 0xBA) {
@@ -2220,14 +2222,14 @@ static uint8_t io_read_2014(uint16_t addr)
 	if (addr == 0x6D && is_z512)
 		return z512_read(addr);
 	if (trace & TRACE_UNK)
-		fprintf(stderr, "Unknown read from port %04X\n", addr);
+		fprintf(tracef, "Unknown read from port %04X\n", addr);
 	return 0x78;	/* 78 is what my actual board floats at */
 }
 
 static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %02x <- %02x\n", addr, val);
+		fprintf(tracef, "write %02x <- %02x\n", addr, val);
 
 	if (copro && (addr & 0xFC) == 0xBC) {
 		z80copro_iowrite(copro, addr, val);
@@ -2264,10 +2266,10 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
 		if (trace & TRACE_512)
-			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+			fprintf(tracef, "Bank %d set to %d\n", addr & 3, val);
 	} else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
 		if (trace & TRACE_512)
-			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
+			fprintf(tracef, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
 		bankenable = val & 1;
 	} else if (addr == 0xBB && ps2)
 		ps2_write(val);
@@ -2289,19 +2291,19 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
 		trace |= val;
-		fprintf(stderr, "trace set to %04X\n", trace);
+		fprintf(tracef, "trace set to %04X\n", trace);
 	} else if (addr == 0xFE) {
 		trace &= 0xFF;
 		trace |= val << 8;
 		printf("trace set to %d\n", trace);
 	} else if (!known && (trace & TRACE_UNK))
-		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+		fprintf(tracef, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
 static uint8_t io_read_4(uint16_t addr)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
+		fprintf(tracef, "read %02x\n", addr);
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x83)
 		return sio2_read((addr & 3) ^ 1);
@@ -2314,14 +2316,14 @@ static uint8_t io_read_4(uint16_t addr)
 	if (addr >= 0x88 && addr <= 0x8B)
 		return ctc_read(addr & 3);
 	if (trace & TRACE_UNK)
-		fprintf(stderr, "Unknown read from port %04X\n", addr);
+		fprintf(tracef, "Unknown read from port %04X\n", addr);
 	return 0xFF;
 }
 
 static void io_write_4(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %02x <- %02x\n", addr, val);
+		fprintf(tracef, "write %02x <- %02x\n", addr, val);
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x83)
 		sio2_write((addr & 3) ^ 1, val);
@@ -2333,10 +2335,10 @@ static void io_write_4(uint16_t addr, uint8_t val)
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
 		if (trace & TRACE_512)
-			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+			fprintf(tracef, "Bank %d set to %d\n", addr & 3, val);
 	} else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
 		if (trace & TRACE_512)
-			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
+			fprintf(tracef, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
 		bankenable = val & 1;
 	} else if (addr == 0xC0 && rtc)
 		rtc_write(rtc, val);
@@ -2349,13 +2351,13 @@ static void io_write_4(uint16_t addr, uint8_t val)
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
-		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+		fprintf(tracef, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
 static uint8_t io_read_5(uint16_t addr)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
+		fprintf(tracef, "read %02x\n", addr);
 	addr &= 0xFF;
 	if (addr >= 0x18 && addr <= 0x1B)
 		return sio2_read((addr & 3) ^ 1);
@@ -2372,14 +2374,14 @@ static uint8_t io_read_5(uint16_t addr)
 	if (addr >= 0x1C && addr <= 0x1F)
 		return pio_read(addr & 3);
 	if (trace & TRACE_UNK)
-		fprintf(stderr, "Unknown read from port %04X\n", addr);
+		fprintf(tracef, "Unknown read from port %04X\n", addr);
 	return 0xFF;
 }
 
 static void io_write_5(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %02x <- %02x\n", addr, val);
+		fprintf(tracef, "write %02x <- %02x\n", addr, val);
 	addr &= 0xFF;
 	if (addr >= 0x18 && addr <= 0x1B)
 		sio2_write((addr & 3) ^ 1, val);
@@ -2391,10 +2393,10 @@ static void io_write_5(uint16_t addr, uint8_t val)
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
 		if (trace & TRACE_512)
-			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+			fprintf(tracef, "Bank %d set to %d\n", addr & 3, val);
 	} else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
 		if (trace & TRACE_512)
-			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
+			fprintf(tracef, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
 		bankenable = val & 1;
 	} else if (addr == 0xC0 && rtc)
 		rtc_write(rtc, val);
@@ -2411,7 +2413,7 @@ static void io_write_5(uint16_t addr, uint8_t val)
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
-		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+		fprintf(tracef, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
 static void io_write_1(uint16_t addr, uint8_t val)
@@ -2419,7 +2421,7 @@ static void io_write_1(uint16_t addr, uint8_t val)
 	if ((addr & 0xFF) == 0x38) {
 		val &= 0x81;
 		if (val != port38 && (trace & TRACE_ROM))
-			fprintf(stderr, "Bank set to %02X\n", val);
+			fprintf(tracef, "Bank set to %02X\n", val);
 		port38 = val;
 		return;
 	}
@@ -2481,9 +2483,9 @@ static void io_write_2(uint16_t addr, uint8_t val)
 	case 0x20:
 		if (trace & TRACE_UART) {
 			if (val & 1)
-				fprintf(stderr, "[RTS high]\n");
+				fprintf(tracef, "[RTS high]\n");
 			else
-				fprintf(stderr, "[RTS low]\n");
+				fprintf(tracef, "[RTS low]\n");
 		}
 		known = 1;
 		break;
@@ -2492,12 +2494,12 @@ static void io_write_2(uint16_t addr, uint8_t val)
 		break;
 	case 0x30:
 		if (trace & TRACE_ROM)
-			fprintf(stderr, "RAM Bank set to %02X\n", val);
+			fprintf(tracef, "RAM Bank set to %02X\n", val);
 		port30 = val;
 		return;
 	case 0x38:
 		if (trace & TRACE_ROM)
-			fprintf(stderr, "ROM Bank set to %02X\n", val);
+			fprintf(tracef, "ROM Bank set to %02X\n", val);
 		port38 = val;
 		return;
 	}
@@ -2518,7 +2520,7 @@ static uint8_t io_read_micro80(uint16_t addr)
 	else if (r >= 0x90 && r <= 0x97)
 		return my_ide_read(r & 7);
 	else if (trace & TRACE_UNK)
-		fprintf(stderr, "Unknown read from port %04X\n", addr);
+		fprintf(tracef, "Unknown read from port %04X\n", addr);
 	return 0xFF;
 }
 
@@ -2539,7 +2541,7 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
-		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+		fprintf(tracef, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
 static void io_write_pdog(uint16_t addr, uint8_t val)
@@ -2642,7 +2644,7 @@ static void poll_irq_event(void)
 static void reti_event(void)
 {
 	if (live_irq && (trace & TRACE_IRQ))
-		fprintf(stderr, "RETI\n");
+		fprintf(tracef, "RETI\n");
 	if (have_im2) {
 		switch(live_irq) {
 		case IRQ_SIOA:
@@ -2718,11 +2720,13 @@ int main(int argc, char *argv[])
 #define INDEV_16C550A	4
 #define INDEV_KIO	5
 
+	tracef = stderr;
+
 	uint8_t *p = ramrom;
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:fF:i:I:km:pPr:sRS:Tuw8C:Zz")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:D:e:fF:i:I:km:pPr:sRS:Tuw8C:Zz")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -2884,6 +2888,12 @@ int main(int argc, char *argv[])
 		case 'd':
 			trace = atoi(optarg);
 			break;
+		case 'D':
+			tracef = fopen(optarg, "w");
+			if (! tracef) {
+				fprintf(stderr, "rc2014: can't open trace file.\n");
+				exit(1);
+			}
 		case 'f':
 			fast = 1;
 			break;
