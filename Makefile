@@ -175,6 +175,12 @@ rhyophyre:rhyophyre.o z180_io.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/lib
 pz1: pz1.o 6502.o 6502dis.o
 	cc -g3 pz1.o 6502.o 6502dis.o -o pz1
 
+nabupc: nabupc.o nabupc_noui.o ide.o tms9918a.o tms9918a_norender.o z80dis.o libz80/libz80.o
+	cc -g3 nabupc.o nabupc_noui.o z80dis.o ide.o tms9918a.o tms9918a_norender.o libz80/libz80.o -o nabupc
+
+nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o libz80/libz80.o
+	cc -g3 nabupc.o nabupc_sdlui.o z80dis.o ide.o tms9918a.o tms9918a_sdl2.o libz80/libz80.o -o nabupc_sdl2 -lSDL2
+
 68hc11.o: 6800.c
 
 makedisk: makedisk.o ide.o
