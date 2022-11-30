@@ -77,6 +77,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 #include "system.h"
 #include "libz80/z80.h"
@@ -102,6 +104,7 @@ static uint16_t tstate_steps = 365/2;	/* Should be 3.58MHz */
 
 static struct wd17xx *wdfdc;
 
+static int hcci_fd = -1;		/* HSS interface socket */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
@@ -219,15 +222,24 @@ unsigned int check_chario(void)
 	fd_set i, o;
 	struct timeval tv;
 	unsigned int r = 0;
+	unsigned int n = 2;
 
 	FD_ZERO(&i);
 	FD_SET(0, &i);
 	FD_ZERO(&o);
 	FD_SET(1, &o);
+
+	if (hcci_fd != -1) {
+		FD_SET(hcci_fd, &i);
+		FD_SET(hcci_fd, &o);
+		n = hcci_fd + 1;
+		if (n < 2)
+			n = 2;
+	}
 	tv.tv_sec = 0;
 	tv.tv_usec = 0;
 
-	if (select(2, &i, &o, NULL, &tv) == -1) {
+	if (select(n, &i, &o, NULL, &tv) == -1) {
 		if (errno == EINTR)
 			return 0;
 		perror("select");
@@ -237,6 +249,10 @@ unsigned int check_chario(void)
 		r |= 1;
 	if (FD_ISSET(1, &o))
 		r |= 2;
+	if (FD_ISSET(hcci_fd, &i))
+		r |= 4;
+	if (FD_ISSET(hcci_fd, &o))
+		r |= 8;
 	return r;
 }
 
@@ -359,20 +375,18 @@ static uint8_t sound_in(uint16_t addr)
 	return 0xFF;
 }
 
-static uint8_t hcci_ctrl = 0xFF;
-
 static uint8_t hcci_read(uint16_t addr)
 {
-	if (addr & 0x0F)
-		return 0xFF;
-	return hcci_ctrl;
+	static uint8_t c;
+	if (hcci_fd != -1)
+		read(hcci_fd, &c, 1);
+	return c;
 }
 
 static void hcci_write(uint16_t addr, uint8_t val)
 {
-	if (addr & 0x0F)
-		return;
-	hcci_ctrl = val;
+	if (hcci_fd != -1)
+		write(hcci_fd, &val, 1);
 }
 
 /*
@@ -725,12 +739,17 @@ void io_write(int unknown, uint16_t addr, uint8_t val)
 static void poll_irq_event(void)
 {
 	static unsigned old_irq;
+	unsigned n = check_chario();
 	old_irq = live_irq;
 	live_irq = 0;
 	if (tms9918a_irq_pending(vdp))
 		live_irq |= VDP_INT;
-	if (kbd_wdog || (check_chario() & 1))
+	if (kbd_wdog || (n & 1))
 		live_irq |= KBD_INT;
+	if (n & 4)	/* HCCI in */
+		live_irq |= HCC_RXINT;
+	if (n & 8)	/* HCCI out */
+		live_irq |= HCC_TXINT;
 	live_irq &= sg_data[14];	/* Interrupt mask */
 	if (live_irq != old_irq && (trace & TRACE_IRQ))
 		fprintf(stderr, "INT %02X\n", live_irq);
@@ -744,6 +763,42 @@ static void reti_event(void)
 		fprintf(stderr, "RETI\n");
 	live_irq = 0;
 	poll_irq_event();
+}
+
+static void hcci_connect(const char *p)
+{
+	struct addrinfo *res;
+	static struct addrinfo hints;
+	int err;
+	char *x = strrchr(p, ':');
+	if (x == NULL)
+		x = ":9995";
+	else {
+		*x++ = 0;
+	}
+
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	err = getaddrinfo(p, x, &hints, &res);
+	if (err) {
+		fprintf(stderr, "nabupc: unable to look up %s: %s.\n", p,
+			gai_strerror(err));
+		exit(1);
+	}
+	while(res) {
+		hcci_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+		if (hcci_fd != -1) {
+			if (connect(hcci_fd, res->ai_addr, res->ai_addrlen) != -1) {
+				fcntl(hcci_fd, F_SETFL, FNDELAY);
+				return;
+			}
+			perror("connect");
+			close(hcci_fd);
+		}
+		res = res->ai_next;
+	}
+	hcci_fd = -1;
+	fprintf(stderr, "nabupc: unable to connect to '%s'.\n", p);
 }
 
 static struct termios saved_term, term;
@@ -761,7 +816,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "nabupc: [-f] [-i idepath] [-r rompath] [-d debug]\n");
+	fprintf(stderr, "nabupc: [-f] [-h server] [-A floppy] [-i idepath] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -772,26 +827,34 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "nabupc.rom";
 	char *idepath = NULL;
+	char *hccipath = NULL;
+	char *drive_a = NULL;
 	uint8_t *p = ram;
 	unsigned kdog = 0;
 
 	while (p < ram + sizeof(ram))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:fh:i:r:A:")) != -1) {
 		switch (opt) {
-		case 'r':
-			rompath = optarg;
-			break;
-		case 'i':
-			ide = 1;
-			idepath = optarg;
-			break;
 		case 'd':
 			trace = atoi(optarg);
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'h':
+			hccipath = optarg;
+			break;
+		case 'i':
+			ide = 1;
+			idepath = optarg;
+			break;
+		case 'r':
+			rompath = optarg;
+			break;
+		case 'A':
+			drive_a = optarg;
 			break;
 		default:
 			usage();
@@ -828,7 +891,12 @@ int main(int argc, char *argv[])
 	}
 
 	wdfdc = wd_init();
-	wd_attach(wdfdc, 0, "test.flop");
+	if (drive_a)
+		wd_attach(wdfdc, 0, drive_a);
+
+	if (hccipath)
+		hcci_connect(hccipath);
+
 	vdp = tms9918a_create();
 	tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 	vdprend = tms9918a_renderer_create(vdp);
