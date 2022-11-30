@@ -115,7 +115,7 @@ unsigned int check_chario(void)
 	tv.tv_sec = 0;
 	tv.tv_usec = 0;
 
-	if (select(2, &i, NULL, NULL, &tv) == -1) {
+	if (select(2, &i, &o, NULL, &tv) == -1) {
 		if (errno == EINTR)
 			return 0;
 		perror("select");
