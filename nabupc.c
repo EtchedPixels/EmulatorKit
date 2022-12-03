@@ -295,6 +295,12 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 
 /* Send init sequence (not clear how init works yet) */
 static unsigned kbd_wdog = 1;
+static uint8_t kbd_last = 0xFF;	/* Code is never used */
+
+void nabupc_queue_key(uint8_t c)
+{
+	kbd_last = c;
+}
 
 /* Need to emulate set up etc eventually bur for now.. pfft */
 static void kbd_out(uint16_t addr, uint8_t val)
@@ -304,14 +310,9 @@ static void kbd_out(uint16_t addr, uint8_t val)
 /* Bit 1 of the status is set if a key is presetn */
 static uint8_t kbd_in(uint16_t addr)
 {
-	unsigned n = check_chario();
-	static uint8_t lc = 0xFF;
+	uint8_t k;
 	if (addr == 0x91) {
-		if (kbd_wdog)
-			n |= 1;
-		if (trace & TRACE_KBD)
-			fprintf(stderr, "kbd_in S: %02X\n", n & 1);
-		if (n & 1)
+		if (kbd_wdog || kbd_last != 0xFF)
 			return 2;
 		return 0;
 	}
@@ -322,10 +323,11 @@ static uint8_t kbd_in(uint16_t addr)
 		return 0x94;	/* watchdog */
 	}
 	/* Data */
-	lc = next_char();
+	k = kbd_last;
+	kbd_last = 0xFF;
 	if (trace & TRACE_KBD)
-		fprintf(stderr, "kbd_in: D: %02X\n", lc);
-	return lc;
+		fprintf(stderr, "kbd_in: D: %02X\n", kbd_last);
+	return k;
 }
 
 static uint8_t sg_addr;
