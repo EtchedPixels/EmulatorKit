@@ -74,6 +74,7 @@ static uint32_t romsize = 65536;
 #define CPUBOARD_TINYZ80	8
 #define CPUBOARD_PDOG128	9
 #define CPUBOARD_PDOG512	10
+#define CPUBOARD_MICRO80W	11
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -574,6 +575,43 @@ static void mem_write_pickled512(uint16_t addr, uint8_t val)
 	*p = val;
 }
 
+static uint8_t mem_read_micro80w(uint16_t addr)
+{
+	if (bankenable) {
+		unsigned int bank = (addr & 0xC000) >> 14;
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
+		addr &= 0x3FFF;
+		return ramrom[(bankreg[bank] << 14) + addr];
+	}
+	addr &= 0x3FFF;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
+	return ramrom[addr];
+}
+
+static void mem_write_micro80w(uint16_t addr, uint8_t val)
+{
+	if (bankenable) {
+		unsigned int bank = (addr & 0xC000) >> 14;
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "W %04x[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
+		if (bankreg[bank] >= 32) {
+			addr &= 0x3FFF;
+			ramrom[(bankreg[bank] << 14) + addr] = val;
+		}
+		/* ROM writes go nowhere */
+		else if (trace & TRACE_MEM)
+			fprintf(stderr, "[Discarded: ROM]\n");
+	} else {
+		if (trace & TRACE_MEM) {
+			fprintf(stderr, "W: %04X = %02X\n", addr, val);
+			fprintf(stderr, "[Discarded: ROM]\n");
+		}
+	}
+}
+
+
 uint8_t do_mem_read(uint16_t addr, int quiet)
 {
 	uint8_t r;
@@ -609,6 +647,9 @@ uint8_t do_mem_read(uint16_t addr, int quiet)
 		break;
 	case CPUBOARD_PDOG512:
 		r = mem_read_pickled512(addr);
+		break;
+	case CPUBOARD_MICRO80W:
+		r = mem_read_micro80w(addr);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -674,6 +715,9 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_PDOG512:
 		mem_write_pickled512(addr, val);
+		break;
+	case CPUBOARD_MICRO80W:
+		mem_write_micro80w(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -1658,7 +1702,7 @@ static void bitbang_spi(uint8_t val)
 
 void pio_data_write(struct z80_pio *pio, uint8_t port, uint8_t val)
 {
-	if (cpuboard == CPUBOARD_MICRO80) {
+	if (cpuboard == CPUBOARD_MICRO80 || cpuboard == CPUBOARD_MICRO80W) {
 		if (port == 0)
 			bitbang_spi(val);
 		else if (port == 1)
@@ -2542,6 +2586,29 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
+static uint8_t io_read_micro80w(uint16_t addr)
+{
+	return io_read_micro80(addr);
+}
+
+static void io_write_micro80w(uint16_t addr, uint8_t val)
+{
+	uint16_t r = addr & 0xFF;
+	if (r >= 0x78 && r <= 0x7B) {
+		bankreg[r & 3] = val & 0x3F;
+		if (trace & TRACE_512)
+			fprintf(stderr, "Bank %d set to %d\n", r & 3, val);
+		return;
+	}
+	if (r >= 0x7C && r <= 0x7F) {
+		if (trace & TRACE_512)
+			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
+		bankenable = val & 1;
+		return;
+	}
+	io_write_micro80(addr, val);
+}
+
 static void io_write_pdog(uint16_t addr, uint8_t val)
 {
 	if ((addr & 0xFB) == 0x78) {	/* 78 or 7C */
@@ -2583,6 +2650,10 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case CPUBOARD_PDOG512:
 		io_write_pdog(addr, val);
 		break;
+		break;
+	case CPUBOARD_MICRO80W:
+		io_write_micro80w(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2609,6 +2680,8 @@ uint8_t io_read(int unused, uint16_t addr)
 		return io_read_micro80(addr);
 	case CPUBOARD_TINYZ80:
 		return io_read_5(addr);
+	case CPUBOARD_MICRO80W:
+		return io_read_micro80w(addr);
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2875,6 +2948,16 @@ int main(int argc, char *argv[])
 				bank512 = 0;
 				romsize = 524288;
 				rom = 1;
+			} else if (strcmp(optarg, "micro80w") == 0) {
+				cpuboard = CPUBOARD_MICRO80W;
+				have_ctc = 1;
+				sio2 = 1;
+				sio2_input = 1;
+				have_im2 = 1;
+				have_acia = 0;
+				rom = 1;
+				switchrom = 0;
+				tstate_steps = 1100;	/* 22MHz */
 			} else {
 				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
 						stderr);
@@ -3009,7 +3092,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (cpuboard == CPUBOARD_MICRO80 || cpuboard == CPUBOARD_TINYZ80)
+	if (cpuboard == CPUBOARD_MICRO80 || cpuboard == CPUBOARD_MICRO80W || cpuboard == CPUBOARD_TINYZ80)
 		z84c15_init();
 
 	if (bank512) {
@@ -3055,7 +3138,7 @@ int main(int argc, char *argv[])
 			ppide_trace(ppide, 1);
 	}
 	/* SD mapping */
-	if (cpuboard == CPUBOARD_MICRO80) {
+	if (cpuboard == CPUBOARD_MICRO80 || cpuboard == CPUBOARD_MICRO80W) {
 		sd_clock = 0x04;
 		sd_mosi = 0x02;
 		sd_port = 1;
@@ -3234,7 +3317,7 @@ int main(int argc, char *argv[])
 			if (have_cpld_serial)
 				sbc64_cpld_timer();
 			if (have_ctc || have_kio) {
-				if (cpuboard != CPUBOARD_MICRO80)
+				if (cpuboard != CPUBOARD_MICRO80 && cpuboard != CPUBOARD_MICRO80W)
 					ctc_tick(tstate_steps);
 				else	/* Micro80 it's not off the CPU clock */
 					ctc_tick(184);
