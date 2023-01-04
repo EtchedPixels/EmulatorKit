@@ -2795,7 +2795,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:fF:i:I:km:pPr:sRS:Tuw8C:Zz")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:e:fF:i:I:km:pPr:sRS:Tuw8C:Zz:")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -2994,7 +2994,7 @@ int main(int argc, char *argv[])
 			is_z512 = 1;
 			break;
 		case 'z':
-			zxkey = zxkey_create();
+			zxkey = zxkey_create(atoi(optarg));
 			break;
 		case 'T':
 			have_tms = 1;

@@ -698,7 +698,7 @@ int main(int argc, char *argv[])
 	ppi = i82c55a_create();
 	i82c55a_trace(ppi, trace & TRACE_PPI);
 
-	zxkey = zxkey_create();
+	zxkey = zxkey_create(1);
 
 
 	/* 20ms - it's a balance between nice behaviour and simulation
