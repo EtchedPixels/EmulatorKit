@@ -7,7 +7,7 @@ all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rc2014-tms9995 rhyophyre pz1
 
-sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2
+sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2 vz300
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -168,6 +168,9 @@ nascom: nascom.o keymatrix.o 58174.o libz80/libz80.o z80dis.o wd17xx.o sasi.o
 
 uk101: uk101.o keymatrix.o acia.o 6502.o 6502dis.o
 	cc -g3 uk101.o keymatrix.o acia.o 6502.o 6502dis.o -lSDL2 -o uk101
+
+vz300: vz300.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o
+	cc -g3 vz300.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o -lSDL2 -o vz300
 
 rhyophyre:rhyophyre.o z180_io.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o
 	cc -g3 rhyophyre.o z180_io.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o -o rhyophyre
