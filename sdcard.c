@@ -55,6 +55,8 @@ static uint8_t sd_process_command(struct sdcard *c)
 		if (c->debug)
 			fprintf(stderr, "%s: Extended command %x\n", c->sd_name, c->sd_cmd[0]);
 		switch(c->sd_cmd[0]) {
+		case 0x40+41:
+			return 0x00;
 		default:
 			return 0x7F;
 		}
@@ -66,6 +68,16 @@ static uint8_t sd_process_command(struct sdcard *c)
 		return 0x01;	/* Just respond 0x01 */
 	case 0x40+1:		/* CMD 1 - leave idle */
 		return 0x00;	/* Immediately indicate we did */
+	case 0x40+8:		/* CMD 8 - send iface cond */
+		c->sd_out[0] = 0x01; 	/* Error */
+		c->sd_out[1] = 0x00;	/* Version 0 */
+		c->sd_out[2] = 0x00;	/* Blah... */
+		c->sd_out[3] = 0x01;	/* 0x01 - 3v3 */
+		c->sd_out[4] = c->sd_cmd[4];
+		c->sd_outlen = 5;
+		c->sd_outp = 0;
+		c->sd_mode = 2;
+		return 0x00;
 	case 0x40+9:		/* CMD 9 - read the CSD */
 		memcpy(c->sd_out,sd_csd, 17);
 		c->sd_outlen = 17;
@@ -109,12 +121,20 @@ static uint8_t sd_process_command(struct sdcard *c)
 		c->sd_inp = 0;
 		c->sd_mode = 4;	/* Send a pad then go to mode 3 */
 		return 0x00;	/* The expected OK */
-#if 0
 	/* We can't turn this on until we support the needed base commands */
 	case 0x40+55:
 		c->sd_ext = 1;
 		return 0x01;
-#endif
+	case 0x40+58:
+		c->sd_outlen = 5;
+		c->sd_outp = 0;
+		c->sd_out[0] = 0;
+		c->sd_out[1] = 0x80;
+		c->sd_out[2] = 0xFF;
+		c->sd_out[3] = 0;
+		c->sd_out[4] = 0;
+		c->sd_mode = 2;
+		return 0x00;
 	default:
 		return 0x7F;
 	}
