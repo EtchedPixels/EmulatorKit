@@ -79,6 +79,8 @@ static struct tms9918a_renderer *vdprend;
 static struct z180_io *io;
 struct ps2 *ps2;
 
+static uint8_t kbd_conf, kbd_last;
+
 static uint8_t acr;
 static uint8_t rmap;
 
@@ -275,7 +277,7 @@ uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 
 static void fdc_log(int debuglevel, char *fmt, va_list ap)
 {
-	if ((trace & TRACE_FDC) || debuglevel == 0)
+	if (((trace & TRACE_FDC) || debuglevel == 0) && *fmt)
 		vfprintf(stderr, "fdc: ", ap);
 }
 
@@ -348,7 +350,7 @@ static void fdc_write(uint8_t addr, uint8_t val)
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "FDC TC\n");
 		break;
-	case 90:	/* DAC */
+	case 0x90:	/* DAC */
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "FDC DAC\n");
 		break;
@@ -427,6 +429,18 @@ static void kbd_out(uint8_t r)
 	ps2_set_lines(ps2, clock, data);
 }
 
+static void kbd_ppi_conf(uint8_t r)
+{
+	/* The 82C55 has some bit control functions on the control port */
+	if ((r & 0xF0) == 0x70) {
+		uint8_t mask = 1 << ((r >> 1) & 0x07);
+		kbd_last &= ~mask;
+		if (r & 1)
+			kbd_last |= mask;
+		kbd_out(kbd_last);
+	}
+}
+
 uint8_t io_read(int unused, uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -435,12 +449,16 @@ uint8_t io_read(int unused, uint16_t addr)
 		return z180_read(io, addr);
 
 	addr &= 0xFF;
-	if (addr >= 0x20 && addr <= 0x27)
+	if (addr >= 0x80 && addr <= 0x83)
 		return ppide_read(ppide, addr & 3);
 	if (addr == 0x88 && rtc)
 		return rtc_read(rtc);
 	if (addr == 0x85)
 		return kbd_in();
+	if (addr == 0x86)
+		return kbd_last;
+	if (addr == 0x87)
+		return kbd_conf;
 	if (addr >= 0x8C && addr < 0x94)
 		return fdc_read(addr);
 	if ((addr == 0x98 || addr == 0x99) && vdp)
@@ -461,15 +479,14 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		z180_write(io, addr, val);
 		known = 1;
 	}
-	if ((addr & 0xFF) == 0xBA) {
-		/* Quart */
-		return;
-	}
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x83)
 		ppide_write(ppide, addr & 3, val);
-	else if (addr == 0x87)
+	else if (addr == 0x86) {
 		kbd_out(val);
+		kbd_last = val;
+	} else if (addr == 0x87)
+		kbd_ppi_conf(val);
 	else if (addr == 0x88) {
 		rtc_write(rtc, val);
 		sysio_write(val);
@@ -601,6 +618,7 @@ int main(int argc, char *argv[])
 			ppide_attach(ppide, 0, fd);
 	}
 	ppide_trace(ppide, trace & TRACE_PPIDE);
+	ppide_reset(ppide);
 
 	sdcard = sd_create("sd0");
 	if (sdpath) {
@@ -701,6 +719,7 @@ int main(int argc, char *argv[])
 					used = z180_dma(io);
 					if (used == 0)
 						used = Z180Execute(&cpu_z180);
+					ps2_event(ps2, used);
 					states += used;
 				}
 				z180_event(io, states);
@@ -708,7 +727,6 @@ int main(int argc, char *argv[])
 			}
 			/* We want to run UI events regularly it seems */
 			ui_event();
-			ps2_event(ps2, 7372);
 		}
 
 		/* 50Hz which is near enough */
