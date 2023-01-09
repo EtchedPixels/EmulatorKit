@@ -316,11 +316,16 @@ static int ps2_receive_byte(struct ps2 *ps2, int clocks)
 }
         
 
+static unsigned ps2step;
+
 static void ps2_clocks(struct ps2 *ps2, int clocks)
 {
     /* Turn system clocks into our steps - about 15KHz per bit is the
        desired result */
-    clocks /= ps2->divider;
+    ps2step += clocks;
+    clocks = ps2step / ps2->divider;
+    ps2step %= ps2->divider;
+
     while(clocks > 0) {
         clocks = ps2->state(ps2, clocks);
     }
