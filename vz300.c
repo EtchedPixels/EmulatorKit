@@ -61,6 +61,7 @@ static uint8_t vzcompat;
 static uint8_t gmbits = M6847_GM1;
 static unsigned machine = 3;		/* Default to VZ300 */
 static unsigned vdcbank = 0;
+static unsigned hires = 0;		/* Australian hires mode present */
 
 static Z80Context cpu_z80;
 
@@ -72,6 +73,7 @@ volatile int emulator_done;
 #define TRACE_CPU	0x000004
 #define TRACE_KEY	0x000008
 #define TRACE_SD	0x000010
+#define TRACE_HIRES	0x000020
 
 static int trace = 0;
 
@@ -101,12 +103,12 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	}
 	/* For 7000 to 77FF we should generate noise based upon the cycle
 	   position relative to screen if we are outside blanking TODO */
-	if (addr < 7800) {
-		if (vdcbank == 0)
+	if (addr < 0x7800) {
+		if (hires == 0 || vdcbank == 0)
 			return mem + addr;
 		/* Graphics expander mods : we put the extra above 128K in our
 		   array. In reality it's a banked 8K RAM where the 2K RAM was */
-		return mem + 131072 + 2048 * (vdcbank - 1);
+		return mem + 131072 + (addr & 2047) + 2048 * (vdcbank - 1);
 	}
 	if (sd) {
 		if (addr < ((vzcompat & 1) ? 0xB800 : 0x9000))
@@ -318,7 +320,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		}
 	}
 	/* Australian style high resolution */
-	if (dev == 32) {
+	if (dev == 32 && hires == 1) {
 		vdcbank = val & 3;
 		gmbits = 0;
 		if (val & 4)
@@ -327,9 +329,12 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 			gmbits |= M6847_GM1;
 		if (val & 16)
 			gmbits |= M6847_GM2;
+		if (trace & TRACE_HIRES)
+			fprintf(stderr, "6845 GMBITS set to %d, bank to %d.\n",
+				(val >> 2) & 7, vdcbank);
 	}
 	/* German hi-res mod - mono 256x192 only. Unfinished */
-	if (dev == 222)
+	if (dev == 222 && hires == 2)
 		vdcbank = val & 3;
 }
 
@@ -514,13 +519,16 @@ int main(int argc, char *argv[])
 	char *sdrom_path = "vz300sdload.rom";
 	char *sd_path = NULL;
 
-	while ((opt = getopt(argc, argv, "r:R:d:fs:23")) != -1) {
+	while ((opt = getopt(argc, argv, "ar:R:d:fs:23")) != -1) {
 		switch (opt) {
 		case '2':
 			machine = 2;
 			break;
 		case 3:
 			machine = 3;
+			break;
+		case 'a':	/* Australian style hires */
+			hires = 1;
 			break;
 		case 'r':
 			rom_path = optarg;
