@@ -50,13 +50,17 @@ struct m6847 *video;
 struct m6847_renderer *render;
 struct sdcard *sd;
 
-static uint8_t mem[131072];		/* It's easier to work this way */
+/* We map into the 128K as bank 0 and 1 as might be expected and then
+   use the extra 6K above that for video 1,2,3 with the video mods */
+static uint8_t mem[131072 + 6144];
 static uint8_t spicfg;
 static uint8_t spidat;
 static uint8_t bank;
 static uint8_t latch;
 static uint8_t vzcompat;
+static uint8_t gmbits = M6847_GM1;
 static unsigned machine = 3;		/* Default to VZ300 */
+static unsigned vdcbank = 0;
 
 static Z80Context cpu_z80;
 
@@ -97,6 +101,13 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	}
 	/* For 7000 to 77FF we should generate noise based upon the cycle
 	   position relative to screen if we are outside blanking TODO */
+	if (addr < 7800) {
+		if (vdcbank == 0)
+			return mem + addr;
+		/* Graphics expander mods : we put the extra above 128K in our
+		   array. In reality it's a banked 8K RAM where the 2K RAM was */
+		return mem + 131072 + 2048 * (vdcbank - 1);
+	}
 	if (sd) {
 		if (addr < ((vzcompat & 1) ? 0xB800 : 0x9000))
 			return mem + addr;
@@ -295,13 +306,31 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 			break;
 		case 57:
 			/* Really this has timing rules */
+			if (trace & TRACE_SD)
+				fprintf(stderr, "sd: W %02X R ", val);
 			spidat = sd_spi_in(sd, val);
+			if (trace & TRACE_SD)
+				fprintf(stderr, "%02X\n", spidat);
 			break;
 		case 58:
 			vzcompat = val;
 			break;
 		}
 	}
+	/* Australian style high resolution */
+	if (dev == 32) {
+		vdcbank = val & 3;
+		gmbits = 0;
+		if (val & 4)
+			gmbits |= M6847_GM0;
+		if (val & 8)
+			gmbits |= M6847_GM1;
+		if (val & 16)
+			gmbits |= M6847_GM2;
+	}
+	/* German hi-res mod - mono 256x192 only. Unfinished */
+	if (dev == 222)
+		vdcbank = val & 3;
 }
 
 static uint8_t do_io_read(int unused, uint16_t addr)
@@ -355,9 +384,9 @@ uint8_t m6847_get_config(struct m6847 *video)
 	if (latch & 0x10)
 		c |= M6847_CSS;
 	if (latch & 0x08)
-		return c | M6847_GM1 | M6847_AG;
+		return c | gmbits | M6847_AG;
 	else
-		return c;
+		return c | gmbits;
 }
 
 uint8_t m6847_font_rom(struct m6847 *video, uint8_t ch, unsigned row)
@@ -414,10 +443,10 @@ static void load_rom(const char *rom_path, uint8_t *addr, int len)
 	close(fd);
 }
 
-static void sd_init(const char *path)
+static void sd_init(const char *rompath, const char *path)
 {
 	int fd;
-	load_rom("vz300sdload.rom", mem + 65536, 6034);
+	load_rom(rompath, mem + 65536, 6034);
 	sd = sd_create("sd0");
 	fd = open(path, O_RDWR);
 	if (fd == -1) {
@@ -482,9 +511,10 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	char *rom_path = "vz300.rom";
+	char *sdrom_path = "vz300sdload.rom";
 	char *sd_path = NULL;
 
-	while ((opt = getopt(argc, argv, "r:d:fs:23")) != -1) {
+	while ((opt = getopt(argc, argv, "r:R:d:fs:23")) != -1) {
 		switch (opt) {
 		case '2':
 			machine = 2;
@@ -494,6 +524,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			rom_path = optarg;
+			break;
+		case 'R':
+			sdrom_path = optarg;
 			break;
 		case 'd':
 			trace = atoi(optarg);
@@ -516,7 +549,7 @@ int main(int argc, char *argv[])
 	load_rom(rom_path, mem, 16384);
 	memset(mem + 65536, 0xFF, 8192);
 	if (sd_path) 
-		sd_init(sd_path);
+		sd_init(sdrom_path, sd_path);
 
 	matrix = keymatrix_create(8, 6, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
