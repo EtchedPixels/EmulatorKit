@@ -22,7 +22,7 @@ struct zxkey {
 
 uint8_t zxkey_scan(struct zxkey *zx, uint16_t addr)
 {
-    if (zx->type == 2 && (((addr & 0xFF) == 0xFF)
+    if (zx->type == 2 && ((addr & 0xFF) == 0xFF))
         return zx->captureff;
     return 0xFF;
 }
@@ -37,13 +37,14 @@ void zxkey_reset(struct zxkey *zx)
 {
 }
 
-struct zxkey *zxkey_create(void)
+struct zxkey *zxkey_create(unsigned type)
 {
     struct zxkey *zx = malloc(sizeof(struct zxkey));
     if (zx == NULL) {
         fprintf(stderr, "Out of memory.\n");
         exit(1);
     }
+    zx->type = type;
     return zx;
 }
 
