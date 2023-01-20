@@ -1,12 +1,26 @@
 /*
  *	Very approximate VZ300
  *
- *	CMOS Z80 at 3.5MHz (1 wait state) 
+ *	CMOS Z80 at 3.58MHz (1 wait state)
  *	6847 video but limited to 2K RAM and modes limtied
  *	Matrix keyboard
  *	RAM and ROM
  *	Tape (not emulated)
- *	SDLoader add on
+ *	Optional SDLoader add on
+ *	Optional 8K Australian style video mod
+ *
+ *	The video timing is something like (NTSC)
+ *
+ *	\FS edge
+ *	26 lines of border
+ *	6 lines of vertical retrace
+ *	13 lines of blanking
+ *	25 lines of top border
+ *	192 lines of video
+ *				total: 262 lines (NTSC). Need PAL info
+ *	227 clocks per line.
+ *	or about 15890 clocks from interrupt top until you get into video
+ *	contention space
  *
  *	With SDLoader the memory map in total is
  *
@@ -164,6 +178,8 @@ uint8_t mem_read(int unused, uint16_t addr)
 {
 	uint8_t *p;
 
+	/* 1 wait state */
+	cpu_z80.tstates++;
 	if (addr >= 0x6800 && addr <= 0x6FFF)
 		return keymatrix(addr);
 
@@ -180,6 +196,9 @@ uint8_t mem_read(int unused, uint16_t addr)
 void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	uint8_t *p;
+
+	/* 1 wait state */
+	cpu_z80.tstates++;
 
 	if (addr >= 0x6800 && addr <= 0x6FFF) {
 		latch = val;
@@ -330,7 +349,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		if (val & 16)
 			gmbits |= M6847_GM2;
 		if (trace & TRACE_HIRES)
-			fprintf(stderr, "6845 GMBITS set to %d, bank to %d.\n",
+			fprintf(stderr, "6847 GMBITS set to %d, bank to %d.\n",
 				(val >> 2) & 7, vdcbank);
 	}
 	/* German hi-res mod - mono 256x192 only. Unfinished */
@@ -366,7 +385,10 @@ uint8_t io_read(int unused, uint16_t addr)
 
 uint8_t m6847_video_read(struct m6847 *video, uint16_t addr, uint8_t *cfg)
 {
-	uint8_t c = mem[0x7000 + (addr & 0x1FFF)];
+	uint8_t c = mem[0x7000 + (addr & 0x07FF)];
+	/* 8K hires mod */
+	if (hires && addr > 0x7FF)
+		c = mem[131072 + addr - 0x0800];
 
 	if (latch & 0x08)
 		return c;
@@ -511,6 +533,8 @@ static void select_vzfile(void)
 	load_vzfile(buf);
 }
 
+int sdl_live;
+
 int main(int argc, char *argv[])
 {
 	static struct timespec tc;
@@ -518,6 +542,8 @@ int main(int argc, char *argv[])
 	char *rom_path = "vz300.rom";
 	char *sdrom_path = "vz300sdload.rom";
 	char *sd_path = NULL;
+	int tstates_per_line = 227;
+	int tstates = 227;
 
 	while ((opt = getopt(argc, argv, "ar:R:d:fs:23")) != -1) {
 		switch (opt) {
@@ -570,7 +596,7 @@ int main(int argc, char *argv[])
 	   smoothness */
 
 	tc.tv_sec = 0;
-	tc.tv_nsec = 20000000L;		/* 20ms - 50Hz */
+	tc.tv_nsec = 16666667L;		/* 20ms - 50Hz, 16.67ms - 60Hz */
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -599,19 +625,29 @@ int main(int argc, char *argv[])
 	   matched with that. The scheme here works fine except when the host
 	   is loaded though */
 
+	/* For the moment these are NTSC timings. Need to add PAL machines. We
+	   don't do line by line rastering at this point. We do need to do sparkle
+	   computation eventually */
 	while (!emulator_done) {
 		int i;
 		/* Roughly right - need to tweak this to get 50Hz and the
 		   right speed plus 1 wait state */
-		for (i = 0; i < 200; i++) {
-			Z80ExecuteTStates(&cpu_z80, 300);
+		for (i = 0; i < 262; i++) {
+			if (i == 0) {
+				m6847_rasterize(video);
+				Z80INT(&cpu_z80, 0xFF);
+			}
+			/* Keep track of the odd cycles from instructions going
+			   over the 227 */
+			tstates += tstates_per_line;
+			tstates -= Z80ExecuteTStates(&cpu_z80, tstates);
 		}
+		/* We are just about to go back into blank which means we've
+		   sparklified the raster image nicely ready to draw */
 		/* We want to run UI events before we rasterize */
 		ui_event();
-		m6847_rasterize(video);
 		m6847_render(render);
-		Z80INT(&cpu_z80, 0xFF);
-		/* Do 20ms of I/O and delays */
+		/* Do 16.66ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 		if (check_chario() & 1) {
