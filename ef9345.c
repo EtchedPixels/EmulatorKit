@@ -946,7 +946,7 @@ void ef9345_update_scanline(struct ef9345 *ef, uint16_t scanline)
 		draw_char_40(ef, ef->m_border, 41, (scanline / 10) + 1);
 	}
 
-	if (scanline == 0)
+	if (scanline < 10)
 	{
 		ef->m_state |= 0x04;
 		draw_border(ef, 0);
