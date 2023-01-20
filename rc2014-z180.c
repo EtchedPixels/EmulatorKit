@@ -745,7 +745,7 @@ int main(int argc, char *argv[])
 				patha = optarg;
 			break;
 		case 'z':
-			zxkey = zxkey_create();
+			zxkey = zxkey_create(2);
 			break;
 		case 'T':
 			has_tms = 1;

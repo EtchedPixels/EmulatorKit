@@ -10,6 +10,8 @@
 
 extern struct ps2 *ps2;
 
+int sdl_live;
+
 #include "ps2keymap.h"
 
 static uint16_t ps2map(SDL_Scancode code)

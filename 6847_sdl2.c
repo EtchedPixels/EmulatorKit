@@ -14,7 +14,7 @@
 #include "6847.h"
 #include "6847_render.h"
 
-static int sdl_live;
+extern int sdl_live;
 
 /*
  * The 6847 set up is odd - there are 8 colours in the encoding plus black

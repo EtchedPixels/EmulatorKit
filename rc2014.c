@@ -41,6 +41,8 @@
 
 #include "acia.h"
 #include "amd9511.h"
+#include "ef9345.h"
+#include "ef9345_render.h"
 #include "ide.h"
 #include "ppide.h"
 #include "ps2.h"
@@ -88,6 +90,7 @@ static uint8_t have_im2;
 static uint8_t have_16x50;
 static uint8_t have_copro;
 static uint8_t have_tms;
+static uint8_t have_ef9345;
 
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
@@ -95,6 +98,7 @@ static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
 static uint8_t is_z512;
 static uint8_t z512_control = 0;
+static uint8_t ef_latch = 0;
 
 static struct ppide *ppide;
 static struct sdcard *sdcard;
@@ -104,6 +108,12 @@ static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct amd9511 *amd9511;
+static struct ef9345 *ef9345;
+static struct ef9345_renderer *ef9345rend;
+
+static uint8_t ef9345_vram[16384];
+static uint8_t ef9345_rom[8192];
+
 struct ps2 *ps2;
 
 struct zxkey *zxkey;
@@ -2229,6 +2239,8 @@ static uint8_t io_read_2014(uint16_t addr)
 		return kio_read(addr & 0x1F);
 	if (addr >= 0x48 && addr < 0x50) 
 		return fdc_read(addr & 7);
+	if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20 )
+		return ef9345_read(ef9345, ef_latch);
 	if ((addr == 0x42 || addr == 0x43) && amd9511)
 		return amd9511_read(amd9511, addr);
 	if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
@@ -2284,6 +2296,10 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x9F && have_kio)
 		kio_write(addr & 0x1F, val);
+	else if (addr == 0x44 && ef9345)
+		ef_latch = val;
+	else if (addr == 0x46 && ef9345 && ((ef_latch & 0xF0) == 0x20))
+		ef9345_write(ef9345, ef_latch, val);
 	else if (addr >= 0x48 && addr < 0x50)
 		fdc_write(addr & 7, val);
 	else if ((addr == 0x42 || addr == 0x43) && amd9511)
@@ -2795,7 +2811,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:fF:i:I:km:pPr:sRS:Tuw8C:Zz:")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:pPr:sRS:Tuw8C:Zz:")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -2831,6 +2847,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'e':
 			rombank = atoi(optarg);
+			break;
+		case 'E':
+			have_ef9345 = 1;
 			break;
 		case 'b':
 			bank512 = 1;
@@ -3181,6 +3200,22 @@ int main(int argc, char *argv[])
 		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 		vdprend = tms9918a_renderer_create(vdp);
 	}
+	if (have_ef9345) {
+		fd = open("ef9345_font.rom", O_RDONLY);
+		if (fd == -1) {
+			perror("ef9345_font.rom");
+			exit(EXIT_FAILURE);
+		}
+		if (read(fd, ef9345_rom, 8192) != 8192) {
+			fprintf(stderr, "rc2014: expected 932 byte font ROM image.\n");
+			exit(EXIT_FAILURE);
+		}
+		close(fd);
+		/* 16K RAM */
+		ef9345 = ef9345_create(EF9345, ef9345_vram, ef9345_rom, 0x3FFF);
+		ef9345_trace(ef9345, 1 /*!!(trace & TRACE_TMS9918A)*/);
+		ef9345rend = ef9345_renderer_create(ef9345);
+	}
 	if (have_ps2) {
 		ps2 = ps2_create(7);
 		ps2_trace(ps2, trace & TRACE_PS2);
@@ -3303,6 +3338,8 @@ int main(int argc, char *argv[])
 			int j;
 			for (j = 0; j < 100; j++) {
 				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/ 10);
+				if (ef9345)
+					ef9345_cycles(ef9345, 200);
 				if (copro)
 					z80copro_run(copro);
 				if (ps2)
@@ -3354,6 +3391,10 @@ int main(int argc, char *argv[])
 		if (vdp) {
 			tms9918a_rasterize(vdp);
 			tms9918a_render(vdprend);
+		}
+		if (ef9345) {
+			ef9345_rasterize(ef9345);
+			ef9345_render(ef9345rend);
 		}
 		if (have_wiznet)
 			w5100_process(wiz);

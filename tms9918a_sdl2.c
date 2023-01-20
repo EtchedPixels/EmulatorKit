@@ -11,7 +11,7 @@
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 
-static int sdl_live;
+extern int sdl_live;
 
 static uint32_t vdp_ctab[16] = {
     0xFF000000,		/* transparent (we render as black) */

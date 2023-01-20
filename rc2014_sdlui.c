@@ -9,6 +9,8 @@
 #include "zxkey.h"
 #include "ps2.h"
 
+int sdl_live;
+
 extern struct zxkey *zxkey;
 extern struct ps2 *ps2;
 
