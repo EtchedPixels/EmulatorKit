@@ -39,7 +39,7 @@ struct ef9345 {
 	uint8_t m_latchi;                         //insert attribute latch
 	uint8_t m_latchu;                         //underline attribute latch
 
-	uint32_t raster[312][512];		  // TODO
+	uint32_t raster[312][492];		  //336 for 40 col
 	uint32_t *m_palette;
 
 	unsigned m_variant;
