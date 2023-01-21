@@ -91,6 +91,8 @@ volatile int emulator_done;
 
 static int trace = 0;
 
+static unsigned video_line;		/* Scan line of the 262 NTSC we have */
+
 static uint8_t *mmu(uint16_t addr, bool write)
 {
 	/* Low ROM : fixed */
@@ -118,6 +120,7 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	/* For 7000 to 77FF we should generate noise based upon the cycle
 	   position relative to screen if we are outside blanking TODO */
 	if (addr < 0x7800) {
+		m6847_sparkle(video, video_line, cpu_z80.tstates);	
 		if (hires == 0 || vdcbank == 0)
 			return mem + addr;
 		/* Graphics expander mods : we put the extra above 128K in our
@@ -637,6 +640,7 @@ int main(int argc, char *argv[])
 				m6847_rasterize(video);
 				Z80INT(&cpu_z80, 0xFF);
 			}
+			video_line = i;
 			/* Keep track of the odd cycles from instructions going
 			   over the 227 */
 			tstates += tstates_per_line;

@@ -221,6 +221,32 @@ void m6847_rasterize(struct m6847 *vdg)
         m6847_text_raster(vdg, config);
 }
 
+/* Mash the 8 pixel set that roughly correspond to this fetch. This is not
+   based on any exact science just getting the right "feel" */
+void m6847_sparkle(struct m6847 *vdg, unsigned line, unsigned point)
+{
+    unsigned imax = 8;
+    unsigned i;
+    /* In the blanking zone */
+    /* TODO: PAL - PAL has extra blanking lines */
+    if (line < 70)
+        return;
+    /* 262 lines of which 192 are video */
+    line -= 70;
+    /* In hsync space */
+    if (point < 71 || point > 199)
+        return;
+    point -= 71;
+    /* The remaining 128 tstates are the 256 pixels */
+    point <<= 1;
+    /* point is now in pixels */
+    if (point & 4)
+        imax = 16;
+    point &= 0xF8;	/* Byte align */
+    for (i = 0; i < imax; i++)
+        vdg->rasterbuffer[256 * line + point + i] = 0xFF000000;
+}
+
 struct m6847 *m6847_create(unsigned int type)
 {
     struct m6847 *vdg = malloc(sizeof(struct m6847));

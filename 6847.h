@@ -22,6 +22,7 @@ extern void m6847_reset(struct m6847 *vdg);
 extern void m6847_trace(struct m6847 *cdg, int onoff);
 extern uint32_t *m6847_get_raster(struct m6847 *vdg);
 extern void m6847_set_colourmap(struct m6847 *vdg, uint32_t *cmap);
+extern void m6847_sparkle(struct m6847 *vdg, unsigned line, unsigned pos);
 
 /* User supplied */
 extern uint8_t m6847_get_config(struct m6847 *vdg);
