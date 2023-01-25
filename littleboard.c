@@ -25,6 +25,7 @@
 #include "z80dis.h"
 #include "sasi.h"
 #include "ncr5380.h"
+#include "wd17xx.h"
 
 
 static uint8_t ram[65536];
@@ -40,6 +41,7 @@ static uint8_t int_recalc = 0;
 
 struct sasi_bus *sasi;
 struct ncr5380 *ncr;
+struct wd17xx *wd;
 
 /* IRQ source that is live */
 static uint8_t live_irq;
@@ -58,6 +60,8 @@ static volatile int done;
 #define TRACE_CTC	32
 #define TRACE_IRQ	64
 #define TRACE_CPU	128
+#define TRACE_SCSI	256
+#define TRACE_FDC	512
 
 static int trace = 0;
 
@@ -712,11 +716,69 @@ static uint8_t ctc_read(uint8_t channel)
 
 static uint8_t wd1772_read(uint8_t addr)
 {
+	switch(addr & 0x07) {
+	case 0x04:	/* read status */
+		return wd17xx_status(wd);
+	case 0x05:	/* read track */
+		return wd17xx_read_track(wd);
+	case 0x06:	/* read sector */
+		return wd17xx_read_sector(wd);
+	case 0x07:	/* read data */
+		return wd17xx_read_data(wd);
+	}
 	return 0xFF;
 }
 
 static void wd1772_write(uint8_t addr, uint8_t val)
 {
+	switch(addr & 0x0F) {
+	case 0x00:	/* write command */
+		wd17xx_command(wd, val);
+		return;
+	case 0x01:	/* write track */
+		wd17xx_write_track(wd, val);
+		return;
+	case 0x02:	/* write sector */
+		wd17xx_write_sector(wd, val);
+		return;
+	case 0x03:	/* write data */
+		wd17xx_write_data(wd, val);
+		return;
+	}
+}
+
+static void wd1772_update_bcr(uint8_t bcr)
+{
+	static uint8_t old_bcr;
+	uint8_t delta = bcr & old_bcr;
+	old_bcr = bcr;
+
+	if (delta & 0x0F) {
+		/* Set drive */
+		switch(bcr & 0x0F) {
+		case 1:
+			wd17xx_set_drive(wd, 0);
+			break;
+		case 2:
+			wd17xx_set_drive(wd, 1);
+			break;
+		case 4:
+			wd17xx_set_drive(wd, 2);
+			break;
+		case 8:
+			wd17xx_set_drive(wd, 3);
+			break;
+		default:
+			/* Non valid values not emulated */
+		case 0:
+			wd17xx_no_drive(wd);
+			break;
+		}
+	}
+	if (delta & 0x10)
+		wd17xx_set_side(wd, (bcr & 0x10) ? 1 : 0);
+	/* 0x20 sets the density (not emulated)
+	   0x80 sets the clock (not emulated) */
 }
 
 static uint8_t scsi_read(uint8_t addr)
@@ -786,6 +848,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		switch(addr & 3) {
 		case 0x00:
 			bcr = val;
+			wd1772_update_bcr(val);
 			break;
 		case 0x01:
 			pp_out(val);
@@ -867,8 +930,10 @@ int main(int argc, char *argv[])
 	int fd;
 	int l;
 	char *rompath = "ampro.rom";
+	char *diskpath = NULL;
+	static char *fdpath[4] = { NULL, NULL, NULL, NULL };
 
-	while ((opt = getopt(argc, argv, "d:r:f")) != -1) {
+	while ((opt = getopt(argc, argv, "d:r:fs:A:B:C:D:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -878,6 +943,15 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 's':
+			diskpath = optarg;
+			break;
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+			fdpath[opt - 'A'] = optarg;
 			break;
 		default:
 			usage();
@@ -908,11 +982,28 @@ int main(int argc, char *argv[])
 	sio_reset();
 	ctc_init();
 
-	sasi = sasi_bus_create();
-	sasi_disk_attach(sasi, 0, "scratch.sd", 512);
-	sasi_bus_reset(sasi);
-	ncr = ncr5380_create(sasi);
-	ncr5380_trace(ncr, 1);
+	wd = wd17xx_create();
+	/* Not clear what we do here - probably we need to add support
+	   for proper disk metadata formats as the disks came with some
+	   peculiar setings - like sectors numbering from 16 and 1K or 512
+	   byte sector options */
+	if (fdpath[0])
+		wd17xx_attach(wd, 0, fdpath[0], 2, 80, 5, 1024);
+	if (fdpath[1])
+		wd17xx_attach(wd, 0, fdpath[1], 2, 80, 5, 1024);
+	if (fdpath[2])
+		wd17xx_attach(wd, 0, fdpath[2], 2, 80, 5, 1024);
+	if (fdpath[3])
+		wd17xx_attach(wd, 0, fdpath[3], 2, 80, 5, 1024);
+	wd17xx_trace(wd, trace & TRACE_FDC);
+		
+	if (diskpath) {
+		sasi = sasi_bus_create();
+		sasi_disk_attach(sasi, 0, diskpath, 512);
+		sasi_bus_reset(sasi);
+		ncr = ncr5380_create(sasi);
+		ncr5380_trace(ncr, trace & TRACE_SCSI);
+	}
 
 	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */

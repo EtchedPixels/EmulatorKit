@@ -5,7 +5,8 @@ all:	rc2014 rc2014-1802 rc2014-6303 rc2014-6502 rc2014-65c816-mini \
 	rc2014-65c816 rc2014-6800 rc2014-68008 rc2014-6809 rc2014-68hc11 \
 	rc2014-80c188 rc2014-8085 rc2014-z8 rc2014-z180 rbcv2 searle linc80 \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
-	s100-z80 scelbi rb-mbc rc2014-tms9995 rhyophyre pz1 68knano
+	s100-z80 scelbi rb-mbc rc2014-tms9995 rhyophyre pz1 68knano \
+	littleboard
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2 vz300
 
@@ -38,6 +39,9 @@ searle:	searle.o ide.o libz80/libz80.o
 
 linc80:	linc80.o ide.o sdcard.o libz80/libz80.o
 	cc -g3 linc80.o ide.o sdcard.o libz80/libz80.o -o linc80
+
+littleboard:	littleboard.o ncr5380.o sasi.o wd17xx.o z80dis.o libz80/libz80.o
+	cc -g3 littleboard.o ncr5380.o sasi.o wd17xx.o z80dis.o libz80/libz80.o -o littleboard
 
 mbc2:	mbc2.o ide.o libz80/libz80.o
 	cc -g3 mbc2.o libz80/libz80.o -o mbc2
