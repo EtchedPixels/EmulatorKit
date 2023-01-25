@@ -750,7 +750,7 @@ static void wd1772_write(uint8_t addr, uint8_t val)
 static void wd1772_update_bcr(uint8_t bcr)
 {
 	static uint8_t old_bcr;
-	uint8_t delta = bcr & old_bcr;
+	uint8_t delta = bcr ^ old_bcr;
 	old_bcr = bcr;
 
 	if (delta & 0x0F) {
@@ -988,13 +988,13 @@ int main(int argc, char *argv[])
 	   peculiar setings - like sectors numbering from 16 and 1K or 512
 	   byte sector options */
 	if (fdpath[0])
-		wd17xx_attach(wd, 0, fdpath[0], 2, 80, 5, 1024);
+		wd17xx_attach(wd, 0, fdpath[0], 2, 80, 10, 512);
 	if (fdpath[1])
-		wd17xx_attach(wd, 0, fdpath[1], 2, 80, 5, 1024);
+		wd17xx_attach(wd, 0, fdpath[1], 2, 80, 10, 512);
 	if (fdpath[2])
-		wd17xx_attach(wd, 0, fdpath[2], 2, 80, 5, 1024);
+		wd17xx_attach(wd, 0, fdpath[2], 2, 80, 10, 512);
 	if (fdpath[3])
-		wd17xx_attach(wd, 0, fdpath[3], 2, 80, 5, 1024);
+		wd17xx_attach(wd, 0, fdpath[3], 2, 80, 10, 512);
 	wd17xx_trace(wd, trace & TRACE_FDC);
 		
 	if (diskpath) {

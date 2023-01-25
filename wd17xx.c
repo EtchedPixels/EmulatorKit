@@ -18,7 +18,7 @@ struct wd17xx {
 	unsigned int secsize[4];
 	unsigned int sides[4];
 	unsigned int drive;
-	uint8_t buf[512];
+	uint8_t buf[2048];
 	unsigned int pos;
 	unsigned int wr;
 	unsigned int rd;
