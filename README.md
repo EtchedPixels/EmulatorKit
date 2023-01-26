@@ -41,6 +41,7 @@ RC2014 and Fuzix.
 - 68HC11
 - 80C85
 - 80C188
+- TMS9995
 - Z8
 
 ## RC2014 / BP80 Integrated Systems Emulated
@@ -66,6 +67,7 @@ RC2014 and Fuzix.
 ## RC2014 Card Emulation (Other)
 - 16x50
 - CTC
+- EF9345
 - Floppy Disk
 - Gluino/Z80 PIO with SD card
 - PS/2 Keyboard
@@ -78,9 +80,11 @@ RC2014 and Fuzix.
 - SBC v2
 - Mark IV
 - N8
+- Rhyophire
 
 ## Other Systems Emulated
-
+- 68KNano
+- Ampro Littleboard/PLUS
 - Amstrad NC100
 - Amstrad NC150
 - Amstrad NC200
@@ -98,6 +102,7 @@ RC2014 and Fuzix.
 - Tiny68K
 - TinyZ80
 - Tom's SBC
+- VZ200/300
 - Z80Master
 - Z80 Membership Card
 - Z80 MBC2
@@ -140,6 +145,12 @@ ROMWBW (see RC2014).
 
 This site also hosts many of the other designs like the Tiny68K.
 
+## Ampro Littleboard
+
+The classic "small board" design that was built to sit on top of a
+floppy disk drive. The emulator can also model the /PLUS version with
+NCR5380 SCSI. ROM images are not clearly redistributable so not included.
+
 ## Amstrad NC series
 
 The ROM images for these machines are not redistributable, you will need an
@@ -155,6 +166,11 @@ build it entirely using the equivalent CMOS parts (74HCTxx) and CMOS Zilog
 devices, as this makes the CF much more reliable and you can run far faster.
 
 There are also designs for a lot of other systems that are not emulated.
+
+## Rhyophire
+
+A Z180 based machine with high resolution graphics. The graphics side is not
+currently emulated. Runs ROMWBW.
 
 ## SBC2G
 
@@ -174,6 +190,11 @@ retro-comp group. This platform can use the Grant Searle ROM and CF images.
 Fuzix runs directly from ROM.
 
 https://easyeda.com/peabody1929/CPM_Z80_Board_REV_B_copy-76313012f79945d3b8b9d3047368abf7
+
+## VZ300
+
+Emulates the VZ200 or VZ300 systems. Can also emulate the SD card add on and
+the Australian banked video memory extension.
 
 ## Z80 MBC2
 
