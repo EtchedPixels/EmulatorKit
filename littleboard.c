@@ -21,6 +21,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include "libz80/z80.h"
 #include "z80dis.h"
 #include "sasi.h"
@@ -42,6 +43,8 @@ static uint8_t int_recalc = 0;
 struct sasi_bus *sasi;
 struct ncr5380 *ncr;
 struct wd17xx *wd;
+
+static unsigned sector_base[4];
 
 /* IRQ source that is live */
 static uint8_t live_irq;
@@ -752,28 +755,35 @@ static void wd1772_update_bcr(uint8_t bcr)
 	static uint8_t old_bcr;
 	uint8_t delta = bcr ^ old_bcr;
 	old_bcr = bcr;
+	unsigned d = 0;
 
 	if (delta & 0x0F) {
 		/* Set drive */
 		switch(bcr & 0x0F) {
 		case 1:
-			wd17xx_set_drive(wd, 0);
+			d = 1;
 			break;
 		case 2:
-			wd17xx_set_drive(wd, 1);
+			d = 2;
 			break;
 		case 4:
-			wd17xx_set_drive(wd, 2);
+			d = 3;
 			break;
 		case 8:
-			wd17xx_set_drive(wd, 3);
+			d = 4;
 			break;
 		default:
-			/* Non valid values not emulated */
-		case 0:
 			wd17xx_no_drive(wd);
 			break;
 		}
+	}
+	if (d) {
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "select drive %d base %d\n",
+				d, sector_base[d - 1]);
+		d--;
+		wd17xx_set_drive(wd, d);
+		wd17xx_set_sector0(wd, sector_base[d]);
 	}
 	if (delta & 0x10)
 		wd17xx_set_side(wd, (bcr & 0x10) ? 1 : 0);
@@ -919,8 +929,39 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "littleboard: [-f] [-s path] [-r path] [-d debug] [-A disk] [-B disk]\n");
+	fprintf(stderr, "littleboard: [-f] [-s path] [-r path] [-d debug] [-A|B|C|D disk]\n");
 	exit(EXIT_FAILURE);
+}
+
+static void insert_floppy(int unit, const char *path)
+{
+	struct stat st;
+	if (stat(path, &st) == -1) {
+		perror(path);
+		exit(1);
+	}
+	/* Guess the media from the size. We only
+	   model double density */
+	switch(st.st_size) {
+	case 204800:
+		/* 40 track ss/dd */
+		wd17xx_attach(wd, unit, path, 1, 40, 10, 512);
+		sector_base[unit] = 1;
+		break;
+	case 409600:
+		/* 40 track ds/dd (could be ss 80 in theory ??) */
+		wd17xx_attach(wd, unit, path, 2, 40, 10, 512);
+		sector_base[unit] = 17;
+		break;
+	case 819200:
+		/* 80 track ds/dd */
+		wd17xx_attach(wd, unit, path, 2, 80, 10, 1024);
+		sector_base[unit] = 17;
+		break;
+	default:
+		fprintf(stderr, "littleboard: unknown media size.\n");
+		exit(1);
+	}
 }
 
 int main(int argc, char *argv[])
@@ -983,20 +1024,18 @@ int main(int argc, char *argv[])
 	ctc_init();
 
 	wd = wd17xx_create();
-	/* double sided media on the Ampro use weird sector numbering */
-	wd17xx_set_sector0(wd, 17);
 	/* Not clear what we do here - probably we need to add support
 	   for proper disk metadata formats as the disks came with some
 	   peculiar setings - like sectors numbering from 16 and 1K or 512
 	   byte sector options */
 	if (fdpath[0])
-		wd17xx_attach(wd, 0, fdpath[0], 2, 40, 10, 512);
+		insert_floppy(0, fdpath[0]);
 	if (fdpath[1])
-		wd17xx_attach(wd, 1, fdpath[1], 2, 40, 10, 512);
+		insert_floppy(1, fdpath[1]);
 	if (fdpath[2])
-		wd17xx_attach(wd, 2, fdpath[2], 2, 40, 10, 512);
+		insert_floppy(2, fdpath[2]);
 	if (fdpath[3])
-		wd17xx_attach(wd, 3, fdpath[3], 2, 40, 10, 512);
+		insert_floppy(3, fdpath[3]);
 	wd17xx_trace(wd, trace & TRACE_FDC);
 		
 	if (diskpath) {
