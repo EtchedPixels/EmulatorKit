@@ -18,3 +18,6 @@ extern void wd17xx_detach(struct wd17xx *fdc, int dev);
 extern int wd17xx_attach(struct wd17xx *fdc, int dev, const char *path, unsigned int sides, unsigned int tracks, unsigned int sectors, unsigned int secsize);
 extern void wd17xx_trace(struct wd17xx *fdc, unsigned int onoff);
 extern uint8_t wd17xx_intrq(struct wd17xx *fdc);
+extern void wd17xx_set_sector0(struct wd17xx *fdc, unsigned offset);
+extern void wd17xx_motor(struct wd17xx *fdc, unsigned on);
+extern void wd17xx_tick(struct wd17xx *fdc, unsigned ms);

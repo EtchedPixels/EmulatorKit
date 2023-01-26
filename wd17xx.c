@@ -27,9 +27,15 @@ struct wd17xx {
 	uint8_t sector;
 	uint8_t status;
 	uint8_t side;
+	uint8_t lastcmd;
 	unsigned int intrq;
-
+	unsigned int sector0;	/* Sector base - usually 1, now and then 0
+				   and on the Ampro sometimes 17 */
+	unsigned int motor;
+	unsigned int spinup;
 	unsigned int trace;
+
+	unsigned int busyhack;
 };
 
 #define NOTREADY 	0x80	/* all commands */
@@ -49,7 +55,7 @@ struct wd17xx {
 static void wd17xx_diskseek(struct wd17xx *fdc)
 {
 	off_t pos = fdc->track * fdc->spt[fdc->drive] * fdc->sides[fdc->drive];
-	pos += fdc->sector - 1;
+	pos += fdc->sector - fdc->sector0;
 	if (fdc->sides[fdc->drive] == 2 && fdc->side)
 		pos += fdc->spt[fdc->drive];
 	pos *= fdc->secsize[fdc->drive];
@@ -147,15 +153,55 @@ void wd17xx_write_track(struct wd17xx *fdc, uint8_t v)
 	fdc->track = v;
 }
 
+void wd17xx_motor(struct wd17xx *fdc, unsigned on)
+{
+	if (on && fdc->motor == 0) {
+		if (fdc->trace)
+			fprintf(stderr, "fdc%d: motor starts.\n",
+				fdc->drive);
+		/* Whatever spin up we need to do */
+		fdc->motor = 10000;	/* 10,000 ms */
+		fdc->spinup = 1000;
+	}
+}
+
+/* We only use this for very crude motor stuff at the moment */
+void wd17xx_tick(struct wd17xx *fdc, unsigned ms)
+{
+	if (fdc->motor == 0)
+		return;
+	if (fdc->motor <= ms) {
+		fdc->motor = 0;
+		if (fdc->trace)
+			fprintf(stderr, "fdc%d: motor stops.\n",
+				fdc->drive);
+	} else
+		fdc->motor -= ms;
+	if (fdc->spinup) {
+		if (fdc->spinup <= ms) {
+			fdc->spinup = 0;
+			if (fdc->lastcmd < 0x80)
+				fdc->status |= HEADLOAD;
+		}
+	}
+}
+
 void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 {
 	unsigned int size = fdc->secsize[fdc->drive];
+	unsigned motor = !(v & 0x08);
+
+
 	if (fdc->drive == NO_DRIVE || fdc->fd[fdc->drive] == -1) {
 		if (fdc->trace)
 			fprintf(stderr, "fdc%d: command to empty drive.\n", fdc->drive);
 		fdc->status = NOTREADY;
 		return;
 	}
+
+	fdc->lastcmd = v;
+	fdc->busyhack = 0;
+
 	if (fdc->trace)
 		fprintf(stderr, "fdc%d: command %x.\n", fdc->drive, v);
 
@@ -173,6 +219,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		}
 		if (v & 0x01)
 			fdc->intrq = 1;
+		wd17xx_motor(fdc, 1);
 		return;
 	}
 	if (fdc->status & BUSY)
@@ -189,6 +236,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->track = 0;
 		fdc->status = TRACK0 | INDEX;
 		fdc->intrq = 1;
+		wd17xx_motor(fdc, motor);
 		break;
 	case 0x10:	/* seek */
 		fdc->intrq = 1;
@@ -204,6 +252,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->status |= TRACK0;
 		if (v & 0x08)
 			fdc->status |= HEADLOAD;
+		wd17xx_motor(fdc, 1/*DEBUGME motor*/);
 		break;
 	case 0x20:	/* step */
 	case 0x30:
@@ -228,6 +277,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (v & 0x08)
 			fdc->status |= HEADLOAD;
 		fdc->intrq = 1;
+		wd17xx_motor(fdc, motor);
 		break;
 	case 0x60:	/* step out */
 	case 0x70:
@@ -239,11 +289,11 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (v & 0x08)
 			fdc->status |= HEADLOAD;
 		fdc->intrq = 1;
+		wd17xx_motor(fdc, motor);
 		break;
 	case 0x80:	/* Read sector */
 		if (fdc->track >= fdc->tracks[fdc->drive] ||
-			fdc->sector > fdc->spt[fdc->drive] ||
-			fdc->sector == 0) {
+			fdc->sector - fdc->sector0 >= fdc->spt[fdc->drive]) {
 			fdc->status = INDEX | RECNFERR;
 			return;
 		}
@@ -257,30 +307,32 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		}
 		fdc->rdsize = size;
 		fdc->status |= BUSY | DRQ;
+		wd17xx_motor(fdc, motor);
 		break;
 	case 0xA0:	/* Write sector */
 		if (fdc->track >= fdc->tracks[fdc->drive] ||
-			fdc->sector > fdc->spt[fdc->drive] ||
-			fdc->sector == 0) {
+			fdc->sector - fdc->sector0 >= fdc->spt[fdc->drive]) {
 			fdc->status = INDEX | RECNFERR;
 			return;
 		}
 		fdc->status |= BUSY | DRQ;
 		fdc->wr = 1;
+		wd17xx_motor(fdc, motor);
 		break;
 	case 0xC0:	/* read address */
 		fdc->status |= BUSY | DRQ;
 		fdc->rd = 1;
 		fdc->rdsize = 6;
 		fdc->buf[0] = fdc->track;
+
 		/* If we tried to seek off the end of the disk then
 		   we'll stop at the end track and see the data there */
 		if (fdc->track >= fdc->tracks[fdc->drive]) {
 			fdc->buf[0] = fdc->tracks[fdc->drive] - 1;
 		}
 		fdc->buf[1] = fdc->side;
-		fdc->buf[2] = 1;
-		switch(fdc->spt[fdc->drive]) {
+		fdc->buf[2] = fdc->sector0;
+		switch(fdc->secsize[fdc->drive]) {
 		case 128:
 			fdc->buf[3] = 0x00;
 			break;
@@ -299,6 +351,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		/* Hardware weirdness */
 		fdc->sector = fdc->track;
 		fdc->intrq = 1;
+		/* busy handling ?? */
+//		fdc->status &= ~BUSY;	/* ?? need to know what real chip does */
+		wd17xx_motor(fdc, 1);
+		fdc->busyhack = 64;
 		break;
 	case 0xD0:	/* Force interrupt : handled above */
 		break;
@@ -321,12 +377,17 @@ uint8_t wd17xx_status(struct wd17xx *fdc)
 	if (fdc->trace)
 		fprintf(stderr, "fdc%d: status %x.\n", fdc->drive, fdc->status);
 	fdc->intrq = 0;
-	return fdc->status;
+	if (fdc->busyhack) {
+		fdc->busyhack--;
+		if (!fdc->busyhack)
+			fdc->status &= ~BUSY;
+	}
+	return fdc->status | (fdc->motor ? 0x80 : 0x00);
 }
 
 uint8_t wd17xx_status_noclear(struct wd17xx *fdc)
 {
-	return fdc->status;
+	return fdc->status | (fdc->motor ? 0x80 : 0x00);
 }
 
 struct wd17xx *wd17xx_create(void)
@@ -337,6 +398,7 @@ struct wd17xx *wd17xx_create(void)
 	fdc->fd[1] = -1;
 	fdc->fd[2] = -1;
 	fdc->fd[3] = -1;
+	fdc->sector0 = 1;
 	return fdc;
 }
 
@@ -393,6 +455,11 @@ void wd17xx_set_side(struct wd17xx *fdc, unsigned int side)
 void wd17xx_trace(struct wd17xx *fdc, unsigned int onoff)
 {
 	fdc->trace = onoff;
+}
+
+void wd17xx_set_sector0(struct wd17xx *fdc, unsigned offset)
+{
+	fdc->sector0 = offset;
 }
 
 uint8_t wd17xx_intrq(struct wd17xx *fdc)

@@ -825,7 +825,7 @@ static uint8_t io_read(int unused, uint16_t addr)
 		r = scsi_read(addr);
 	else switch(addr & 0xC0) {
 		case 0x40:
-			r = ctc_read(addr >> 4);
+			r = ctc_read((addr - 0x40) >> 4);
 			break;
 		case 0x80:
 			r = sio2_read(addr >> 2);
@@ -867,7 +867,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	}
 	switch (addr & 0xC0) {
 	case 0x40:
-		ctc_write(addr >> 4, val);
+		ctc_write((addr - 0x40) >> 4, val);
 		break;
 	case 0x80:
 		sio2_write((addr >> 2), val);
@@ -983,18 +983,20 @@ int main(int argc, char *argv[])
 	ctc_init();
 
 	wd = wd17xx_create();
+	/* double sided media on the Ampro use weird sector numbering */
+	wd17xx_set_sector0(wd, 17);
 	/* Not clear what we do here - probably we need to add support
 	   for proper disk metadata formats as the disks came with some
 	   peculiar setings - like sectors numbering from 16 and 1K or 512
 	   byte sector options */
 	if (fdpath[0])
-		wd17xx_attach(wd, 0, fdpath[0], 2, 80, 10, 512);
+		wd17xx_attach(wd, 0, fdpath[0], 2, 40, 10, 512);
 	if (fdpath[1])
-		wd17xx_attach(wd, 0, fdpath[1], 2, 80, 10, 512);
+		wd17xx_attach(wd, 1, fdpath[1], 2, 40, 10, 512);
 	if (fdpath[2])
-		wd17xx_attach(wd, 0, fdpath[2], 2, 80, 10, 512);
+		wd17xx_attach(wd, 2, fdpath[2], 2, 40, 10, 512);
 	if (fdpath[3])
-		wd17xx_attach(wd, 0, fdpath[3], 2, 80, 10, 512);
+		wd17xx_attach(wd, 3, fdpath[3], 2, 40, 10, 512);
 	wd17xx_trace(wd, trace & TRACE_FDC);
 		
 	if (diskpath) {
@@ -1054,6 +1056,7 @@ int main(int argc, char *argv[])
 			}
 			if (ncr)
 				ncr5380_activity(ncr);
+			wd17xx_tick(wd, 5);
 			/* Do 5ms of I/O and delays */
 			if (!fast)
 				nanosleep(&tc, NULL);
