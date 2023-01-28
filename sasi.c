@@ -46,7 +46,7 @@
 
 #define NR_LUN	8
 
-#define CHECK_CONDITION	0x01
+#define CHECK_CONDITION	0x02
 
 struct sasi_bus;
 
@@ -357,20 +357,23 @@ static void sasi_command_process(struct sasi_disk *sd)
 static void sasi_command_execute_in(struct sasi_disk *sd)
 {
     switch(sd->cmd[0]) {
+    case 0x03:
+        sasi_status_in(sd, 0);
+        break;
     case 0x08:
         sasi_read_block(sd);
         break;
-    case 0x0C:
+    case 0x0D:
         sasi_status_in(sd, 0);
         break;
-    case 0x0E:
-        sasi_status_in(sd, 0);
-        break;
-    case 0x0F:
+    case 0x10:
         sasi_status_in(sd, 0);
         break;
     case 0xE5:
         sasi_read_block(sd);
+        break;
+    case 0xE7:
+        sasi_status_in(sd, 0);
         break;
     default:
         fprintf(stderr, "sasi_command_execute: state error cmd %02x\n",
@@ -381,23 +384,20 @@ static void sasi_command_execute_in(struct sasi_disk *sd)
 static void sasi_command_execute_out(struct sasi_disk *sd)
 {
     switch(sd->cmd[0]) {
-    case 0x03:
-        sasi_status_in(sd, 0);
-        break;
     case 0x0A:
         sasi_write_block(sd);
         break;
-    case 0x0D:
+    case 0x0C:
         sasi_status_in(sd, 0);
         break;
-    case 0x10:
+    case 0x0E:
+        sasi_status_in(sd, 0);
+        break;
+    case 0x0F:
         sasi_status_in(sd, 0);
         break;
     case 0xE6:
         sasi_write_block(sd);
-        break;
-    case 0xE7:
-        sasi_status_in(sd, 0);
         break;
     }
 }
@@ -440,6 +440,8 @@ static uint8_t sasi_disk_read(struct sasi_disk *sd)
     r = sd->dbuf[sd->dptr++];
     if (sd->dptr == sd->dlen)
         sasi_command_execute_in(sd);
+    if (sd->dptr >= sizeof(sd->dbuf))
+        sd->dptr = 0;
     return r;
 }
 
