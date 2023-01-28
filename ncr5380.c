@@ -54,7 +54,7 @@ static void ncr_set_icr(struct ncr5380 *ncr, uint8_t val)
 //	if (delta & ~val & 0x04)
 //		sasi_write_data(ncr->bus, ncr->last_data);
 	/* Ack strobed - so data byte transferred on bus */
-	if (delta & ~val & 0x10)
+	if ((delta & ~val & 0x10) && !(sasi_bus_state(ncr->bus) & SASI_IO))
 		sasi_write_data(ncr->bus, ncr->last_data);
 }
 
@@ -127,10 +127,10 @@ static void ncr_phase_check(struct ncr5380 *ncr)
 				b, ncr->tcr & 7);
 		if ((ncr->mode & 2) /* && (b & SASI_REQ) &&  !(lb & SASI_REQ) */)
 			ncr->irq = 1;
-		ncr->bsr |= 8;
+		ncr->bsr &= 0xF7;
 		ncr_dma_end(ncr);
 	} else
-		ncr->bsr &= 0xF7;
+		ncr->bsr |= 8;
 }
 
 static uint8_t do_ncr5380_read(struct ncr5380 *ncr, unsigned reg)
@@ -140,6 +140,10 @@ static uint8_t do_ncr5380_read(struct ncr5380 *ncr, unsigned reg)
 
 	switch (reg & 0x0F) {
 	case 0:
+		/* This is a bit clunky - we should probably model the ACK
+		    REQ cycle on the bus in full but it will do for now */
+		if (sasi_bus_state(ncr->bus) & SASI_IO)
+			return sasi_read_data(ncr->bus);
 		/* Return the bus data state live */
 		return ncr->last_data;
 	case 1:
@@ -173,8 +177,8 @@ static uint8_t do_ncr5380_read(struct ncr5380 *ncr, unsigned reg)
 		return r;
 	case 5:
 		/* bus and status register. Status bits */
-		r = ncr->bsr & 0xE4;
-		bus = sasi_bus_state(ncr->bus);
+		ncr_phase_check(ncr);
+		r = ncr->bsr & 0xEC;
 		if (ncr->busbits & SCSI_ATN)
 			r |= 0x02;
 		if (ncr->irq)
