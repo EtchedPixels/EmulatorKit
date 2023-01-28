@@ -218,7 +218,7 @@ static struct z80_sio_chan sio[2];
 
 static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
-	if (trace & TRACE_IRQ) {
+	if (trace & TRACE_SIO) {
 		fprintf(stderr, "Clear intbits %d %x\n",
 			(int)(chan - sio), m);
 	}
@@ -609,8 +609,11 @@ static int ctc_check_im2(void)
 /* Model the chains between the CTC devices */
 static void ctc_receive_pulse(int i);
 
+/* CTC 2 is chained into CTC3 */
 static void ctc_pulse(int i)
 {
+	if (i == 2)
+		ctc_receive_pulse(3);
 }
 
 /* We don't worry about edge directions just a logical pulse model */
@@ -794,7 +797,8 @@ static void wd1772_update_bcr(uint8_t bcr)
 static uint8_t scsi_read(uint8_t addr)
 {
 	if (ncr) {
-		fprintf(stderr, "[%04X]", cpu_z80.PC);
+		if (trace & TRACE_SCSI)
+			fprintf(stderr, "[%04X]", cpu_z80.PC);
 		if (addr == 0x29)
 			return idport;
 		if (addr > 0x29)
@@ -809,7 +813,8 @@ static void scsi_write(uint8_t addr, uint8_t val)
 {
 	if (addr > 0x28 || ncr == NULL)
 		return;
-	fprintf(stderr, "[%04X]", cpu_z80.PC);
+	if (trace & TRACE_SCSI)
+		fprintf(stderr, "[%04X]", cpu_z80.PC);
 	ncr5380_write(ncr, addr, val);
 }
 
@@ -832,17 +837,14 @@ static uint8_t io_read(int unused, uint16_t addr)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
 	if ((addr & 0xF0) == 0x20)
-		r = scsi_read(addr);
+		return scsi_read(addr);
 	else switch(addr & 0xC0) {
 		case 0x40:
-			r = ctc_read((addr - 0x40) >> 4);
-			break;
+			return ctc_read((addr - 0x40) >> 4);
 		case 0x80:
-			r = sio2_read(addr >> 2);
-			break;
+			return sio2_read(addr >> 2);
 		case 0xC0:
-			r = wd1772_read(addr);
-			break;
+			return wd1772_read(addr);
 	}
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -878,13 +880,13 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	switch (addr & 0xC0) {
 	case 0x40:
 		ctc_write((addr - 0x40) >> 4, val);
-		break;
+		return;
 	case 0x80:
 		sio2_write((addr >> 2), val);
-		break;
+		return;
 	case 0xC0:
 		wd1772_write(addr, val);
-		break;
+		return;
 	}
 	if (trace & TRACE_UNK)
 		fprintf(stderr,
@@ -929,7 +931,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "littleboard: [-f] [-s path] [-r path] [-d debug] [-A|B|C|D disk]\n");
+	fprintf(stderr, "littleboard: [-f] [i idport] [-s path] [-r path] [-d debug] [-A|B|C|D disk]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -974,7 +976,7 @@ int main(int argc, char *argv[])
 	char *diskpath = NULL;
 	static char *fdpath[4] = { NULL, NULL, NULL, NULL };
 
-	while ((opt = getopt(argc, argv, "d:r:fs:A:B:C:D:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:fi:r:s:A:B:C:D:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -993,6 +995,9 @@ int main(int argc, char *argv[])
 		case 'C':
 		case 'D':
 			fdpath[opt - 'A'] = optarg;
+			break;
+		case 'i':
+			idport = atoi(optarg);
 			break;
 		default:
 			usage();
@@ -1083,12 +1088,12 @@ int main(int argc, char *argv[])
 		unsigned n;
 		for (l = 0; l < 10; l++) {
 			int i;
-			/* 36400 T states */
-			for (i = 0; i < 100; i++) {
-				Z80ExecuteTStates(&cpu_z80, 364);
+			/* 200000 T states */
+			for (i = 0; i < 500; i++) {
+				Z80ExecuteTStates(&cpu_z80, 400);
 				sio2_timer();
-				ctc_tick(364);
-				for (n = 0; n < 182;n++) {
+				ctc_tick(400);
+				for (n = 0; n < 200;n++) {
 					ctc_receive_pulse(0);
 					ctc_receive_pulse(1);
 				}
