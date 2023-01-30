@@ -31,6 +31,7 @@ struct uart16x50 {
 void uart16x50_reset(struct uart16x50 *uptr)
 {
     uptr->dlab = 0;
+    uptr->iir = 1;
 }
 
 /* Compute the interrupt indicator register from what is pending */
