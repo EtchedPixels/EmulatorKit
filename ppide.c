@@ -19,6 +19,7 @@ void ppide_write(struct ppide *ppide, uint8_t addr, uint8_t val)
     uint8_t dhigh = val & changed;
     uint8_t dlow = ~val & changed;
     uint16_t d;
+    unsigned bit;
 
     switch(addr) {
         case 0:	/* Port A data */
@@ -64,8 +65,20 @@ void ppide_write(struct ppide *ppide, uint8_t addr, uint8_t val)
             }
             break;
         case 3: /* Control register */
-            /* We could check the direction bits but we don't */
-            ppide->pioreg[addr] = val;
+            /* Check for control commands being used to flip the clock
+               as that is how Will's katest code drives the clock */
+            if (val & 0x80) {
+                /* We could check the direction bits but we don't */
+                ppide->pioreg[addr] = val;
+            }
+            /* We are doing Port C bitbanging */
+            bit = 1 << ((val >> 1) & 0x07);
+            if (val & 1)
+                val = ppide->pioreg[2] | bit;
+            else
+                val = ppide->pioreg[2] & ~bit;
+            /* Do the equivalent write */
+            ppide_write(ppide, 2, val);
             break;
     }
 }
