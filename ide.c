@@ -226,18 +226,19 @@ static void edd_setup(struct ide_taskfile *tf)
   ready(tf);
 }
 
+/* DSC is not guaranteed but the Mini68K BIOS blindly checks the byte */
 void ide_reset(struct ide_controller *c)
 {
   if (c->drive[0].present) {
     edd_setup(&c->drive[0].taskfile);
     /* A drive could clear busy then set DRDY up to 2 minutes later if its
        mindnumbingly slow to start up ! We don't emulate any of that */
-    c->drive[0].taskfile.status = ST_DRDY;
+    c->drive[0].taskfile.status = ST_DRDY|ST_DSC;
     c->drive[0].eightbit = 0;
   }
   if (c->drive[1].present) {
     edd_setup(&c->drive[1].taskfile);
-    c->drive[1].taskfile.status = ST_DRDY;
+    c->drive[1].taskfile.status = ST_DRDY|ST_DSC;
     c->drive[1].eightbit = 0;
   }
   c->selected = 0;
