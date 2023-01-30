@@ -64,6 +64,8 @@ static struct uart16x50 *uart;
 static struct rtc *rtc;
 static unsigned rtc_loaded;
 
+static unsigned memsize = 512 * 1024;
+
 /* 2MB RAM */
 static uint8_t ram[0x200000];
 /* 128K ROM */
@@ -378,8 +380,12 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 		u27 <<= 1;
 		u27 |= 1;
 	}
-	if (address < 0x200000)
-		return ram[address];
+	if (address < 0x200000) {
+		if (address < memsize)
+			return ram[address];
+		else
+			return 0xFF;
+	}
 	if (address < 0x380000)
 		return 0xFF;
 	if (address < 0x3F0000)
@@ -460,7 +466,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 	}
 	u27 <<= 1;
 	u27 |= 1;
-	if (address < 0x200000) {
+	if (address < memsize) {
 		ram[address] = value;
 		return;
 	}
@@ -581,7 +587,7 @@ void cpu_set_fc(int fc)
 
 void usage(void)
 {
-	fprintf(stderr, "mini68k: [-0][-1][-2][-e][-r rompath][-i idepath][-d debug].\n");
+	fprintf(stderr, "mini68k: [-0][-1][-2][-e][-m memsize][-r rompath][-i idepath][-d debug].\n");
 	exit(1);
 }
 
@@ -594,7 +600,7 @@ int main(int argc, char *argv[])
 	const char *romname = "mini-128.rom";
 	const char *diskname = NULL;
 
-	while((opt = getopt(argc, argv, "012efd:i:r:")) != -1) {
+	while((opt = getopt(argc, argv, "012d:efi:m:r:")) != -1) {
 		switch(opt) {
 		case '0':
 			cputype = M68K_CPU_TYPE_68000;
@@ -605,17 +611,20 @@ int main(int argc, char *argv[])
 		case '2':
 			cputype = M68K_CPU_TYPE_68020;
 			break;
+		case 'd':
+			trace = atoi(optarg);
+			break;
 		case 'e':
 			cputype = M68K_CPU_TYPE_68EC020;
 			break;
 		case 'f':
 			fast = 1;
 			break;
-		case 'd':
-			trace = atoi(optarg);
-			break;
 		case 'i':
 			diskname = optarg;
+			break;
+		case 'm':
+			memsize = atoi(optarg);
 			break;
 		case 'r':
 			romname = optarg;
@@ -645,6 +654,16 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+	if (memsize & 0x7FFFF) {
+		fprintf(stderr, "%s: RAM must be a multiple of 512K blocks.\n",
+			argv[0]);
+		exit(1);
+	}
+	if (memsize > sizeof(ram)) {
+		fprintf(stderr, "%s: RAM size must be no more than %ldKib\n",
+			argv[0], (long)sizeof(ram) >> 10);
+		exit(1);
+	}
 	memset(ram, 0xA7, sizeof(ram));
 
 	fd = open(romname, O_RDONLY);
