@@ -62,6 +62,8 @@ static struct ppide *ppide;
 static struct uart16x50 *uart;
 /* RTC */
 static struct rtc *rtc;
+static unsigned rtc_loaded;
+
 /* 2MB RAM */
 static uint8_t ram[0x200000];
 /* 128K ROM */
@@ -76,6 +78,8 @@ static int trace = 0;
 #define TRACE_MEM	1
 #define TRACE_CPU	2
 #define TRACE_UART	4
+#define TRACE_PPIDE	8
+#define TRACE_RTC	16
 
 uint8_t fc;
 
@@ -322,17 +326,41 @@ void ns202_reset(void)
 	ns202.reg[R_CIPTR] = 0xFF;
 }
 	
-unsigned int cfg_read()
+static unsigned int cfg_read(void)
 {
 	return mfpic_cfg;
 }
 
-void cfg_write(unsigned int value)
+static void cfg_write(unsigned int value)
 {
 	/* 7-3 user */
 	/* Bit 2 masks upper 8 interrupts */
 	/* 1:0 shift value for interrupt vector */
 	mfpic_cfg = value;
+}
+
+/* Remap the bits as the MF/PIC doesn't follow the usual RBC/RC2014 mapping */
+
+static unsigned rtc_remap_w(unsigned v)
+{
+	unsigned r = 0;
+	if (v & 1)		/* Data / Data */
+		r |= 0x80;
+	if (!(v & 2))		/* Write / /Write */
+		r |= 0x20;
+	if (v & 4)		/* Clock / Clock */
+		r |= 0x40;
+	if (!(v & 8))		/* Reset / /Reset */
+		r |= 0x10;
+	return r;
+}
+
+static unsigned rtc_remap_r(unsigned v)
+{
+	unsigned r = 0;
+	if (v & 0x01)		/* Data in */
+		r |= 0x01;
+	return r;
 }
 
 /* Read data from RAM, ROM, or a device */
@@ -367,7 +395,7 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 	case 0x42:
 		return cfg_read();
 	case 0x43:
-		return rtc_read(rtc) >> 4;
+		return rtc_remap_r(rtc_read(rtc));
 	case 0x44:
 	case 0x45:
 	case 0x46:
@@ -450,7 +478,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		cfg_write(value);
 		return;
 	case 0x43:
-		rtc_write(rtc, value << 4);
+		rtc_write(rtc, rtc_remap_w(value));
 		return;
 	case 0x44:
 	case 0x45:
@@ -521,11 +549,15 @@ static struct termios saved_term, term;
 static void cleanup(int sig)
 {
 	tcsetattr(0, 0, &saved_term);
+	if (rtc_loaded)
+		rtc_save(rtc, "mini68k.nvram");
 	exit(1);
 }
 
 static void exit_cleanup(void)
 {
+	if (rtc_loaded)
+		rtc_save(rtc, "mini68k.nvram");
 	tcsetattr(0, 0, &saved_term);
 }
 
@@ -627,6 +659,7 @@ int main(int argc, char *argv[])
 	close(fd);
 
 	ppide = ppide_create("hd0");
+	ppide_reset(ppide);
 	if (diskname) {
 		fd = open(diskname, O_RDWR);
 		if (fd == -1) {
@@ -638,12 +671,17 @@ int main(int argc, char *argv[])
 		if (ppide_attach(ppide, 0, fd))
 			exit(1);
 	}
+	ppide_trace(ppide, trace & TRACE_PPIDE);
 
 	uart = uart16x50_create();
 	if (trace & TRACE_UART)
 		uart16x50_trace(uart, 1);
 
 	rtc = rtc_create();
+	rtc_reset(rtc);
+	rtc_trace(rtc, trace & TRACE_RTC);
+	rtc_load(rtc, "mini68k.nvram");
+	rtc_loaded = 1;
 
 	m68k_init();
 	m68k_set_cpu_type(cputype);

@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include "system.h"
 #include "rtc_bitbang.h"
 
@@ -98,16 +100,21 @@ static void rtcop(struct rtc *rtc)
 	   the data byte to go with it */
 	if (rtc->state == 2) {
 		if ((!rtc->wp) || (rtc->reg == 7)) {
-			if (rtc->trace)
-				fprintf(stderr, "RTC write %d as %d\n", rtc->reg, rtc->w);
 			/* We did a real write! */
 			/* Not yet tackled burst mode */
-			if (rtc->reg != 0x3F && (rtc->reg & 0x20))	/* NVRAM */
+			if (rtc->reg != 0x3F && (rtc->reg & 0x20)) {
+				/* NVRAM */
 				rtc->ram[rtc->reg & 0x1F] = rtc->w;
-			else if (rtc->reg == 2)
-				rtc->clock24 = rtc->w & 0x80;
-			else if (rtc->reg == 7)
-				rtc->wp = rtc->w & 0x80;
+				if (rtc->trace)
+					fprintf(stderr, "RTC write RAM %d as %d\n", rtc->reg &0x1F, rtc->w);
+			} else {
+				if (rtc->reg == 2)
+					rtc->clock24 = rtc->w & 0x80;
+				if (rtc->reg == 7)
+					rtc->wp = rtc->w & 0x80;
+				if (rtc->trace)
+					fprintf(stderr, "RTC write time %d as %d\n", rtc->reg &0x1F, rtc->w);
+			}
 		}
 		/* For now don't emulate writes to the time */
 		rtc->state = 0;
@@ -147,7 +154,7 @@ static void rtcop(struct rtc *rtc)
 		if (rtc->w != 0xFE)
 			rtc->r = rtc->ram[(rtc->w >> 1) & 0x1F] << 1;
 		if (rtc->trace)
-			fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n", (rtc->w >> 1) & 0xFF, rtc->r);
+			fprintf(stderr, "RTC RAM read %d, ready to clock out %d.\n", (rtc->w >> 1) & 0x1F, rtc->r);
 		return;
 	}
 	/* Register read */
@@ -240,4 +247,26 @@ void rtc_free(struct rtc *rtc)
 void rtc_trace(struct rtc *rtc, int onoff)
 {
 	rtc->trace = onoff;
+}
+
+void rtc_save(struct rtc *rtc, const char *path)
+{
+	int fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0600);
+	if (fd == -1) {
+		perror(path);
+		return;
+	}
+	if (write(fd, rtc->ram, 32) != 32)
+		fprintf(stderr, "%s: write failed.\n", path);
+	close(fd);
+}
+
+void rtc_load(struct rtc *rtc, const char *path)
+{
+	int fd = open(path, O_RDONLY);
+	if (fd == -1)
+		return;
+	if (read(fd, rtc->ram, 32) != 32)
+		fprintf(stderr, "%s: read failed.\n", path);
+	close(fd);
 }
