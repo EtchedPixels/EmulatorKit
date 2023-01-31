@@ -298,8 +298,8 @@ static void cmd_initparam_complete(struct ide_taskfile *tf)
     tf->status |= ST_ERR;
     tf->error |= ERR_ABRT;
     tf->drive->failed = 1;		/* Report ID NF until fixed */
-    fprintf(stderr, "geo is %d %d, asked for %d %d\n",
-      d->sectors, d->heads, tf->count, (tf->lba4 & DEVH_HEAD) + 1);
+/*    fprintf(stderr, "geo is %d %d, asked for %d %d\n",
+      d->sectors, d->heads, tf->count, (tf->lba4 & DEVH_HEAD) + 1); */
     ide_fault(d, "invalid geometry");
   } else if (tf->drive->failed == 1)
     tf->drive->failed = 0;		/* Valid translation */
@@ -359,7 +359,8 @@ static void cmd_recalibrate_complete(struct ide_taskfile *tf)
   struct ide_drive *d = tf->drive;
   if (d->failed)
     drive_failed(tf);
-  if (d->offset == -1 || xlate_block(tf) != 0L) {
+  /* This is properly only defined for CHS 0/0/1 or LBA 0 */
+  if (xlate_block(tf) < 0) {
     tf->status &= ~ST_DSC;
     tf->status |= ST_ERR;
     tf->error |= ERR_ABRT;
@@ -760,8 +761,8 @@ int ide_attach(struct ide_controller *c, int drive, int fd)
   }
   d->fd = fd;
   d->present = 1;
-  d->heads = d->identify[3];
-  d->sectors = d->identify[6];
+  d->heads = le16(d->identify[3]);
+  d->sectors = le16(d->identify[6]);
   d->cylinders = le16(d->identify[1]);
   if (d->identify[49] & le16(1 << 9))
     d->lba = 1;

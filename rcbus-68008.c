@@ -1,7 +1,7 @@
 /*
  *	Platform features
  *
- *	68000 processor card for RC2014 with 20bit addressing mapped
+ *	68000 processor card for rcbus with 20bit addressing mapped
  *	000000-00FFFF	ROM
  *	010000-01FFFF	IO Window (hides ROM in supervisor mode only)
  *	020000-07FFFF	ROM
@@ -405,7 +405,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-68008: [-1] [-A] [-a] [-b] [-f] [-R] [-r rompath] [-i disk] [-I disk] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus-68008: [-1] [-A] [-a] [-b] [-f] [-R] [-r rompath] [-i disk] [-I disk] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -414,7 +414,7 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	int ppi = 0;
-	char *rompath = "rc2014-68000.rom";
+	char *rompath = "rcbus-68000.rom";
 	char *idepath;
 	int has_rtc = 0;
 	int has_acia = 0;
@@ -472,7 +472,7 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (has_acia == 0 && has_16550a == 0) {
-		fprintf(stderr, "rc2014: no UART selected, defaulting to 16550A\n");
+		fprintf(stderr, "rcbus: no UART selected, defaulting to 16550A\n");
 		has_16550a = 1;
 	}
 
@@ -482,7 +482,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, 524288) != 524288) {
-		fprintf(stderr, "rc2014: ROM image should be 512K.\n");
+		fprintf(stderr, "rcbus: ROM image should be 512K.\n");
 		exit(EXIT_FAILURE);
 	}
 	close(fd);

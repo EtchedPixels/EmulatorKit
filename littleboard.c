@@ -877,6 +877,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		scsi_write(addr, val);
 		return;
 	}
+	if (addr == 0xF4) {	/* Secret trap door debug */
+		trace = val;
+		return;
+	}
 	switch (addr & 0xC0) {
 	case 0x40:
 		ctc_write((addr - 0x40) >> 4, val);

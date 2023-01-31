@@ -55,7 +55,7 @@ struct ppide *ppide;
 struct rtc *rtcdev;
 struct uart16x50 *uart;
 
-static uint16_t tstate_steps = 369;	/* RC2014 speed (7.4MHz)*/
+static uint16_t tstate_steps = 369;	/* rcbus speed (7.4MHz)*/
 
 /* Who is pulling on the interrupt line */
 
@@ -363,7 +363,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-8085: [-1] [-a] [-b] [-B] [-e rombank] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-e rombank] [-w] [-d debug] [-S symbols]\n");
+	fprintf(stderr, "rcbus-8085: [-1] [-a] [-b] [-B] [-e rombank] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-e rombank] [-w] [-d debug] [-S symbols]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -374,7 +374,7 @@ int main(int argc, char *argv[])
 	int fd;
 	int rom = 1;
 	int rombank = 0;
-	char *rompath = "rc2014-8085.rom";
+	char *rompath = "rcbus-8085.rom";
 	char *idepath;
 	int acia_input;
 	int uart_16550a = 0;
@@ -437,12 +437,12 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (acia_uart == 0 && uart_16550a == 0) {
-		fprintf(stderr, "rc2014-8085: no UART selected, defaulting to 68B50\n");
+		fprintf(stderr, "rcbus-8085: no UART selected, defaulting to 68B50\n");
 		acia_uart = 1;
 		acia_input = 1;
 	}
 	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
-		fprintf(stderr, "rc2014-8085: no ROM\n");
+		fprintf(stderr, "rcbus-8085: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -461,7 +461,7 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 		if (read(fd, ramrom, 65536) < 2048) {
-			fprintf(stderr, "rc2014-8085: short rom '%s'.\n", rompath);
+			fprintf(stderr, "rcbus-8085: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
 		close(fd);
@@ -474,7 +474,7 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		if (read(fd, ramrom, 524288) != 524288) {
-			fprintf(stderr, "rc2014-8085: banked rom image should be 512K.\n");
+			fprintf(stderr, "rcbus-8085: banked rom image should be 512K.\n");
 			exit(EXIT_FAILURE);
 		}
 		bankenable = 1;
@@ -570,7 +570,7 @@ int main(int argc, char *argv[])
 	   slow stuff and nap for 5ms. */
 	while (!done) {
 		int i;
-		/* 36400 T states for base RC2014 - varies for others */
+		/* 36400 T states for base rcbus - varies for others */
 		for (i = 0; i < 100; i++) {
 			i8085_exec(tstate_steps);
 			if (acia)

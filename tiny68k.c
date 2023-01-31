@@ -22,7 +22,7 @@ static uint8_t ram[(16 << 20) - 32768];
 static struct ide_controller *ide;
 /* 68681 */
 static struct duart *duart;
-static int rc2014;
+static int rcbus;
 
 static int trace = 0;
 
@@ -109,12 +109,12 @@ void recalc_interrupts(void)
 
 /* Until we plug any RC2014 emulation into this */
 
-static uint8_t rc2014_inb(uint8_t address)
+static uint8_t rcbus_inb(uint8_t address)
 {
 	return 0xFF;
 }
 
-static void rc2014_outb(uint8_t address, uint8_t data)
+static void rcbus_outb(uint8_t address, uint8_t data)
 {
 }
 
@@ -134,8 +134,8 @@ int cpu_irq_ack(int level)
 
 static unsigned int do_io_readb(unsigned int address)
 {
-	if (rc2014 && address >= 0xFF8000 && address <= 0xFF8FFF)
-		return rc2014_inb(((address - 0xFF8000) >> 1) & 0xFF);
+	if (rcbus && address >= 0xFF8000 && address <= 0xFF8FFF)
+		return rcbus_inb(((address - 0xFF8000) >> 1) & 0xFF);
 	/* SPI is not modelled */
 	if (address >= 0xFFD000 && address <= 0xFFDFFF)
 		return 0xFF;
@@ -153,8 +153,8 @@ static void do_io_writeb(unsigned int address, unsigned int value)
 		printf("<%c>", value);
 		return;
 	}
-	if (rc2014 && address >= 0xFF8000 && address <= 0xFF8FFF) {
-		rc2014_outb(((address - 0xFF8000) >> 1) & 0xFF, value);
+	if (rcbus && address >= 0xFF8000 && address <= 0xFF8FFF) {
+		rcbus_outb(((address - 0xFF8000) >> 1) & 0xFF, value);
 		return;
 	}
 	/* SPI is not modelled */
@@ -173,7 +173,7 @@ static void do_io_writeb(unsigned int address, unsigned int value)
 unsigned int do_cpu_read_byte(unsigned int address)
 {
 	address &= 0xFFFFFF;
-	if (rc2014) {
+	if (rcbus) {
 		/* Musashi can't emulate this properly it seems */
 		if (address >= 0x800000 && address <= 0xFF8000) {
 			fprintf(stderr, "R: bus error at %d\n", address);
@@ -200,7 +200,7 @@ unsigned int do_cpu_read_word(unsigned int address)
 {
 	address &= 0xFFFFFF;
 
-	if (rc2014) {
+	if (rcbus) {
 		if (address >= 0x800000 && address < 0xFF8000) {
 			fprintf(stderr, "R: bus error at %d\n", address);
 			return 0xFFFF;
@@ -249,7 +249,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "WB %06X <- %02X\n", address, value);
 
-	if (rc2014) {
+	if (rcbus) {
 		if (address >= 0x800000 && address <= 0xFF8000) {
 			fprintf(stderr, "W: bus error at %06X\n", address);
 			return;
@@ -270,7 +270,7 @@ void cpu_write_word(unsigned int address, unsigned int value)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "WW %06X <- %04X\n", address, value);
 
-	if (rc2014) {
+	if (rcbus) {
 		if (address >= 0x800000 && address <= 0xFF8000) {
 			fprintf(stderr, "W: bus error at %06X\n", address);
 			return;
@@ -385,7 +385,7 @@ int main(int argc, char *argv[])
 			cputype = M68K_CPU_TYPE_68EC020;
 			break;
 		case 'R':
-			rc2014 = 1;
+			rcbus = 1;
 			break;
 		case 'f':
 			fast = 1;

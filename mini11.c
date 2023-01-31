@@ -38,7 +38,7 @@ static uint8_t romen = 1;
 
 struct sdcard *sdcard;
 
-/* The CPU E clock runs at CLK/4. The RC2014 standard clock is fine
+/* The CPU E clock runs at CLK/4. The rcbus standard clock is fine
    and makes serial rates easy */
 static uint16_t clockrate =  364/4;
 
@@ -371,7 +371,7 @@ int main(int argc, char *argv[])
 	while (!done) {
 		unsigned int i;
 		unsigned int j;
-		/* 36400 T states for base RC2014 - varies for others */
+		/* 36400 T states for base rcbus - varies for others */
 		for (j = 0; j < 10; j++) {
 			for (i = 0; i < 10; i++) {
 				while(cycles < clockrate)

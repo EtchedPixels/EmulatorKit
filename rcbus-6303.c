@@ -1,19 +1,18 @@
 /*
  *	Platform features
  *
- *	6809 CPU
+ *	6303 CPU
  *	IDE at $FE10-$FE17 no high or control access (mirrored at $FE90-97)
  *	Simple memory 32K ROM / 32K RAM
  *	Memory banking Zeta style 16K page at $FE78-$FE7B (enable at $FE7C)
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
  *	RTC at $FE0C
  *	WizNET ethernet
- *	6840 at 0x60
  *
  *	Alternate MMU option using highmmu on 8085/MMU card
  *
  *	TODO:
- *	Lots - this is just an initial hack for testing
+ *	More accurate clock rate
  */
 
 #include <stdio.h>
@@ -27,11 +26,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/select.h>
-#include "d6809.h"
-#include "e6809.h"
+#include "6800.h"
 #include "ide.h"
-#include "16x50.h"
-#include "6840.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
 #include "w5100.h"
@@ -50,8 +46,6 @@ static uint8_t wiznet = 0;
 
 struct ppide *ppide;
 struct rtc *rtcdev;
-struct uart16x50 *uart;
-struct m6840 *ptm;
 
 /* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
    rate and get 115200 baud - which is pushing it admittedly! */
@@ -61,8 +55,11 @@ static uint16_t clockrate =  364/4;
 
 static uint8_t live_irq;
 
-#define IRQ_16550A	1
-#define IRQ_PTM		2
+#define IRQ_SIOA	1
+#define IRQ_SIOB	2
+#define IRQ_CTC		3
+#define IRQ_ACIA	4
+#define IRQ_16550A	5
 
 static nic_w5100_t *wiz;
 
@@ -75,14 +72,17 @@ static volatile int done;
 #define TRACE_PPIDE	16
 #define TRACE_512	32
 #define TRACE_RTC	64
-#define TRACE_CPU	128
-#define TRACE_IRQ	256
-#define TRACE_UART	512
-#define TRACE_PTM	1024
+#define TRACE_ACIA	128
+#define TRACE_CTC	256
+#define TRACE_CPU	512
+#define TRACE_IRQ	1024
+#define TRACE_UART	2048
 
 static int trace = 0;
 
-unsigned int check_chario(void)
+struct m6800 cpu;
+
+int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -120,26 +120,36 @@ unsigned int next_char(void)
 	return c;
 }
 
-static void int_clear(unsigned int irq)
-{
-	live_irq &= ~(1 << irq);
-}
-
-static void int_set(unsigned int irq)
-{
-	live_irq |= 1 << irq;
-}
-
 void recalc_interrupts(void)
 {
-	if (uart16x50_irq_pending(uart))
-		int_set(IRQ_16550A);
+	if (live_irq)
+		m6800_raise_interrupt(&cpu, IRQ_IRQ1);
 	else
-		int_clear(IRQ_16550A);
-	if (m6840_irq_pending(ptm))
-		int_set(IRQ_PTM);
-	else
-		int_clear(IRQ_PTM);
+		m6800_clear_interrupt(&cpu, IRQ_IRQ1);
+}
+
+/* Serial glue: a bit different as the serial port is on chip and emulated
+   by the CPU emulator */
+
+void m6800_sci_change(struct m6800 *cpu)
+{
+	/* SCI changed status - could add debug here FIXME */
+}
+
+void m6800_tx_byte(struct m6800 *cpu, uint8_t byte)
+{
+	write(1, &byte, 1);
+}
+
+/* I/O ports: nothing for now */
+
+void m6800_port_output(struct m6800 *cpu, int port)
+{
+}
+
+uint8_t m6800_port_input(struct m6800 *cpu, int port)
+{
+	return 0xFF;
 }
 
 static int ide = 0;
@@ -155,20 +165,17 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
-/* Clock timer 3 off timer 2 */
-void m6840_output_change(struct m6840 *m, uint8_t outputs)
-{
-	static int old = 0;
-	if ((outputs ^ old) & 2) {
-		/* timer 2 high to low -> clock timer 3 */
-		if (!(outputs & 2))
-			m6840_external_clock(ptm, 3);
-	}
-	old = outputs;
-}
+/* Real time clock state machine and related state.
 
-static uint8_t m6809_do_inport(uint8_t addr)
+   Give the host time and don't emulate time setting except for
+   the 24/12 hour setting.
+
+ */
+
+uint8_t m6800_inport(uint8_t addr)
 {
+	if (trace & TRACE_IO)
+		fprintf(stderr, "read %02x\n", addr);
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
 	if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
@@ -177,29 +184,14 @@ static uint8_t m6809_do_inport(uint8_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
-	if (addr >= 0x60 && addr <= 0x67)
-		return m6840_read(ptm, addr & 7);
 	if (addr == 0x0C && rtc)
 		return rtc_read(rtcdev);
-	if (addr >= 0xC0 && addr <= 0xC7)
-		return uart16x50_read(uart, addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
 }
 
-uint8_t m6809_inport(uint8_t addr)
-{
-	uint8_t r;
-	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x = ", addr);
-	r = m6809_do_inport(addr);
-	if (trace & TRACE_IO)
-		fprintf(stderr, "%02x\n", r);
-	return r;
-}
-
-void m6809_outport(uint8_t addr, uint8_t val)
+void m6800_outport(uint8_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
@@ -218,10 +210,6 @@ void m6809_outport(uint8_t addr, uint8_t val)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
-	else if (addr >= 0x60 && addr < 0x68)
-		m6840_write(ptm, addr & 7, val);
-	else if (addr >= 0xC0 && addr <= 0xC7)
-		uart16x50_write(uart, addr & 7, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
@@ -240,12 +228,12 @@ void m6809_outport(uint8_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-unsigned char do_e6809_read8(unsigned addr, unsigned debug)
+uint8_t m6800_read_op(struct m6800 *cpu, uint16_t addr, int debug)
 {
 	if (addr >> 8 == 0xFE) {
 		if (debug)
 			return 0xFF;
-		return m6809_inport(addr & 0xFF);
+		return m6800_inport(addr & 0xFF);
 	}
 	if (bankhigh) {
 		uint8_t reg = mmureg;
@@ -259,7 +247,7 @@ unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
 
 		val = ramrom[(higha << 16) + addr];
-		if (trace & TRACE_MEM) {
+		if (!debug && (trace & TRACE_MEM)) {
 			fprintf(stderr, "R %04X[%02X] = %02X\n",
 				(unsigned int)addr,
 				(unsigned int)higha,
@@ -268,30 +256,31 @@ unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 		return val;
 	} else 	if (bankenable) {
 		unsigned int bank = (addr & 0xC000) >> 14;
-		if (trace & TRACE_MEM)
+		if (!debug && (trace & TRACE_MEM))
 			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
 		addr &= 0x3FFF;
 		return ramrom[(bankreg[bank] << 14) + addr];
 	}
-	if (trace & TRACE_MEM)
+	if (!debug && (trace & TRACE_MEM))
 		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
 	return ramrom[addr];
 }
 
-unsigned char e6809_read8(unsigned addr)
+uint8_t m6800_debug_read(struct m6800 *cpu, uint16_t addr)
 {
-	return do_e6809_read8(addr, 0);
+	return m6800_read_op(cpu, addr, 1);
 }
 
-unsigned char e6809_read8_debug(unsigned addr)
+uint8_t m6800_read(struct m6800 *cpu, uint16_t addr)
 {
-	return do_e6809_read8(addr, 1);
+	return m6800_read_op(cpu, addr, 0);
 }
 
-void e6809_write8(unsigned addr, unsigned char val)
+
+void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 {
 	if (addr >> 8 == 0xFE) {
-		m6809_outport(addr & 0xFF, val);
+		m6800_outport(addr & 0xFF, val);
 		return;
 	}
 	if (bankhigh) {
@@ -337,36 +326,9 @@ void e6809_write8(unsigned addr, unsigned char val)
 	}
 }
 
-static const char *make_flags(uint8_t cc)
+static void poll_irq_event(void)
 {
-	static char buf[9];
-	char *p = "EFHINZVC";
-	char *d = buf;
-
-	while(*p) {
-		if (cc & 0x80)
-			*d++ = *p;
-		else
-			*d++ = '-';
-		cc <<= 1;
-		p++;
-	}
-	*d = 0;
-	return buf;
-}
-
-/* Called each new instruction issue */
-void e6809_instruction(unsigned pc)
-{
-	char buf[80];
-	struct reg6809 *r = e6809_get_regs();
-	if (trace & TRACE_CPU) {
-		d6809_disassemble(buf, pc);
-		fprintf(stderr, "%04X: %-16.16s | ", pc, buf);
-		fprintf(stderr, "%s %02X:%02X %04X %04X %04X %04X\n",
-			make_flags(r->cc),
-			r->a, r->b, r->x, r->y, r->u, r->s);
-	}
+	/* For now only internal IRQ */
 }
 
 static struct termios saved_term, term;
@@ -384,7 +346,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-6809: [-b] [-f] [-R] [-i idepath] [-I ppidepath] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus-6303: [-b] [-B] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -394,7 +356,7 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	int rom = 1;
-	char *rompath = "rc2014-6809.rom";
+	char *rompath = "rcbus-6303.rom";
 	char *idepath;
 	unsigned int cycles = 0;
 
@@ -441,7 +403,7 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
-		fprintf(stderr, "rc2014-6809: no ROM\n");
+		fprintf(stderr, "rcbus-6303: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -452,7 +414,7 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		if (read(fd, ramrom + 32768, 32768) != 32768) {
-			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
+			fprintf(stderr, "rcbus-6303: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
 		close(fd);
@@ -465,7 +427,7 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		if (read(fd, ramrom, 524288) != 524288) {
-			fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
+			fprintf(stderr, "rcbus-6303: banked rom image should be 512K.\n");
 			exit(EXIT_FAILURE);
 		}
 		bankenable = 1;
@@ -501,13 +463,6 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	uart = uart16x50_create();
-	uart16x50_trace(uart, trace & TRACE_UART);
-	uart16x50_set_input(uart, 1);
-
-	ptm = m6840_create();
-	m6840_trace(ptm, trace & TRACE_PTM);
-
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
@@ -540,7 +495,10 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	e6809_reset(trace & TRACE_CPU);
+	m6800_reset(&cpu, CPU_6303, INTIO_6803, 3);
+
+	if (trace & TRACE_CPU)
+		cpu.debug = 1;
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
@@ -548,25 +506,26 @@ int main(int argc, char *argv[])
 	   is loaded though */
 
 	while (!done) {
-		unsigned int i, j;
-		/* 36400 T states for base RC2014 - varies for others */
+		unsigned int i;
+		/* 36400 T states for base rcbus - varies for others */
 		for (i = 0; i < 100; i++) {
 			while(cycles < clockrate)
-				cycles += e6809_sstep(live_irq, 0);
-			m6840_tick(ptm, cycles);
-			for (j = 0; j < cycles; j++)
-				m6840_external_clock(ptm, 2);
+				cycles += m6800_execute(&cpu);
 			cycles -= clockrate;
-			recalc_interrupts();
 		}
-		/* Drive the  serial */
-		uart16x50_event(uart);
+		/* Drive the internal serial */
+		i = check_chario();
+		if (i & 1)
+			m6800_rx_byte(&cpu, next_char());
+		if (i & 2)
+			m6800_tx_done(&cpu);
 		/* Wiznet timer */
 		if (wiznet)
 			w5100_process(wiz);
 		/* Do 5ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+		poll_irq_event();
 	}
 	exit(0);
 }

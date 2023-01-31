@@ -342,7 +342,7 @@ static opcode_t opcodes[NUMBER_OPCODES] = {
     {0x98, "TYA", IMPLI, 2, 0} /* TYA */
 };
 
-static void append_rc2014(char *input, char *lead, uint16_t arg, char *tail) {
+static void append_rcbus(char *input, char *lead, uint16_t arg, char *tail) {
     struct symbol *s = find_symbol(arg);
     int pn = 0;
     if (s == NULL) {
@@ -465,22 +465,22 @@ static void disassemble(char *output, uint16_t current_addr, uint8_t *buffer) {
         case ABSOL:
         case ABSIX:
         case ABSIY:
-            append_rc2014(output, "", word_operand, "");
+            append_rcbus(output, "", word_operand, "");
             break;
        case ZEROP:
-            append_rc2014(output, "", byte_operand, "");
+            append_rcbus(output, "", byte_operand, "");
             break;
        case ZEPIX:
-            append_rc2014(output, "", byte_operand, ",X");
+            append_rcbus(output, "", byte_operand, ",X");
             break;
        case ZEPIY:
-            append_rc2014(output, "", byte_operand, ",Y");
+            append_rcbus(output, "", byte_operand, ",Y");
             break;
         case INDIN:
-            append_rc2014(output, "(", byte_operand, ",X)");
+            append_rcbus(output, "(", byte_operand, ",X)");
             break;
         case ININD:
-            append_rc2014(output, "(", byte_operand, "),Y");
+            append_rcbus(output, "(", byte_operand, "),Y");
             break;
         default:
             break;

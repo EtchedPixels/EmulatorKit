@@ -1,22 +1,12 @@
 /*
  *	Platform features
  *
- *	Z8 at 7.3728MHz
- *	Internal serial
+ *	80C188 at 12MHz
  *	IDE at 0x10-0x17 no high or control access (mirrored at 0x90-97)
- *	PPIDE at 0x20
- *	Simple memory 32K ROM / 32K RAM
- *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
- *	First 512K ROM Second 512K RAM (0-31, 32-63)
- *	Etched Pixels MMU at 0xFF
+ *	First 512K RAM Second 512K ROM
  *	RTC at 0x0C
  *	16550A at 0xC0
  *	WizNET ethernet
- *
- *	TODO:
- *	Possibly emulate the graphics option
- *	More accurate clock rate
- *	CPU debug tracing
  */
 
 #include <stdio.h>
@@ -30,70 +20,99 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/select.h>
-#include "z8.h"
+#include "80x86/e8086.h"
 #include "ide.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
 #include "w5100.h"
 
-static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
+static uint8_t ramrom[1024 * 1024];
 
-static unsigned int bankreg[4];
-static uint8_t bankenable;
-
-static uint8_t bank512 = 0;
-static uint8_t bankhigh = 0;
-static uint8_t mmureg = 0;
 static uint8_t rtc;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 
-static int int_tx;
-
+e8086_t *cpu;
 struct ppide *ppide;
 struct rtc *rtcdev;
-
-static uint16_t mcycles = 368;	/* Clocks per 50us */
-
-/* Who is pulling on the interrupt line */
-
-static uint8_t live_irq;
-
-#define IRQ_16550A	1
-
 static nic_w5100_t *wiz;
 
+static uint16_t tstate_steps = 369;	/* rcbus speed (7.4MHz)  for now */
+
 static volatile int done;
+
+/* Who is pulling on the interrupt line */
+static uint8_t live_irq;
+
+#define IRQ_SIOA	1
+#define IRQ_SIOB	2
+#define IRQ_CTC		3
+#define IRQ_ACIA	4
+#define IRQ_16550A	5
+
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
 #define TRACE_ROM	4
 #define TRACE_UNK	8
-#define TRACE_LED	16
-#define TRACE_PPIDE	32
+#define TRACE_PPIDE	16
+#define TRACE_512	32
 #define TRACE_RTC	64
-#define TRACE_CPU	128
-#define TRACE_UART	256
-#define TRACE_512	512
+#define TRACE_ACIA	128
+#define TRACE_CTC	256
+#define TRACE_CPU	512
+#define TRACE_IRQ	1024
+#define TRACE_UART	2048
 
 static int trace = 0;
 
-struct z8 *cpu;
-
-uint8_t z8_port_read(struct z8 *z8, uint8_t port)
+uint8_t i808x_do_read(uint32_t addr)
 {
-	return 0xFF;
-} 
-
-void z8_port_write(struct z8 *z8, uint8_t port, uint8_t val)
-{
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %06X = %02X\n", addr, ramrom[addr]);
+	return ramrom[addr];
 }
 
-void z8_tx(struct z8 *z8, uint8_t ch)
+uint8_t i808x_debug_read(uint16_t addr)
 {
-	write(1, &ch, 1);
-	int_tx = 1;
+	return i808x_do_read(addr);	/* No side effects */
 }
+
+uint8_t i808x_read8(void *mem, unsigned long addr)
+{
+	return i808x_do_read(addr);
+}
+
+uint16_t i808x_read16(void *mem, unsigned long addr)
+{
+	uint16_t r = i808x_do_read(addr);
+	r |= i808x_do_read(addr + 1);
+	return r;
+}
+
+
+void do_i808x_write(uint32_t addr, uint8_t val)
+{
+	if (addr >= 512 * 1024) {
+		fprintf(stderr, "W: %06X: write to ROM of %02X.\n", addr, val);
+		return;
+	}
+	ramrom[addr] = val;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W: %06X = %02X\n", addr, val);
+}
+
+void i808x_write8(void *mem, unsigned long addr, uint8_t val)
+{
+	do_i808x_write(addr, val);
+}
+
+void i808x_write16(void *mem, unsigned long addr, uint16_t val)
+{
+	do_i808x_write(addr, val);
+	do_i808x_write(addr + 1, val >> 8);
+}
+
 
 int check_chario(void)
 {
@@ -133,23 +152,13 @@ unsigned int next_char(void)
 	return c;
 }
 
-static void int_event(void)
-{
-	int c = check_chario();
-	if (c & 1)
-		z8_rx_char(cpu, next_char());
-	if (int_tx && (c & 2)) {
-		int_tx = 0;
-		z8_tx_done(cpu);
-	}
-}
-	
+/* FIXME: we really need to do the right 80C188 vectoring */
 void recalc_interrupts(void)
 {
 	if (live_irq)
-		z8_raise_irq(cpu, 0);
+		e86_irq(cpu, 0x20);
 	else
-		z8_clear_irq(cpu, 0);
+		e86_irq(cpu, 0);
 }
 
 static void int_set(int src)
@@ -417,23 +426,20 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
-/* Real time clock state machine and related state.
+/* Our port handling is 8bit wide because our bus is 8bit wide without any
+   wide transaction indications */
 
-   Give the host time and don't emulate time setting except for
-   the 24/12 hour setting.
-   
- */
-
-uint8_t z8_inport(uint8_t addr)
+static uint8_t i808x_inport(uint16_t addr)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
+		fprintf(stderr, "read %04x\n", addr);
+	addr &= 0xFF;
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
-		return my_ide_read(addr & 7);
-	if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
 		return my_ide_read(addr & 7);
 	if (addr >= 0x20 && addr <= 0x23 && ide == 2)
 		return ppide_read(ppide, addr & 3);
+	if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
+		return my_ide_read(addr & 7);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr == 0x0C && rtc)
@@ -445,15 +451,12 @@ uint8_t z8_inport(uint8_t addr)
 	return 0xFF;
 }
 
-void z8_outport(uint8_t addr, uint8_t val)
+static void i808x_outport(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %02x <- %02x\n", addr, val);
-	if (addr == 0xFF && bankhigh) {
-		mmureg = val;
-		if (trace & TRACE_512)
-			fprintf(stderr, "MMUreg set to %02X\n", val);
-	} else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
+		fprintf(stderr, "write %04x <- %02x\n", addr, val);
+	addr &= 0xFF;
+	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
 	else if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
 		my_ide_write(addr & 7, val);
@@ -461,136 +464,38 @@ void z8_outport(uint8_t addr, uint8_t val)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
-	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
-	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
-		bankreg[addr & 3] = val & 0x3F;
-		if (trace & TRACE_512)
-			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
-	} else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
-		if (trace & TRACE_512)
-			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
-		bankenable = val & 1;
-	} else if (addr == 0x0C && rtc)
+	else if (addr == 0x0C && rtc)
 		rtc_write(rtcdev, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart_16550a)
 		uart_write(&uart, addr & 0x0F, val);
-	else if (addr == 0x80) {
-		if (trace & TRACE_LED)
-			printf("[%02X]\n", val);
-	} else if (addr == 0xFD) {
+	else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-/* FIXME: emulate paging off correctly, also be nice to emulate with less
-   memory fitted */
-uint8_t z8_do_read(struct z8 *cpu, uint16_t addr, int debug)
+static uint8_t i808x_in8(void *mem, unsigned long addr)
 {
-	if (addr >> 8 == 0xFF) {
-		if (debug)
-			return 0xFF;
-		return z8_inport(addr & 0xFF);
-	}
-	if (bankhigh) {
-		uint8_t reg = mmureg;
-		uint8_t val;
-		uint32_t higha;
-		if (addr < 0xE000)
-			reg >>= 1;
-		higha = (reg & 0x40) ? 1 : 0;
-		higha |= (reg & 0x10) ? 2 : 0;
-		higha |= (reg & 0x4) ? 4 : 0;
-		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
-
-		val = ramrom[(higha << 16) + addr];
-		if (!debug && (trace & TRACE_MEM)) {
-			fprintf(stderr, "R %04X[%02X] = %02X\n",
-				(unsigned int)addr,
-				(unsigned int)higha,
-				(unsigned int)val);
-		}
-		return val;
-	} else 	if (bankenable) {
-		unsigned int bank = (addr & 0xC000) >> 14;
-		if (!debug && (trace & TRACE_MEM))
-			fprintf(stderr, "R %04x[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
-		addr &= 0x3FFF;
-		return ramrom[(bankreg[bank] << 14) + addr];
-	}
-	if (!debug && (trace & TRACE_MEM))
-		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr]);
-	return ramrom[addr];
+	return i808x_inport(addr & 0xFFFF);
 }
 
-uint8_t z8_read_data(struct z8 *cpu, uint16_t addr)
+static uint16_t i808x_in16(void *mem, unsigned long addr)
 {
-	return z8_do_read(cpu, addr, 0);
+	uint16_t r = i808x_inport(addr);
+	r |= i808x_inport(addr + 1) << 8;
+	return r;
 }
 
-uint8_t z8_read_code(struct z8 *cpu, uint16_t addr)
+static void i808x_out8(void *mem, unsigned long addr, uint8_t val)
 {
-	return z8_do_read(cpu, addr, 0);
+	i808x_outport(addr, val);
 }
 
-uint8_t z8_read_code_debug(struct z8 *cpu, uint16_t addr)
+static void i808x_out16(void *mem, unsigned long addr, uint16_t val)
 {
-	return z8_do_read(cpu, addr, 1);
-}
-
-void z8_write_data(struct z8 *cpu, uint16_t addr, uint8_t val)
-{
-	if (addr >> 8 == 0xFF) {
-		z8_outport(addr & 0xFF, val);
-		return;
-	}
-	if (bankhigh) {
-		uint8_t reg = mmureg;
-		uint8_t higha;
-		if (addr < 0xE000)
-			reg >>= 1;
-		higha = (reg & 0x40) ? 1 : 0;
-		higha |= (reg & 0x10) ? 2 : 0;
-		higha |= (reg & 0x4) ? 4 : 0;
-		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
-		
-		if (trace & TRACE_MEM) {
-			fprintf(stderr, "W %04X[%02X] = %02X\n",
-				(unsigned int)addr,
-				(unsigned int)higha,
-				(unsigned int)val);
-		}
-		if (!(higha & 8)) {
-			if (trace & TRACE_MEM)
-				fprintf(stderr, "[Discard: ROM]\n");
-			return;
-		}
-		ramrom[(higha << 16)+ addr] = val;
-	} else if (bankenable) {
-		unsigned int bank = (addr & 0xC000) >> 14;
-		if (trace & TRACE_MEM)
-			fprintf(stderr, "W %04x[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
-		if (bankreg[bank] >= 32) {
-			addr &= 0x3FFF;
-			ramrom[(bankreg[bank] << 14) + addr] = val;
-		}
-		/* ROM writes go nowhere */
-		else if (trace & TRACE_MEM)
-			fprintf(stderr, "[Discarded: ROM]\n");
-	} else {
-		if (trace & TRACE_MEM)
-			fprintf(stderr, "W: %04X = %02X\n", addr, val);
-		if (addr >= 32768 && !bank512)
-			ramrom[addr] = val;
-		else if (trace & TRACE_MEM)
-			fprintf(stderr, "[Discarded: ROM]\n");
-	}
-}
-
-void z8_write_code(struct z8 *z8, uint16_t addr, uint8_t val)
-{
-	z8_write_data(z8, addr, val);
+	i808x_outport(addr, val);
+	i808x_outport(addr + 1, val >> 8);
 }
 
 static void poll_irq_event(void)
@@ -612,7 +517,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-z8: [-1] [-b] [-B] [-e bank] [-f] [-i cfidepath] [-I ppidepath]\n             [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus-80c188: [-1] [-f] [-R] [-r rompath] [-e rombank] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -621,31 +526,15 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	int fd;
-	int rom = 1;
-	int rombank = 0;
-	char *rompath = "rc2014-z8.rom";
+	char *rompath = "rcbus-808x.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "1bBd:e:fi:I:r:Rt:w")) != -1) {
+	uart_16550a = 1;
+
+	while ((opt = getopt(argc, argv, "d:fi:I:r:Rw")) != -1) {
 		switch (opt) {
-		case '1':
-			uart_16550a = 1;
-			break;
 		case 'r':
 			rompath = optarg;
-			break;
-		case 'e':
-			rombank = atoi(optarg);
-			break;
-		case 'b':
-			bank512 = 1;
-			bankhigh = 0;
-			rom = 0;
-			break;
-		case 'B':
-			bankhigh = 1;
-			bank512 = 0;
-			rom = 0;
 			break;
 		case 'i':
 			ide = 1;
@@ -674,48 +563,16 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	if (uart_16550a == 0)
-		fprintf(stderr, "rc2014: no UART selected, defaulting to internal\n");
-
-	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
-		fprintf(stderr, "rc2014: no ROM\n");
+	fd = open(rompath, O_RDONLY);
+	if (fd == -1) {
+		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-
-	if (rom) {
-		fd = open(rompath, O_RDONLY);
-		if (fd == -1) {
-			perror(rompath);
-			exit(EXIT_FAILURE);
-		}
-		bankreg[0] = 0;
-		bankreg[1] = 1;
-		bankreg[2] = 32;
-		bankreg[3] = 33;
-		if (lseek(fd, 8192 * rombank, SEEK_SET) < 0) {
-			perror("lseek");
-			exit(1);
-		}
-		if (read(fd, ramrom, 65536) < 2048) {
-			fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
-			exit(EXIT_FAILURE);
-		}
-		close(fd);
+	if (read(fd, ramrom + 512 * 1024, 512 * 1024) < 512 * 1024) {
+		fprintf(stderr, "rcbus: short rom '%s'.\n", rompath);
+		exit(EXIT_FAILURE);
 	}
-
-	if (bank512|| bankhigh ) {
-		fd = open(rompath, O_RDONLY);
-		if (fd == -1) {
-			perror(rompath);
-			exit(EXIT_FAILURE);
-		}
-		if (read(fd, ramrom, 524288) != 524288) {
-			fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
-			exit(EXIT_FAILURE);
-		}
-		bankenable = 1;
-		close(fd);
-	}
+	close(fd);
 
 	if (ide) {
 		/* FIXME: clean up when classic cf becomes a driver */
@@ -745,6 +602,9 @@ int main(int argc, char *argv[])
 				ppide_trace(ppide, 1);
 		}
 	}
+
+	if (uart_16550a)
+		uart_init(&uart);
 
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
@@ -778,32 +638,41 @@ int main(int argc, char *argv[])
 		tcsetattr(0, TCSADRAIN, &term);
 	}
 
-	if (uart_16550a)
-		uart_init(&uart);
+	cpu = e86_new();
+	if (cpu == NULL) {
+		fprintf(stderr, "rcbus: failed to create CPU instance.\n");
+		exit(1);
+	}
+	e86_init(cpu);
+	/* FIXME: no 80C188 emulation so need to tweak emulator later */
+	e86_set_80186(cpu);
+	/* Bus interfaces */
+	e86_set_mem(cpu, NULL, i808x_read8, i808x_write8, i808x_read16, i808x_write16);
+	e86_set_prt(cpu, NULL, i808x_in8, i808x_out8, i808x_in16, i808x_out16);
+	e86_set_ram(cpu, ramrom, sizeof(ramrom));
 
-	cpu = z8_create();
-	z8_reset(cpu);
-	if (trace & TRACE_CPU)
-		z8_set_trace(cpu, 1);
+	/* Reset the CPU */	
+	e86_reset(cpu);
+
+	if (trace & TRACE_CPU) {
+//		i808x_log = stderr;
+	}
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host
 	   is loaded though */
 
+	/* We run 7372000 t-states per second */
+	/* We run 369 cycles per I/O check, do that 100 times then poll the
+	   slow stuff and nap for 5ms. */
 	while (!done) {
 		int i;
-		/* 36400 T states for base RC2014 - varies for others */
+		/* 36400 T states for base rcbus - varies for others */
 		for (i = 0; i < 100; i++) {
-			/* TODO: need to loop for the desired tstates */
-			cpu->cycles = 0;
-			while(cpu->cycles < mcycles)
-				z8_execute(cpu);
+			e86_clock(cpu, tstate_steps);
 			if (uart_16550a)
 				uart_event(&uart);
-			else {
-				int_event();
-			}
 		}
 		if (wiznet)
 			w5100_process(wiz);

@@ -216,7 +216,7 @@ uint8_t z80dis_byte_quiet(uint16_t addr)
 	return do_mem_read0(addr, 1);
 }
 
-static void rc2014_trace(unsigned unused)
+static void rcbus_trace(unsigned unused)
 {
 	static uint32_t lastpc = -1;
 	char buf[256];
@@ -726,7 +726,7 @@ int main(int argc, char *argv[])
 	cpu_z180.ioWrite = io_write;
 	cpu_z180.memRead = mem_read;
 	cpu_z180.memWrite = mem_write;
-	cpu_z180.trace = rc2014_trace;
+	cpu_z180.trace = rcbus_trace;
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle

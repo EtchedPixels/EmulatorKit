@@ -1,7 +1,7 @@
 /*
  *	Platform features
  *
- *	65C816 processor card for RC2014 with 16bit addressing and I/O at $FExx 
+ *	6502 processor card for rcbus with I/O at $FExx 
  *	Motorola 68B50
  *	IDE at 0x10-0x17 no high or control access
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
@@ -22,13 +22,12 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/select.h>
-#include <lib65816/cpu.h>
-#include <lib65816/cpuevent.h>
+#include "6502.h"
+#include "16x50.h"
 #include "acia.h"
 #include "ide.h"
-#include "rtc_bitbang.h"
 #include "6522.h"
-#include "16x50.h"
+#include "rtc_bitbang.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
@@ -39,22 +38,26 @@ static uint8_t bankenable;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 static uint8_t iopage = 0xFE;
+static uint16_t addrinvert = 0x0000;
 
-static uint16_t tstate_steps = 200;
+static uint16_t tstate_steps = 200;	/* 4MHz */
 
 /* Who is pulling on the interrupt line */
+
+static uint8_t live_irq;
 
 #define IRQ_ACIA	1
 #define IRQ_16550A	2
 #define IRQ_VIA		3
 
 static nic_w5100_t *wiz;
-struct via6522 *via;
-struct acia *acia;
-struct uart16x50 *uart;
+static struct via6522 *via;
+static struct uart16x50 *uart;
 struct rtc *rtc;
-
+static struct acia *acia;
 static int acia_narrow;
+
+static volatile int done;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
@@ -107,10 +110,21 @@ unsigned int next_char(void)
 	return c;
 }
 
-/* We do this in the 65C816 loop instead. Provide a dummy for the device models */
+/* We do this in the 6502 loop instead. Provide a dummy for the device models */
 void recalc_interrupts(void)
 {
 }
+
+static void int_set(int src)
+{
+	live_irq |= (1 << src);
+}
+
+static void int_clear(int src)
+{
+	live_irq &= ~(1 << src);
+}
+
 
 static int ide = 0;
 struct ide_controller *ide0;
@@ -142,9 +156,7 @@ void via_handshake_b(struct via6522 *via)
 {
 }
 
-
-
-uint8_t mmio_read_65c816(uint8_t addr)
+uint8_t mmio_read_6502(uint8_t addr)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
@@ -167,7 +179,7 @@ uint8_t mmio_read_65c816(uint8_t addr)
 	return 0xFF;
 }
 
-void mmio_write_65c816(uint8_t addr, uint8_t val)
+void mmio_write_6502(uint8_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
@@ -198,61 +210,66 @@ void mmio_write_65c816(uint8_t addr, uint8_t val)
 		printf("trace set to %d\n", val);
 		trace = val;
 		if (trace & TRACE_CPU)
-			CPU_setTrace(1);
+			log_6502 = 1;
 		else
-			CPU_setTrace(0);
+			log_6502 = 0;
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-/* FIXME: emulate paging off correctly, also be nice to emulate with less
-   memory fitted */
-uint8_t do_65c816_read(uint16_t addr)
+/* Support emulating 32K/32K at some point */
+uint8_t do_6502_read(uint16_t addr)
 {
+	uint16_t xaddr = addr ^ addrinvert;
 	if (bankenable) {
-		unsigned int bank = (addr & 0xC000) >> 14;
+		unsigned int bank = (xaddr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
-			fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (addr & 0x3FFF)]);
-		addr &= 0x3FFF;
-		return ramrom[(bankreg[bank] << 14) + addr];
+			fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) bankreg[bank], (unsigned int) ramrom[(bankreg[bank] << 14) + (xaddr & 0x3FFF)]);
+		xaddr &= 0x3FFF;
+		return ramrom[(bankreg[bank] << 14) + xaddr];
 	}
 	/* When banking is off the entire 64K is occupied by repeats of ROM 0 */
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[addr & 0x3FFF]);
-	return ramrom[addr & 0x3FFF];
+		fprintf(stderr, "R %04X = %02X\n", addr, ramrom[xaddr & 0x3FFF]);
+	return ramrom[xaddr & 0x3FFF];
 }
 
-uint8_t read65c816(uint32_t addr, uint8_t debug)
+uint8_t read6502(uint16_t addr)
 {
 	uint8_t r;
 
-	addr &= 0xFFFF;
-	
-	if (addr >> 8 == iopage) {
-		if (debug)
-			return 0xFF;
-		else
-			return mmio_read_65c816(addr);
-	}
-	r = do_65c816_read(addr);
+	if (addr >> 8 == iopage)
+		return mmio_read_6502(addr);
+
+	r = do_6502_read(addr);
 	return r;
 }
 
-void write65c816(uint32_t addr, uint8_t val)
+uint8_t read6502_debug(uint16_t addr)
 {
-	addr &= 0xFFFF;
+	/* Avoid side effects for debug */
+	if (addr >> 8 == iopage)
+		return 0xFF;
+
+	return do_6502_read(addr);
+}
+
+
+void write6502(uint16_t addr, uint8_t val)
+{
+	uint16_t xaddr = addr ^ addrinvert;
 
 	if (addr >> 8 == iopage) {
-		mmio_write_65c816(addr, val);
+		mmio_write_6502(addr, val);
 		return;
 	}
 	if (bankenable) {
-		unsigned int bank = (addr & 0xC000) >> 14;
+		unsigned int bank = (xaddr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W %04X[%02X] = %02X\n", (unsigned int) addr, (unsigned int) bankreg[bank], (unsigned int) val);
 		if (bankreg[bank] >= 32) {
-			addr &= 0x3FFF;
-			ramrom[(bankreg[bank] << 14) + addr] = val;
+			xaddr &= 0x3FFF;
+			ramrom[(bankreg[bank] << 14) + xaddr] = val;
 		}
 		/* ROM writes go nowhere */
 		else if (trace & TRACE_MEM)
@@ -265,50 +282,30 @@ void write65c816(uint32_t addr, uint8_t val)
 	}
 }
 
-void wdm(void)
+static void poll_irq_event(void)
 {
-}
-
-void system_process(void)
-{
-	static int n = 0;
-	static struct timespec tc;
-	/* 5ms - it's a balance between nice behaviour and simulation
-	   smoothness */
-	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
-	if (acia)
-		acia_timer(acia);
-	if (uart)
-		uart16x50_event(uart);
-	via_tick(via, 100);
-
+	if (via_irq_pending(via))
+		int_set(IRQ_VIA);
+	else
+		int_clear(IRQ_VIA);
 	if (acia) {
 		if (acia_irq_pending(acia))
-			CPU_addIRQ(IRQ_ACIA);
+			int_set(IRQ_ACIA);
 		else
-			CPU_clearIRQ(IRQ_ACIA);
+			int_clear(IRQ_ACIA);
 	}
-	if (via_irq_pending(via))
-		CPU_addIRQ(IRQ_VIA);
-	else
-		CPU_clearIRQ(IRQ_VIA);
-
 	if (uart) {
 		if (uart16x50_irq_pending(uart))
-			CPU_addIRQ(IRQ_16550A);
+			int_set(IRQ_16550A);
 		else
-			CPU_clearIRQ(IRQ_16550A);
+			int_clear(IRQ_16550A);
 	}
+}
 
-	if (n++ == 100) {
-		n = 0;
-		if (wiznet)
-			w5100_process(wiz);
-		/* Do 5ms of I/O and delays */
-		if (!fast)
-			nanosleep(&tc, NULL);
-	}
+static void irqnotify(void)
+{
+	if (live_irq)
+		irq6502();
 }
 
 static struct termios saved_term, term;
@@ -316,7 +313,7 @@ static struct termios saved_term, term;
 static void cleanup(int sig)
 {
 	tcsetattr(0, TCSADRAIN, &saved_term);
-	exit(1);
+	done = 1;
 }
 
 static void exit_cleanup(void)
@@ -326,18 +323,19 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014: [-1] [-A] [-a] [-c] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus-6502: [-1] [-A] [-a] [-f] [-i idepath] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[])
 {
+	static struct timespec tc;
 	int opt;
 	int fd;
-	char *rompath = "rc2014-65c816.rom";
+	int input = 0;	/* undefined */
+	int usertc = 0;
+	char *rompath = "rcbus-6502.rom";
 	char *idepath;
-	int input = 0;
-	int hasrtc = 0;
 
 	while ((opt = getopt(argc, argv, "1Aad:fi:r:Rw")) != -1) {
 		switch (opt) {
@@ -366,7 +364,7 @@ int main(int argc, char *argv[])
 			fast = 1;
 			break;
 		case 'R':
-			hasrtc = 1;
+			usertc = 1;
 			break;
 		case 'w':
 			wiznet = 1;
@@ -379,7 +377,7 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (input == 0) {
-		fprintf(stderr, "rc2014: no UART selected, defaulting to 16550A\n");
+		fprintf(stderr, "rcbus-6502: no UART selected, defaulting to 16550A\n");
 		input = 2;
 	}
 
@@ -389,7 +387,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, 524288) != 524288) {
-		fprintf(stderr, "rc2014: banked rom image should be 512K.\n");
+		fprintf(stderr, "rcbus-6502: banked rom image should be 512K.\n");
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
@@ -418,11 +416,10 @@ int main(int argc, char *argv[])
 		uart = uart16x50_create();
 		uart16x50_set_input(uart, 1);
 		uart16x50_trace(uart, trace & TRACE_UART);
+		uart16x50_reset(uart);
 	}
 
-	via = via_create();
-
-	if (hasrtc) {
+	if (usertc) {
 		rtc = rtc_create();
 		rtc_trace(rtc, trace & TRACE_RTC);
 	}
@@ -432,6 +429,10 @@ int main(int argc, char *argv[])
 		nic_w5100_reset(wiz);
 	}
 
+	/* 5ms - it's a balance between nice behaviour and simulation
+	   smoothness */
+	tc.tv_sec = 0;
+	tc.tv_nsec = 5000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -449,11 +450,41 @@ int main(int argc, char *argv[])
 	}
 
 	if (trace & TRACE_CPU)
-		CPU_setTrace(1);
+		log_6502 = 1;
 
-	CPUEvent_initialize();
-	CPU_setUpdatePeriod(tstate_steps);
-	CPU_reset();
-	CPU_run();
+	via = via_create();
+	via_trace(via, trace & TRACE_VIA);
+
+	init6502();
+	reset6502();
+	hookexternal(irqnotify);
+
+	/* This is the wrong way to do it but it's easier for the moment. We
+	   should track how much real time has occurred and try to keep cycle
+	   matched with that. The scheme here works fine except when the host
+	   is loaded though */
+
+	/* We run 4000000 t-states per second */
+	/* We run 200 cycles per I/O check, do that 100 times then poll the
+	   slow stuff and nap for 5ms. */
+	while (!done) {
+		int i;
+		/* 36400 T states for base rcbus - varies for others */
+		for (i = 0; i < 100; i++) {
+			/* FIXME: should check return and keep adjusting */
+			exec6502(tstate_steps);
+			if (acia)
+				acia_timer(acia);
+			if (input == 2)
+				uart16x50_event(uart);
+			via_tick(via, tstate_steps);
+		}
+		if (wiznet)
+			w5100_process(wiz);
+		/* Do 5ms of I/O and delays */
+		if (!fast)
+			nanosleep(&tc, NULL);
+		poll_irq_event();
+	}
 	exit(0);
 }

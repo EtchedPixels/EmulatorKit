@@ -29,7 +29,7 @@ struct ppide *ppide;
 struct rtc *rtcdev;
 struct uart16x50 *uart;
 
-static uint16_t tstate_steps = 369;	/* RC2014 speed (7.4MHz)*/
+static uint16_t tstate_steps = 369;	/* rcbus speed (7.4MHz)*/
 
 /* Who is pulling on the interrupt line */
 
@@ -248,7 +248,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-ns32k: [-1] [-a] [-b] [-B] [-e rombank] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-e rombank] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus-ns32k: [-1] [-a] [-b] [-B] [-e rombank] [-f] [-i idepath] [-I ppidepath] [-R] [-r rompath] [-e rombank] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -257,7 +257,7 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	int fd;
-	char *rompath = "rc2014-ns32k.rom";
+	char *rompath = "rcbus-ns32k.rom";
 	char *idepath = NULL;
 
 	while ((opt = getopt(argc, argv, "d:fi:I:r:Rw")) != -1) {
@@ -298,7 +298,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, 32768) != 32768) {
-		fprintf(stderr, "rc2014-ns32k: short rom '%s'.\n", rompath);
+		fprintf(stderr, "rcbus-ns32k: short rom '%s'.\n", rompath);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
@@ -385,7 +385,7 @@ int main(int argc, char *argv[])
 	   slow stuff and nap for 5ms. */
 	while (!done) {
 		int i;
-		/* 36400 T states for base RC2014 - varies for others */
+		/* 36400 T states for base rcbus - varies for others */
 		for (i = 0; i < 100; i++) {
 			ns32016_exec(tstate_steps);
 			uart16x50_event(uart);

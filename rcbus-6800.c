@@ -274,7 +274,7 @@ static void exit_cleanup(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"rc2014-6800: [-1] [-b] [-f] [-i path] [-R] [-r rompath] [-d debug]\n");
+		"rcbus-6800: [-1] [-b] [-f] [-i path] [-R] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -284,7 +284,7 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	unsigned int uarttype = 0;		/* ACIA */
-	char *rompath = "rc2014-6800.rom";
+	char *rompath = "rcbus-6800.rom";
 	char *idepath;
 	unsigned int cycles = 0;
 	unsigned int romsize = 32768;
@@ -325,7 +325,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, romsize) != romsize) {
-		fprintf(stderr, "rc2014-6800: short rom '%s'.\n",
+		fprintf(stderr, "rcbus-6800: short rom '%s'.\n",
 			rompath);
 		exit(EXIT_FAILURE);
 	}

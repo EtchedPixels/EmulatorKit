@@ -232,7 +232,7 @@ uint8_t z80dis_byte_quiet(uint16_t addr)
 	return do_mem_read0(addr, 1);
 }
 
-static void rc2014_trace(unsigned unused)
+static void rcbus_trace(unsigned unused)
 {
 	static uint32_t lastpc = -1;
 	char buf[256];
@@ -645,7 +645,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rc2014-z180: [-a] [-b] [-f] [-i idepath] [-P buspirate] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus-z180: [-a] [-b] [-f] [-i idepath] [-P buspirate] [-R] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -654,7 +654,7 @@ int main(int argc, char *argv[])
 	static struct timespec tc;
 	int opt;
 	int fd;
-	char *rompath = "rc2014-z180.rom";
+	char *rompath = "rcbus-z180.rom";
 	char *sdpath = NULL;
 	char *idepath = NULL;
 	char *patha = NULL, *pathb = NULL;
@@ -711,7 +711,7 @@ int main(int argc, char *argv[])
 				sdpath = NULL;
 				break;
 			}
-			fprintf(stderr, "rc2014-z180: unknown machine type '%s'.\n", optarg);
+			fprintf(stderr, "rcbus-z180: unknown machine type '%s'.\n", optarg);
 			exit(1);
 		case 'f':
 			fast = 1;
@@ -736,7 +736,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'F':
 			if (pathb) {
-				fprintf(stderr, "rc2014-z180: too many floppy disks specified.\n");
+				fprintf(stderr, "rcbus-z180: too many floppy disks specified.\n");
 				exit(1);
 			}
 			if (patha)
@@ -763,7 +763,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, ramrom, ram_base) != ram_base) {
-		fprintf(stderr, "rc2014-z180: ROM image should be %dK.\n",
+		fprintf(stderr, "rcbus-z180: ROM image should be %dK.\n",
 			ram_base >> 10);
 		exit(EXIT_FAILURE);
 	}
@@ -897,7 +897,7 @@ int main(int argc, char *argv[])
 	cpu_z180.ioWrite = io_write;
 	cpu_z180.memRead = mem_read;
 	cpu_z180.memWrite = mem_write;
-	cpu_z180.trace = rc2014_trace;
+	cpu_z180.trace = rcbus_trace;
 
 	/* We don't have a GPIO control pin on the SC126, but we do have
 	   devices that need to be wired to \RESET so emulate that with

@@ -357,7 +357,7 @@ static uint8_t z80_dma_do_run(struct z80dma *dma)
 
 /* Simulate the given number of clocks of DMA and return the number we didn't
    use that can therefore be CPU given. We don't simulate at the clock level
-   as for RC2014 it doesn't matter if we block it up a shade */
+   as for rcbus it doesn't matter if we block it up a shade */
 
 int z80_dma_run(struct z80dma *dma, int cycles)
 {

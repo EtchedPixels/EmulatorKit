@@ -9,7 +9,7 @@
  *	IDE at 0x10-0x17 no high or control access		DONE
  *	Control register at 0x38-0x3F				DONE
  *
- *	Additional optional peripherals (own and RC2014)	ABSENT
+ *	Additional optional peripherals (own and rcbus)		ABSENT
  *
  *	TODO:
  *	- debug interrupt blocking

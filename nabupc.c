@@ -871,7 +871,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (read(fd, rom, 8192) != 8192) {
-		fprintf(stderr, "rc2014: short rom '%s'.\n", rompath);
+		fprintf(stderr, "nabupc: short rom '%s'.\n", rompath);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
@@ -940,7 +940,7 @@ int main(int argc, char *argv[])
 	   slow stuff and nap for 20ms to get 50Hz on the TMS99xx */
 	while (!emulator_done) {
 		int i;
-		/* 36400 T states for base RC2014 - varies for others */
+		/* 36400 T states for base rcbus - varies for others */
 		for (i = 0; i < 50; i++) {
 			int j;
 			for (j = 0; j < 100; j++) {
