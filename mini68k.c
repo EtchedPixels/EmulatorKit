@@ -23,6 +23,8 @@
  *		0x43	rtc
  *		0x44	PPI
  *		0x48	sio	16x50
+ *	0x2x	DiskIO PPIDE
+ *	0x3x	DiskIO Floppy
  *
  *	Low 1K, 4K or 64K can be protected
  *
@@ -55,16 +57,25 @@
 #include "16x50.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
+#include "lib765/include/765.h"
+
 
 /* IDE controller */
-static struct ppide *ppide;
+static struct ppide *ppide;	/* MFPIC */
+static struct ppide *ppide2;	/* DiskIO */
 /* Serial */
 static struct uart16x50 *uart;
 /* RTC */
 static struct rtc *rtc;
 static unsigned rtc_loaded;
-
-static unsigned memsize = 512 * 1024;
+/* FDC on DiskIO */
+static FDC_PTR fdc;
+static FDRV_PTR drive_a, drive_b;
+/* 4M Memory card */
+static unsigned memsize = 512;
+static unsigned mem_4mb;
+static uint8_t m4_bank[64];
+static uint8_t m4_bankp;
 
 /* 2MB RAM */
 static uint8_t ram[0x200000];
@@ -74,6 +85,8 @@ static uint8_t rom[0x20000];
 static uint8_t u27;
 /* Config register on the MFPIC */
 static uint8_t mfpic_cfg;
+/* Memory for 4M card */
+static uint8_t mem4[4][0x100000];
 
 static int trace = 0;
 
@@ -82,6 +95,7 @@ static int trace = 0;
 #define TRACE_UART	4
 #define TRACE_PPIDE	8
 #define TRACE_RTC	16
+#define TRACE_FDC	32
 
 uint8_t fc;
 
@@ -140,10 +154,12 @@ static unsigned int irq_pending;
 
 void recalc_interrupts(void)
 {
+#if 0
 	/*  UART autovector 1 */
 	if (uart16x50_irq_pending(uart))
 		m68k_set_irq(M68K_IRQ_1);
 	else
+#endif	
 		m68k_set_irq(0);
 }
 
@@ -365,6 +381,31 @@ static unsigned rtc_remap_r(unsigned v)
 	return r;
 }
 
+/* FDC: TC not connected ? */
+static void fdc_log(int debuglevel, char *fmt, va_list ap)
+{
+	if ((trace & TRACE_FDC) || debuglevel == 0)
+		vfprintf(stderr, "fdc: ", ap);
+}
+
+static void fdc_write(uint8_t addr, uint8_t val)
+{
+	if (addr & 0x08)
+		fdc_write_dor(fdc, val);
+	else if (addr & 1)
+		fdc_write_data(fdc, val);
+}
+
+static uint8_t fdc_read(uint8_t addr)
+{
+	if (addr & 0x08)
+		return fdc_read_dir(fdc);
+	else if (addr & 1)
+		return fdc_read_data(fdc);
+	else
+		return fdc_read_ctrl(fdc);
+}
+
 /* Read data from RAM, ROM, or a device */
 unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 {
@@ -386,6 +427,16 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 		else
 			return 0xFF;
 	}
+	if (address < 0x30000) {
+		if (mem_4mb) {
+			unsigned r = (address >> 14) & 0x3F;
+			r = m4_bank[r];
+			if (r == 0xFF)
+				return 0xFF;
+			return mem4[m4_bank[r]][address & 0x3FFF];
+		}
+		return 0xFF;
+	}
 	if (address < 0x380000)
 		return 0xFF;
 	if (address < 0x3F0000)
@@ -395,6 +446,10 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 	if (debug)
 		return 0xFF;
 	address &= 0xFFFF;
+	if ((address & 0xF0) == 0x20)
+		return ppide_read(ppide2, address & 0x03);
+	if ((address & 0xF0) == 0x30)
+		return fdc_read(address);
 	switch(address & 0xFF) {
 	case 0x40:
 		return ns202_read(address);
@@ -470,13 +525,37 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		ram[address] = value;
 		return;
 	}
+	if (address >= 0x30000 && address <= 0x380000 && mem_4mb) {
+		unsigned r = (address >> 14) & 0x3F;
+		r = m4_bank[r];
+		if (r == 0xFF)
+			return;
+		mem4[r][address & 0x3FFF] = value;
+		return;
+	}
 	if (address < 0x3F0000) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr,  "%06x: write to invalid space.\n", address);
 		return;
 	}
 	address &= 0xFF;
+	if ((address & 0xF0) == 0x20) {
+		ppide_write(ppide2, address & 0x03, value);
+		return;
+	}
+	if ((address & 0xF0) == 0x30) {
+		fdc_write(address, value);
+		return;
+	}
 	switch(address) {
+	/* 4MEM : 00 for now*/
+	case 0x00:
+		m4_bankp = value;
+		return;
+	case 0x01:
+		m4_bank[m4_bankp] = value;
+		return;
+	/* MFPIC */
 	case 0x40:
 		ns202_write(address, value);
 		return;
@@ -548,6 +627,7 @@ static void device_init(void)
 	ppide_reset(ppide);
 	uart16x50_reset(uart);
 	uart16x50_set_input(uart, 1);
+	u27 = 0;
 }
 
 static struct termios saved_term, term;
@@ -587,7 +667,7 @@ void cpu_set_fc(int fc)
 
 void usage(void)
 {
-	fprintf(stderr, "mini68k: [-0][-1][-2][-e][-m memsize][-r rompath][-i idepath][-d debug].\n");
+	fprintf(stderr, "mini68k: [-0][-1][-2][-e][-m memsize][-r rompath][-i idepath][-I idepath] [-d debug].\n");
 	exit(1);
 }
 
@@ -599,8 +679,11 @@ int main(int argc, char *argv[])
 	int opt;
 	const char *romname = "mini-128.rom";
 	const char *diskname = NULL;
+	const char *diskname2 = NULL;
+	const char *patha = NULL;
+	const char *pathb = NULL;
 
-	while((opt = getopt(argc, argv, "012d:efi:m:r:")) != -1) {
+	while((opt = getopt(argc, argv, "012d:efi:m:r:A:B:I:")) != -1) {
 		switch(opt) {
 		case '0':
 			cputype = M68K_CPU_TYPE_68000;
@@ -629,6 +712,15 @@ int main(int argc, char *argv[])
 		case 'r':
 			romname = optarg;
 			break;
+		case 'A':
+			patha = optarg;
+			break;
+		case 'B':
+			pathb = optarg;
+			break;
+		case 'I':
+			diskname2 = optarg;
+			break;
 		default:
 			usage();
 		}
@@ -654,6 +746,7 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+	memsize <<= 10;	/* In KiB for friendlyness */
 	if (memsize & 0x7FFFF) {
 		fprintf(stderr, "%s: RAM must be a multiple of 512K blocks.\n",
 			argv[0]);
@@ -692,6 +785,21 @@ int main(int argc, char *argv[])
 	}
 	ppide_trace(ppide, trace & TRACE_PPIDE);
 
+	ppide2 = ppide_create("hd1");
+	ppide_reset(ppide2);
+	if (diskname2) {
+		fd = open(diskname2, O_RDWR);
+		if (fd == -1) {
+			perror(diskname2);
+			exit(1);
+		}
+		if (ppide2 == NULL)
+			exit(1);
+		if (ppide_attach(ppide2, 0, fd))
+			exit(1);
+	}
+	ppide_trace(ppide2, trace & TRACE_PPIDE);
+
 	uart = uart16x50_create();
 	if (trace & TRACE_UART)
 		uart16x50_trace(uart, 1);
@@ -701,6 +809,34 @@ int main(int argc, char *argv[])
 	rtc_trace(rtc, trace & TRACE_RTC);
 	rtc_load(rtc, "mini68k.nvram");
 	rtc_loaded = 1;
+
+	fdc = fdc_new();
+
+	lib765_register_error_function(fdc_log);
+
+	if (patha) {
+		drive_a = fd_newdsk();
+		fd_settype(drive_a, FD_35);
+		fd_setheads(drive_a, 2);
+		fd_setcyls(drive_a, 80);
+		fdd_setfilename(drive_a, patha);
+	} else
+		drive_a = fd_new();
+
+	if (pathb) {
+		drive_b = fd_newdsk();
+		fd_settype(drive_a, FD_35);
+		fd_setheads(drive_a, 2);
+		fd_setcyls(drive_a, 80);
+		fdd_setfilename(drive_a, pathb);
+	} else
+		drive_b = fd_new();
+
+	fdc_reset(fdc);
+	fdc_setisr(fdc, NULL);
+
+	fdc_setdrive(fdc, 0, drive_a);
+	fdc_setdrive(fdc, 1, drive_b);
 
 	m68k_init();
 	m68k_set_cpu_type(cputype);
@@ -713,6 +849,7 @@ int main(int argc, char *argv[])
 		/* Approximate a 68008 */
 		m68k_execute(400);
 		uart16x50_event(uart);
+		ns202_tick(800);
 		if (!fast)
 			take_a_nap();
 	}
