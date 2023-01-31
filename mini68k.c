@@ -31,13 +31,8 @@
  *	WIP
  *	TODO
  *	- Correct(ish) speeds
- *	- Emulate the ns202 timer
  *	- Emulate the ns202 interrupt delivery
  *	- Finish the ns202 register model
- *	- Work out why PPIDE isn't being detected
- *	- Clock and nvram emulation isn't right somewhere
- *	- Look if there is other hardware we should emulate
- *	  (eg the 4M card)
  */
 
 #include <stdio.h>
@@ -173,8 +168,10 @@ int cpu_irq_ack(int level)
 
 struct ns32202 {
 	uint8_t reg[32];
-	unsigned pri;
 	uint16_t ct_l, ct_h;
+	unsigned live;
+	unsigned irq;
+#define NO_INT	0xFF
 };
 
 #define R_HVCT	0
@@ -197,23 +194,131 @@ struct ns32202 {
 #define R_CSV	24
 #define R_CCV	28
 
-
 struct ns32202 ns202;
+
+/* Bitop helpers for reg pairs */
+static int ns202_top16(unsigned r)
+{
+	unsigned v = ns202.reg[r] | (ns202.reg[r+1] << 8);
+	unsigned n = 15;
+	while (n >= 0) {
+		if (v & (1 << n))
+			return n;
+		n--;
+	}
+	return -1;
+}
+
+static unsigned ns202_test16(unsigned r, unsigned n)
+{
+	if (n >= 8)
+		return !!(ns202.reg[r + 1] & (1 << (n - 8)));
+	return !!(ns202.reg[r] & (1 << n));
+}
+
+static void ns202_set16(unsigned r, unsigned n)
+{
+	if (n >= 8)
+		ns202.reg[r + 1] |= 1 << (n - 8);
+	else
+		ns202.reg[r] |= 1 << n;
+}
+
+static void ns202_clear16(unsigned r, unsigned n)
+{
+	if (n >= 8)
+		ns202.reg[r + 1] &= ~(1 << (n - 8));
+	else
+		ns202.reg[r] &= ~(1 << n);
+}
+
+/* TODO - rotating priority */
+static int ns202_hipri(void)
+{
+	unsigned  n = 15;
+	while(n >= 0) {
+		if (ns202_test16(R_IPND, n) && !ns202_test16(R_IMSK, n))
+			return n;
+		n--;
+	}
+	return -1;
+}
+
+/* Find the highest interrupt priority and if it is higher than the
+   current highest priority then set irq and remember it
+   TODO: set HSRV ?? */
+static void ns202_compute_int(void)
+{
+	/* Find the highest interrupt that isn't masked */
+	int n = ns202_hipri();
+	int t = ns202_top16(R_ISRV);
+	if (n == -1)
+		return;
+	/* TODO: rotating mode */
+	if (ns202.live != NO_INT && n > t) {
+		/* We have a new winner for topmost interrupt */
+		ns202.irq = 1;
+		ns202.live = n;
+		ns202.reg[R_HVCT] &= 0x0F;
+		ns202.reg[R_HVCT] |= n;
+	}
+}
+
+/* We had int raised (hopefully) and the CPU acked it */
+static void ns202_int_ack(void)
+{
+	/* The IPND for the active interrupt is cleared, the corresponding
+	   bit in the ISRV is set. We don't model cascaded ICU */
+	ns202_clear16(R_IPND, ns202.live);
+	ns202_set16(R_ISRV, ns202.live);
+	/* And the interrupt is dropped */
+	ns202.irq = 0;
+	/* Check if there isn't now a higher priority into to interrupt the
+	   interrupt */
+	ns202_compute_int();
+}
+
+/* RETI or equivalent occurred. */
+static void ns202_clear_int(void)
+{
+	unsigned live = ns202.live;
+	if (live == NO_INT)
+		return;
+	ns202.reg[R_HVCT] |= 0x0F;
+	/* Clear the live interrupt in ISRV */
+	ns202_clear16(R_ISRV, live);
+	ns202.live = NO_INT;
+	/* Check if there is anything pending to cause a next interrupt */
+	ns202_compute_int();
+}
 
 /* TODO: emulate mis-setting 8 v 16bit mode */
 unsigned int ns202_read(unsigned int address)
 {
 	unsigned ns32_reg = (address >> 8) & 0x1F;
-//	unsigned ns32_sti = (address >> 8) & 0x20;
+	unsigned ns32_sti = (address >> 8) & 0x20;
 
 	switch(ns32_reg) {
 	case R_HVCT:
-//		ns202_clear_int(ns32_sti);
-//		ns32_hvct_recalc();
+		/* INTA or RETI cycle */
+		if (ns32_sti)	/* RETI */
+			ns202_clear_int();
+		else		/* INTA */
+			ns202_int_ack();
+		if (ns32_sti)
+			return ns202.reg[R_HVCT]|0x0F;
 		return ns202.reg[R_HVCT];
 	case R_SVCT:
 //		ns32_hvct_recalc();
 		return ns202.reg[R_HVCT];
+	case R_FPRT:
+		if (ns202.reg[R_FPRT] < 8)
+			return 1 << ns202.reg[R_FPRT];
+		return 0;
+	case R_FPRT + 1:
+		if (ns202.reg[R_FPRT] >= 8)
+			return 1 << (ns202.reg[R_FPRT] - 8);
+		return 0;
 	case R_CCV:
 	case R_CCV + 1:
 	case R_CCV + 2:
@@ -229,10 +334,10 @@ unsigned int ns202_read(unsigned int address)
 	case R_IPND + 1:
 	case R_CSRC:
 	case R_CSRC + 1:
+	case R_ISRV:
+	case R_ISRV + 1:
 	case R_IMSK:
 	case R_IMSK + 1:
-	case R_FPRT:
-	case R_FPRT + 1:
 	case R_MCTL:
 	case R_OCASN:
 	case R_CIPTR:
@@ -258,7 +363,6 @@ void ns202_write(unsigned int address, unsigned int value)
 
 	switch(ns32_reg) {
 	case R_HVCT:
-		ns202.reg[R_HVCT] = value;
 		break;
 	case R_SVCT:
 		ns202.reg[R_HVCT] &= 0x0F;
@@ -269,8 +373,7 @@ void ns202_write(unsigned int address, unsigned int value)
 	case R_IPND + 1:
 		break;
 	case R_FPRT:
-		value &= 0x0F;
-		/* TODO special processing */
+		ns202.reg[R_FPRT] = value & 0x0F;
 		break;
 	case R_FPRT + 1:
 		/* Not writeable */
@@ -300,6 +403,8 @@ void ns202_write(unsigned int address, unsigned int value)
 	case R_TPR + 1:
 	case R_ELTG:
 	case R_ELTG + 1:
+	case R_ISRV:
+	case R_ISRV + 1:
 	case R_IMSK:
 	case R_IMSK + 1:
 	case R_CSRC:
@@ -318,10 +423,7 @@ void ns202_write(unsigned int address, unsigned int value)
 	default:
 		ns202.reg[ns32_reg] = value;
 	}
-}
-
-void ns202_tick(unsigned clocks)
-{
+	ns202_compute_int();
 }
 
 void ns202_raise(unsigned irq)
@@ -331,10 +433,82 @@ void ns202_raise(unsigned irq)
 	if (ns202.reg[R_MCTL] & 0x08)	/* FRZ */
 		return;
 	ns202.reg[R_IPND + ir] |= ib;
+	ns202_compute_int();
 }
 
-void ns202_clear(unsigned irq)
+void ns202_counter(void)
 {
+	uint8_t cctl = ns202.reg[R_CCTL];
+	uint8_t cictl = ns202.reg[R_CICTL];
+	/* Split clocks, low enabled */
+	if ((cctl & 0x84) == 0x04) {
+		/* Low counter decrement */
+		ns202.ct_l--;
+		if (ns202.ct_l == 0) {
+			if (cictl & 0x04)
+				cictl |= 0x08;
+			else
+				cictl |= 0x04;
+			ns202.ct_l = ns202.reg[R_CCV];
+			ns202.ct_l |= ns202.reg[R_CCV + 1] << 8;
+		}
+	}
+	if ((cctl & 0x88) == 0x08) {
+		/* High counter decrement */
+		ns202.ct_h--;
+		if (ns202.ct_h == 0) {
+			if (cictl & 0x40)
+				cictl |= 0x80;
+			else
+				cictl |= 0x40;
+			ns202.ct_h = ns202.reg[R_CCV + 2];
+			ns202.ct_h |= ns202.reg[R_CCV + 3] << 8;
+		}
+	}
+	ns202.reg[R_CICTL] = cictl;
+	if ((cctl & 0x88) == 0x88) {
+		/* 32bit decrement */
+		if (ns202.ct_l == 0) {
+			ns202.ct_h--;
+			if (ns202.ct_h == 0) {
+				if (cictl & 0x40)
+					cictl |= 0x80;
+				else
+					cictl |= 0x40;
+				ns202.ct_l = ns202.reg[R_CCV];
+				ns202.ct_l |= ns202.reg[R_CCV + 1] << 8;
+				ns202.ct_h = ns202.reg[R_CCV + 2];
+				ns202.ct_h |= ns202.reg[R_CCV + 3] << 8;
+			}
+		}
+		ns202.ct_l--;
+	}
+	/* Raise interrupts as needed */
+	if ((cictl & 0x60) == 0x60) {
+		ns202_raise(ns202.reg[R_CIPTR] >> 4);
+	}
+	if ((cictl & 0x06) == 0x06) {
+		ns202_raise(ns202.reg[R_CIPTR] & 0x0F);
+	}
+}
+
+void ns202_tick(unsigned clocks)
+{
+	static unsigned dclock;
+	unsigned scale = (ns202.reg[R_CCTL] & 0x40) ? 4 : 1;
+
+	dclock += clocks;
+	while (dclock >= scale) {
+		dclock -= scale;
+		ns202_counter();
+	}
+	/* Update LCCV/HCCV if we should do so */
+	if (!(ns202.reg[R_MCTL] & 0x80)) {	/* CFRZ */
+		ns202.reg[28] = ns202.ct_l;
+		ns202.reg[29] = ns202.ct_l >> 8;
+		ns202.reg[30] = ns202.ct_h;
+		ns202.reg[31] = ns202.ct_h >> 8;
+	}
 }
 
 void ns202_reset(void)
