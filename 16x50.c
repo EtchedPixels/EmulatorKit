@@ -24,6 +24,7 @@ struct uart16x50 {
 #define TEMT	2
 #define MODEM	8
     uint8_t irqline;
+    unsigned clock;
     int trace;
     int input;
 };
@@ -99,8 +100,8 @@ static void show_settings(struct uart16x50 *uptr)
 
     baud = uptr->ls + (uptr->ms << 8);
     if (baud == 0)
-        baud = 1843200;
-    baud = 1843200 / baud;
+        baud = uptr->clock;
+    baud = uptr->clock / baud;
     baud /= 16;
 
     fprintf(stderr, "[%d:%d", baud, (uptr->lcr &3) + 5);
@@ -291,8 +292,14 @@ struct uart16x50 *uart16x50_create(void)
 		exit(1);
 	}
 	memset(d, 0, sizeof(*d));
+	d->clock = 1843200;	/* Usual default */
 	uart16x50_reset(d);
 	return d;
+}
+
+void uart16x50_set_clock(struct uart16x50 *d, unsigned clock)
+{
+        d->clock = clock;
 }
 
 void uart16x50_free(struct uart16x50 *d)
