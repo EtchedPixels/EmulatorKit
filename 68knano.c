@@ -36,6 +36,7 @@ static int trace = 0;
 #define TRACE_MEM	1
 #define TRACE_CPU	2
 #define TRACE_UART	4
+#define TRACE_RTC	8
 
 uint8_t fc;
 
@@ -106,24 +107,27 @@ void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 	/* RTS is the LED - again we don't care until we add SD */
 	/* OUT2 is nSS - but inverted */
 	if (delta & MCR_OUT2)
-		ds3234_spi_cs(ds3234, !!(mcr & MCR_OUT2));
+		ds3234_spi_cs(ds3234, !(mcr & MCR_OUT2));
 	/* OUT1 is the SPI clock */
 	if (delta & MCR_OUT1) {
 		if (mcr & MCR_OUT1) {
+			/* Falling edge as sen by SPI. Values change */
 			/* Load */
-			msr_lines &= ~MSR_DSR;
+			msr_lines &= ~MSR_DCD;
 			/* Inverted signal */
 			if (!(txbyte & 0x80))
-				msr_lines |= MSR_DSR;
+				msr_lines |= MSR_DCD;
+			txbyte <<= 1;
+			fprintf(stderr, "spi: clock fall - MSR %02x\n", msr_lines);
 			uart16x50_signal_event(uart, msr_lines);
 		} else {
-			/* Sample */
+			/* Rising edge: Values sample */
 			rxbyte <<= 1;
 			rxbyte |= !(mcr & MCR_DTR);
-			txbyte <<= 1;
 			bitcount++;
+			fprintf(stderr, "spi: clock rise - MCR %02x\n", mcr);
 			if (bitcount == 8) {
-				rxbyte = ds3234_spi_rxtx(ds3234, txbyte);
+				txbyte = ds3234_spi_rxtx(ds3234, rxbyte);
 				bitcount = 0;
 			}
 		}
@@ -430,6 +434,7 @@ int main(int argc, char *argv[])
 		uart16x50_trace(uart, 1);
 
 	ds3234 = ds3234_create();
+	ds3234_trace(ds3234, trace & TRACE_RTC);
 
 	m68k_init();
 	m68k_set_cpu_type(cputype);
