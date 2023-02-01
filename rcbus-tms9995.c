@@ -141,6 +141,11 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
+
 static uint8_t tms9995_do_inport(uint8_t addr)
 {
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)

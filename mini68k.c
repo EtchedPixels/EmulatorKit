@@ -580,6 +580,11 @@ static uint8_t fdc_read(uint8_t addr)
 		return fdc_read_ctrl(fdc);
 }
 
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
+
 /* Read data from RAM, ROM, or a device */
 unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 {

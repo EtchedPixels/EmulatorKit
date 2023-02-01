@@ -125,6 +125,11 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
+
 /*
  *	6522 VIA support - we don't do anything with the pins on the VIA
  *	right now

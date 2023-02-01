@@ -155,6 +155,11 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
+
 /* Clock timer 3 off timer 2 */
 void m6840_output_change(struct m6840 *m, uint8_t outputs)
 {

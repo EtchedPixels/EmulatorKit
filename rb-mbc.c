@@ -217,6 +217,11 @@ unsigned int next_char(void)
     return c;
 }
 
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
+
 static uint8_t io_read(int unused, uint16_t addr)
 {
     if (trace & TRACE_IO)

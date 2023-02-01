@@ -105,6 +105,12 @@ void recalc_interrupts(void)
 		m6800_clear_interrupt(&cpu, IRQ_IRQ1);
 }
 
+
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
+
 /* Not relevant for 6800 */
 
 void m6800_sci_change(struct m6800 *cpu)

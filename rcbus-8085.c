@@ -131,7 +131,6 @@ uint8_t i8085_read(uint16_t addr)
 	return i8085_do_read(addr);
 }
 
-
 void i8085_write(uint16_t addr, uint8_t val)
 {
 	if (bankhigh) {
@@ -261,12 +260,10 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 	ide_write8(ide0, addr, val);
 }
 
-/* Real time clock state machine and related state.
-
-   Give the host time and don't emulate time setting except for
-   the 24/12 hour setting.
-   
- */
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
 
 uint8_t i8085_inport(uint8_t addr)
 {
