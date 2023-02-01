@@ -13,6 +13,7 @@ struct ds3234 {
 	uint8_t ar;
 	uint8_t srptr;
 	unsigned state;
+	unsigned cs;
 	struct tm *tm;
 	int trace;
 };
@@ -39,7 +40,6 @@ static uint8_t ds3234_regread(struct ds3234 *rtc, uint8_t reg)
 		if (!rtc->clock24) {
 			if (rtc->tm->tm_hour > 11)
 				val |= 0x20;
-			val |= 0x80;
 		}
 		break;
 	case 3:
@@ -92,27 +92,64 @@ static void ds3234_regwrite(struct ds3234 *rtc, uint8_t reg, uint8_t val)
 
 uint8_t ds3234_spi_rxtx(struct ds3234 *rtc, uint8_t val)
 {
+	/* Not selected */
+	if (rtc->cs)
+		return 0xFF;
+	/* Waiting command */
 	if (rtc->state == 0) {
+		if (rtc->trace)
+			fprintf(stderr, "ds3234: command %02X\n", val);
 		rtc->ar = val;
 		rtc->state = 1;
-		return 0xFF;
+		if (rtc->ar & 0x80)
+			return 0xFF;
+		/* Fall through and reply with data */
+	} else {
+		/* Repeated operations increment the pointer from 0-0x13
+		   and then it wraps. In the high space it reaches 0x19
+		   and then stops there for NVRAM bursts */
+		if ((rtc->ar & 0x7F) == 0x13)
+			rtc->ar &= 0x80;
+		else if ((rtc->ar & 0x7F) != 0x19)
+			rtc->ar++;
 	}
+	/* Read or write */
 	if (rtc->ar & 0x80) {
+		if (rtc->trace)
+			fprintf(stderr, "ds3234: write %02X\n", val);
 		ds3234_regwrite(rtc, rtc->ar & 0x7F, val);
 		return 0xFF;
-	} else
-		return ds3234_regread(rtc, rtc->ar);
+	} else {
+		uint8_t r = ds3234_regread(rtc, rtc->ar);
+		if (rtc->trace)
+			fprintf(stderr, "ds3234: input (discarded) %02X read %02X\n", val, r);
+		return r;
+	}
 }
 
 void ds3234_spi_cs(struct ds3234 *rtc, unsigned cs)
 {
-	if (cs)
+	/* Low at command start */
+	if (rtc->cs && !cs) {
+		if (rtc->trace)
+			fprintf(stderr, "ds3234: CS goes low, latch time.\n");
+		time_t t;
+		time(&t);
+		rtc->tm = gmtime(&t);
+	}
+	if (cs) {
+		if (rtc->trace)
+			fprintf(stderr, "ds3234: CS goes high.\n");
 		rtc->state = 0;
+	}
+	rtc->cs = cs;
 }
 
 void ds3234_reset(struct ds3234 *rtc)
 {
 	memset(rtc, 0, sizeof(struct ds3234));
+	rtc->cs = 1;
+	rtc->clock24 = 1;
 }
 
 struct ds3234 *ds3234_create(void)
