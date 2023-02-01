@@ -99,14 +99,14 @@ void recalc_interrupts(void)
 
 int cpu_irq_ack(int level)
 {
-	/* TODO */
-	return M68K_INT_ACK_SPURIOUS;
+	return M68K_INT_ACK_AUTOVECTOR;
 }
 
 /* Read data from RAM, ROM, or a device */
 unsigned int do_cpu_read_byte(unsigned int address, unsigned int trap)
 {
 	address &= 0xFFFFFF;
+	uint16_t r;
 	switch(address >> 20 ) {
 	case 0x00:	/* ROM */
 	case 0x02:
@@ -114,7 +114,10 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned int trap)
 	case 0x08:	/* Open bus */
 		return 0xFF;
 	case 0x09:
-		return ide_read8(ide, (address & 0x1E) >> 1);
+		r = ide_read16(ide, (address & 0x0E) >> 1);
+		if (!(address & 1))
+			r >>= 8;
+		return r;
 	case 0x0A:
 		return uart16x50_read(uart, (address & 0x1E) >> 1);
 	case 0x0C:
@@ -140,6 +143,10 @@ unsigned int cpu_read_byte(unsigned int address)
 
 unsigned int do_cpu_read_word(unsigned int address, unsigned int trap)
 {
+	/* Special case the ide as it matters */
+	if ((address & 0xF00000) == 0x900000) {
+		return ide_read16(ide, (address & 0x0E) >> 1);
+	}
 	return (do_cpu_read_byte(address, trap) << 8) | do_cpu_read_byte(address + 1, trap);
 }
 
@@ -169,7 +176,7 @@ unsigned int cpu_read_long_dasm(unsigned int address)
 void cpu_write_byte(unsigned int address, unsigned int value)
 {
 	address &= 0xFFFFFF;
-	switch(address >> 20 ) {
+	switch(address >> 20) {
 	case 0x00:	/* ROM */
 	case 0x02:
 		if (trace & TRACE_MEM)
@@ -178,7 +185,9 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 	case 0x08:	/* Open bus */
 		return;
 	case 0x09:
-		ide_write8(ide, (address & 0x1E) >> 1, value);
+		if (!(address & 1))
+			value >>= 8;
+		ide_write16(ide, (address & 0x0E) >> 1, value);
 		return;
 	case 0x0A:
 		uart16x50_write(uart, (address & 0x1E) >> 1, value);
@@ -200,6 +209,11 @@ void cpu_write_word(unsigned int address, unsigned int value)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "WW %06X <- %04X\n", address, value);
 
+	/* Special case the ide as it matters */
+	if ((address & 0xF00000) == 0x900000) { 
+		ide_write16(ide, (address & 0x0E) >> 1, value);
+		return;
+	}
 	cpu_write_byte(address, value >> 8);
 	cpu_write_byte(address + 1, value & 0xFF);
 }
@@ -377,6 +391,7 @@ int main(int argc, char *argv[])
 		   testing this stuff */
 		m68k_execute(1000);
 		uart16x50_event(uart);
+		recalc_interrupts();
 		if (!fast)
 			take_a_nap();
 	}
