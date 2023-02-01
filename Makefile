@@ -6,7 +6,7 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	rcbus-80c188 rcbus-8085 rcbus-z8 rcbus-z180 rbcv2 searle linc80 \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
-	littleboard
+	littleboard mini68k
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2 vz300
 
@@ -125,8 +125,8 @@ tiny68k: tiny68k.o ide.o duart.o m68k/lib68k.a
 tiny68k.o: tiny68k.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c tiny68k.c
 
-68knano: 68knano.o ide.o 16x50.o m68k/lib68k.a
-	cc -g3 68knano.o ide.o 16x50.o m68k/lib68k.a -o 68knano
+68knano: 68knano.o ide.o 16x50.o ds3234.o m68k/lib68k.a
+	cc -g3 68knano.o ide.o 16x50.o ds3234.o m68k/lib68k.a -o 68knano
 
 68knano.o: 68knano.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c 68knano.c

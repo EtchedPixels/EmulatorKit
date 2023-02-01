@@ -17,12 +17,16 @@
 #include <unistd.h>
 #include <m68k.h>
 #include "16x50.h"
+#include "ds3234.h"
 #include "ide.h"
 
 /* IDE controller */
 static struct ide_controller *ide;
 /* Serial */
 static struct uart16x50 *uart;
+/* RTC */
+static struct ds3234 *ds3234;
+
 /* 1MB RAM */
 static uint8_t ram[0x100000];
 /* 64K ROM */
@@ -84,6 +88,54 @@ unsigned int next_char(void)
 		return 0xFF;
 	}
 	return c;
+}
+
+static uint8_t msr_lines;
+
+/* The output modem lines may have shifted */
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	static uint8_t last_mcr;
+	static uint8_t rxbyte, txbyte;
+	static uint8_t bitcount;
+	uint8_t delta = last_mcr ^ mcr;
+	last_mcr = mcr;
+
+	/* Work out what this did to the SPI */
+	/* DTR is MOSI - we don't care about it directly */
+	/* RTS is the LED - again we don't care until we add SD */
+	/* OUT2 is nSS - but inverted */
+	if (delta & MCR_OUT2)
+		ds3234_spi_cs(ds3234, !!(mcr & MCR_OUT2));
+	/* OUT1 is the SPI clock */
+	if (delta & MCR_OUT1) {
+		if (mcr & MCR_OUT1) {
+			/* Load */
+			msr_lines &= ~MSR_DSR;
+			/* Inverted signal */
+			if (!(txbyte & 0x80))
+				msr_lines |= MSR_DSR;
+			uart16x50_signal_event(uart, msr_lines);
+		} else {
+			/* Sample */
+			rxbyte <<= 1;
+			rxbyte |= !(mcr & MCR_DTR);
+			txbyte <<= 1;
+			bitcount++;
+			if (bitcount == 8) {
+				rxbyte = ds3234_spi_rxtx(ds3234, txbyte);
+				bitcount = 0;
+			}
+		}
+	}
+}
+
+/* We model this as if the clock is always on. Should really be checking
+   the DS3234 state etc */
+static void sqw_toggle(void)
+{
+	msr_lines ^= MSR_DSR;
+	uart16x50_signal_event(uart, msr_lines);
 }
 
 static unsigned int irq_pending;
@@ -377,6 +429,8 @@ int main(int argc, char *argv[])
 	if (trace & TRACE_UART)
 		uart16x50_trace(uart, 1);
 
+	ds3234 = ds3234_create();
+
 	m68k_init();
 	m68k_set_cpu_type(cputype);
 	m68k_pulse_reset();
@@ -385,14 +439,19 @@ int main(int argc, char *argv[])
 	device_init();
 
 	while (1) {
-		/* A 10MHz 68000 should do 1000 cycles per 1/10000th of a
-		   second. We do a blind 0.01 second sleep so we are actually
-		   emulating a bit under 10Mhz - which will do fine for
-		   testing this stuff */
-		m68k_execute(1000);
-		uart16x50_event(uart);
-		recalc_interrupts();
-		if (!fast)
-			take_a_nap();
+		unsigned n = 0;
+		while(n++ < 5000) {
+			/* A 10MHz 68000 should do 1000 cycles per 1/10000th of a
+			   second. We do a blind 0.01 second sleep so we are actually
+			   emulating a bit under 10Mhz - which will do fine for
+			   testing this stuff */
+			m68k_execute(1000);
+			uart16x50_event(uart);
+			recalc_interrupts();
+			if (!fast)
+				take_a_nap();
+		}
+		/* Toggle SQW at 1Hz (so two toggles a second) */
+		sqw_toggle();
 	}
 }
