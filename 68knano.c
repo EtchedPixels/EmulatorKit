@@ -1,6 +1,8 @@
 /*
- *	Emulator for Matt Sarnoff's 68K nano. Does not currently emulate the
- *	bitbang SPI RTC
+ *	Emulator for Matt Sarnoff's 68Knano.
+ *
+ *	We emulate at about 10MHz. The serial doesn't actually care
+ *	about real baud rates.
  */
 #include <stdio.h>
 #include <stdint.h>
@@ -118,14 +120,16 @@ void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 			if (!(txbyte & 0x80))
 				msr_lines |= MSR_DCD;
 			txbyte <<= 1;
-			fprintf(stderr, "spi: clock fall - MSR %02x\n", msr_lines);
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "spi: clock fall - MSR %02x\n", msr_lines);
 			uart16x50_signal_event(uart, msr_lines);
 		} else {
 			/* Rising edge: Values sample */
 			rxbyte <<= 1;
 			rxbyte |= !(mcr & MCR_DTR);
 			bitcount++;
-			fprintf(stderr, "spi: clock rise - MCR %02x\n", mcr);
+			if (trace & TRACE_RTC)
+				fprintf(stderr, "spi: clock rise - MCR %02x\n", mcr);
 			if (bitcount == 8) {
 				txbyte = ds3234_spi_rxtx(ds3234, rxbyte);
 				bitcount = 0;
@@ -432,6 +436,7 @@ int main(int argc, char *argv[])
 	uart = uart16x50_create();
 	if (trace & TRACE_UART)
 		uart16x50_trace(uart, 1);
+	uart16x50_set_clock(uart, 12000000);
 
 	ds3234 = ds3234_create();
 	ds3234_trace(ds3234, trace & TRACE_RTC);
@@ -446,11 +451,11 @@ int main(int argc, char *argv[])
 	while (1) {
 		unsigned n = 0;
 		while(n++ < 5000) {
-			/* A 10MHz 68000 should do 1000 cycles per 1/10000th of a
+			/* A 12MHz 68000 should do 12000 cycles per 1/10000th of a
 			   second. We do a blind 0.01 second sleep so we are actually
-			   emulating a bit under 10Mhz - which will do fine for
+			   emulating a bit under 12Mhz - which will do fine for
 			   testing this stuff */
-			m68k_execute(1000);
+			m68k_execute(1200);
 			uart16x50_event(uart);
 			recalc_interrupts();
 			if (!fast)
