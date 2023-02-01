@@ -175,6 +175,7 @@ void uart16x50_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
         break;
     case 4:	/* MCR */
         uptr->mcr = val & 0x3F;
+        uart16x50_signal_change(uptr, uptr->mcr);
         show_settings(uptr);
         break;
     case 5:	/* LSR (r/o) */
@@ -248,6 +249,22 @@ void uart16x50_dsr_timer(struct uart16x50 *uart16x50)
     uart16x50->msr ^= 0x20;	/* DSR toggles */
     uart16x50->msr |= 0x02;	/* DSR delta */
     uart16x50_interrupt(uart16x50, MODEM);
+}
+
+/* Model specific signal changes */
+void uart16x50_signal_event(struct uart16x50 *uart16x50, uint8_t msr)
+{
+    uint8_t delta = msr & uart16x50->msr;
+    if (delta) {
+        unsigned n;
+        for(n = 4; n < 7; n++) {
+            if (delta & (1 << n))
+                uart16x50->msr |= (1 << (n - 4));
+        }
+        uart16x50->msr &= 0x0F;
+        uart16x50->msr |= (msr & 0xF0);
+        uart16x50_interrupt(uart16x50, MODEM);
+    }
 }
 
 void uart16x50_set_input(struct uart16x50 *uart16x50, int port)
