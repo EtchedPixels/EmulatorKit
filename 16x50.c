@@ -102,8 +102,9 @@ static void show_settings(struct uart16x50 *uptr)
         baud = 1843200;
     baud = 1843200 / baud;
     baud /= 16;
-    fprintf(stderr, "[%d:%d",
-            baud, (uptr->lcr &3) + 5);
+
+    fprintf(stderr, "[%d:%d", baud, (uptr->lcr &3) + 5);
+
     switch(uptr->lcr & 0x38) {
         case 0x00:
         case 0x10:
@@ -174,7 +175,7 @@ void uart16x50_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
         show_settings(uptr);
         break;
     case 4:	/* MCR */
-        uptr->mcr = val & 0x3F;
+        uptr->mcr = val & 0x1F;
         uart16x50_signal_change(uptr, uptr->mcr);
         show_settings(uptr);
         break;
@@ -254,10 +255,10 @@ void uart16x50_dsr_timer(struct uart16x50 *uart16x50)
 /* Model specific signal changes */
 void uart16x50_signal_event(struct uart16x50 *uart16x50, uint8_t msr)
 {
-    uint8_t delta = msr & uart16x50->msr;
+    uint8_t delta = msr ^ uart16x50->msr;
     if (delta) {
         unsigned n;
-        for(n = 4; n < 7; n++) {
+        for(n = 4; n <= 7; n++) {
             if (delta & (1 << n))
                 uart16x50->msr |= (1 << (n - 4));
         }
