@@ -91,6 +91,7 @@ static int trace = 0;
 #define TRACE_PPIDE	8
 #define TRACE_RTC	16
 #define TRACE_FDC	32
+#define TRACE_NS202	64
 
 uint8_t fc;
 
@@ -145,24 +146,6 @@ unsigned int next_char(void)
 	return c;
 }
 
-static unsigned int irq_pending;
-
-void recalc_interrupts(void)
-{
-#if 0
-	/*  UART autovector 1 */
-	if (uart16x50_irq_pending(uart))
-		m68k_set_irq(M68K_IRQ_1);
-	else
-#endif	
-		m68k_set_irq(0);
-}
-
-int cpu_irq_ack(int level)
-{
-	/* TODO */
-	return M68K_INT_ACK_SPURIOUS;
-}
 
 /* Hardware emulation */
 
@@ -200,7 +183,7 @@ struct ns32202 ns202;
 static int ns202_top16(unsigned r)
 {
 	unsigned v = ns202.reg[r] | (ns202.reg[r+1] << 8);
-	unsigned n = 15;
+	int n = 15;
 	while (n >= 0) {
 		if (v & (1 << n))
 			return n;
@@ -235,7 +218,7 @@ static void ns202_clear16(unsigned r, unsigned n)
 /* TODO - rotating priority */
 static int ns202_hipri(void)
 {
-	unsigned  n = 15;
+	int n = 15;
 	while(n >= 0) {
 		if (ns202_test16(R_IPND, n) && !ns202_test16(R_IMSK, n))
 			return n;
@@ -255,27 +238,38 @@ static void ns202_compute_int(void)
 	if (n == -1)
 		return;
 	/* TODO: rotating mode */
-	if (ns202.live != NO_INT && n > t) {
+	if (ns202.live == NO_INT || n > t) {
 		/* We have a new winner for topmost interrupt */
 		ns202.irq = 1;
 		ns202.live = n;
-		ns202.reg[R_HVCT] &= 0x0F;
+		ns202.reg[R_HVCT] &= 0xF0;
 		ns202.reg[R_HVCT] |= n;
+//		if (trace & TRACE_NS202)
+//			fprintf(stderr, "ns202: interrupt %d\n", n);
 	}
 }
 
 /* We had int raised (hopefully) and the CPU acked it */
-static void ns202_int_ack(void)
+static unsigned ns202_int_ack(void)
 {
+	unsigned live = ns202.live;
 	/* The IPND for the active interrupt is cleared, the corresponding
 	   bit in the ISRV is set. We don't model cascaded ICU */
-	ns202_clear16(R_IPND, ns202.live);
-	ns202_set16(R_ISRV, ns202.live);
+	ns202_clear16(R_IPND, live);
+	ns202_set16(R_ISRV, live);
+	if (trace & TRACE_NS202)
+		fprintf(stderr, "ns202: intack %d\n", live);
 	/* And the interrupt is dropped */
 	ns202.irq = 0;
+	/* Clear the host IRQ as well : HACK - abstract this */
+	m68k_set_irq(0);
 	/* Check if there isn't now a higher priority into to interrupt the
 	   interrupt */
 	ns202_compute_int();
+	live |= ns202.reg[R_HVCT] & 0xF0;
+	if (trace & TRACE_NS202)
+		fprintf(stderr, "ns202: intack vector %02X\n", live);
+	return live;
 }
 
 /* RETI or equivalent occurred. */
@@ -284,16 +278,24 @@ static void ns202_clear_int(void)
 	unsigned live = ns202.live;
 	if (live == NO_INT)
 		return;
+	/* Guesswork - seems the ACK clears the counter flag, but what
+	   about error bit ? */
+	if (live == (ns202.reg[R_CIPTR] & 0x0F))
+		ns202.reg[R_CICTL] &= 0xFB;
+	if (live == ns202.reg[R_CIPTR] >> 4)
+		ns202.reg[R_CICTL] &= 0xBF;
 	ns202.reg[R_HVCT] |= 0x0F;
 	/* Clear the live interrupt in ISRV */
 	ns202_clear16(R_ISRV, live);
+	if (trace & TRACE_NS202)
+		fprintf(stderr, "ns202: int clear %d\n", live);
 	ns202.live = NO_INT;
 	/* Check if there is anything pending to cause a next interrupt */
 	ns202_compute_int();
 }
 
 /* TODO: emulate mis-setting 8 v 16bit mode */
-unsigned int ns202_read(unsigned int address)
+static unsigned int do_ns202_read(unsigned int address)
 {
 	unsigned ns32_reg = (address >> 8) & 0x1F;
 	unsigned ns32_sti = (address >> 8) & 0x20;
@@ -356,11 +358,22 @@ unsigned int ns202_read(unsigned int address)
 	}
 }
 
+unsigned int ns202_read(unsigned int address)
+{
+	unsigned r = do_ns202_read(address);
+	if (trace & TRACE_NS202)
+		fprintf(stderr, "ns202_read %06X[%-2d] = %02X\n", address,
+				(address >> 8) & 0x1F, r);
+	return r;
+}
+
 void ns202_write(unsigned int address, unsigned int value)
 {
 	unsigned ns32_reg = (address >> 8) & 0x1F;
 //	unsigned ns32_sti = (address >> 8) & 0x20;
 
+	if (trace & TRACE_NS202)
+		fprintf(stderr, "ns202_write %06X[%-2d] = %02X\n", address, ns32_reg, value);
 	switch(ns32_reg) {
 	case R_HVCT:
 		break;
@@ -385,13 +398,13 @@ void ns202_write(unsigned int address, unsigned int value)
 		/* Need to process single cycle decrementer here TODO */
 		break;
 	case R_CICTL:
-		if (value & 0x08) {
+		if (value & 0x01) {
 			ns202.reg[ns32_reg] &= 0xF0;
-			ns202.reg[ns32_reg] |= value & 7;
+			ns202.reg[ns32_reg] |= value & 0x0F;
 		}
-		if (value & 0x80) {
+		if (value & 0x10) {
 			ns202.reg[ns32_reg] &= 0x0F;
-			ns202.reg[ns32_reg] |= value & 70;
+			ns202.reg[ns32_reg] |= value & 0xF0;
 		}
 		break;
 	case R_CCV:
@@ -428,11 +441,9 @@ void ns202_write(unsigned int address, unsigned int value)
 
 void ns202_raise(unsigned irq)
 {
-	unsigned ib = 1 << (irq & 7);
-	unsigned ir = (irq & 8) ? 1 : 0;
 	if (ns202.reg[R_MCTL] & 0x08)	/* FRZ */
 		return;
-	ns202.reg[R_IPND + ir] |= ib;
+	ns202_set16(R_IPND, irq);
 	ns202_compute_int();
 }
 
@@ -449,8 +460,10 @@ void ns202_counter(void)
 				cictl |= 0x08;
 			else
 				cictl |= 0x04;
-			ns202.ct_l = ns202.reg[R_CCV];
-			ns202.ct_l |= ns202.reg[R_CCV + 1] << 8;
+			ns202.ct_l = ns202.reg[R_CSV];
+			ns202.ct_l |= ns202.reg[R_CSV + 1] << 8;
+//			if (trace & TRACE_NS202)
+//				fprintf(stderr, "ns202: low counter 0 reload %d.\n", ns202.ct_l);
 		}
 	}
 	if ((cctl & 0x88) == 0x08) {
@@ -461,8 +474,10 @@ void ns202_counter(void)
 				cictl |= 0x80;
 			else
 				cictl |= 0x40;
-			ns202.ct_h = ns202.reg[R_CCV + 2];
-			ns202.ct_h |= ns202.reg[R_CCV + 3] << 8;
+			ns202.ct_h = ns202.reg[R_CSV + 2];
+			ns202.ct_h |= ns202.reg[R_CSV + 3] << 8;
+//			if (trace & TRACE_NS202)
+//				fprintf(stderr, "ns202: high counter 0 reload %d.\n", ns202.ct_h);
 		}
 	}
 	ns202.reg[R_CICTL] = cictl;
@@ -475,10 +490,12 @@ void ns202_counter(void)
 					cictl |= 0x80;
 				else
 					cictl |= 0x40;
-				ns202.ct_l = ns202.reg[R_CCV];
-				ns202.ct_l |= ns202.reg[R_CCV + 1] << 8;
-				ns202.ct_h = ns202.reg[R_CCV + 2];
-				ns202.ct_h |= ns202.reg[R_CCV + 3] << 8;
+				ns202.ct_l = ns202.reg[R_CSV];
+				ns202.ct_l |= ns202.reg[R_CSV + 1] << 8;
+				ns202.ct_h = ns202.reg[R_CSV + 2];
+				ns202.ct_h |= ns202.reg[R_CSV + 3] << 8;
+//				if (trace & TRACE_NS202)
+//					fprintf(stderr, "ns202: dual counter 0.\n");
 			}
 		}
 		ns202.ct_l--;
@@ -516,7 +533,24 @@ void ns202_reset(void)
 	ns202.reg[R_IMSK] = 0xFF;
 	ns202.reg[R_IMSK + 1] = 0xFF;
 	ns202.reg[R_CIPTR] = 0xFF;
+	ns202.live = NO_INT;
 }
+
+static unsigned int irq_pending;
+
+void recalc_interrupts(void)
+{
+	if (uart16x50_irq_pending(uart))
+		ns202_raise(12);
+	/* TODO: which IRQ */
+	if (ns202.irq){
+//		if (trace & TRACE_NS202)
+//			fprintf(stderr,  "IRQ raised\n");
+		m68k_set_irq(M68K_IRQ_2);
+	} else
+		m68k_set_irq(0);
+}
+
 	
 static unsigned int cfg_read(void)
 {
@@ -717,7 +751,6 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 			fprintf(stderr,  "%06x: write to invalid space.\n", address);
 		return;
 	}
-	address &= 0xFF;
 	if ((address & 0xF0) == 0x20) {
 		ppide_write(ppide2, address & 0x03, value);
 		return;
@@ -726,7 +759,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		fdc_write(address, value);
 		return;
 	}
-	switch(address) {
+	switch(address & 0xFF) {
 	/* 4MEM : 00 for now*/
 	case 0x00:
 		m4_bankp = value;
@@ -736,7 +769,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		return;
 	/* MFPIC */
 	case 0x40:
-		ns202_write(address, value);
+		ns202_write(address & 0xFFFF, value);
 		return;
 	case 0x42:
 		cfg_write(value);
@@ -758,7 +791,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 	case 0x4D:
 	case 0x4E:
 	case 0x4F:
-		uart16x50_write(uart, address & 7, value);
+		uart16x50_write(uart, address & 0x07, value);
 		return;
 	}
 }
@@ -833,6 +866,23 @@ static void take_a_nap(void)
 	t.tv_nsec = 100000;
 	if (nanosleep(&t, NULL))
 		perror("nanosleep");
+}
+
+int cpu_irq_ack(int level)
+{
+	unsigned v = ns202_int_ack();
+	/* Now apply the board glue */
+	if (!(mfpic_cfg & 4)) {
+		v &= 7;
+		v |= mfpic_cfg & 0xF8;
+	} else {
+		v &= 0x0F;
+		v |= mfpic_cfg & 0xF0;
+	}
+	v <<= (mfpic_cfg & 3);
+	if (trace & TRACE_NS202)
+		fprintf(stderr, "68K vector %02X\n", v);
+	return v;
 }
 
 void cpu_pulse_reset(void)
@@ -1028,7 +1078,10 @@ int main(int argc, char *argv[])
 		/* Approximate a 68008 */
 		m68k_execute(400);
 		uart16x50_event(uart);
-		ns202_tick(800);
+		recalc_interrupts();
+		/* The CPU runs at 8MHz but the NS202 is run off the serial
+		   clock */
+		ns202_tick(184);
 		if (!fast)
 			take_a_nap();
 	}
