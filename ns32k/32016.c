@@ -59,6 +59,7 @@ static uint32_t read_n(uint32_t addr, uint32_t size)
 	addr += size;
 	while(size--) {
 		v <<= 8;
+		/* TODO .. check this isn't backwards */
 		v |= ns32016_read8(--addr);
 	}
 	return v;
@@ -67,21 +68,21 @@ static uint32_t read_n(uint32_t addr, uint32_t size)
 static uint16_t read_x16(uint32_t addr)
 {
 	uint16_t r = ns32016_read8(addr);
-	r |= ns32016_read8(addr) << 8;
+	r |= ns32016_read8(addr + 1) << 8;
 	return r;
 }
 
 static uint32_t read_x32(uint32_t addr)
 {
 	uint32_t r = read_x16(addr);
-	r |= read_x16(addr) << 16;
+	r |= read_x16(addr + 2) << 16;
 	return r;
 }
 
 static uint64_t read_x64(uint32_t addr)
 {
 	uint64_t r = read_x32(addr);
-	r |= ((uint64_t)read_x32(addr)) << 32;
+	r |= ((uint64_t)read_x32(addr + 4)) << 32;
 	return r;
 }
 
@@ -1083,7 +1084,7 @@ uint32_t ReturnCommon(void)
 	return 0;		// OK
 }
 
-void ns32016_exec(unsigned int cycles)
+void ns32016_exec(int cycles)
 {
 	uint32_t opcode, WriteIndex;
 	uint32_t temp = 0, temp2, temp3;

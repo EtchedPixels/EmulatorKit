@@ -9,7 +9,7 @@ extern void ns32016_reset(void);
 extern void ns32016_init(void);
 extern void ns32016_ShowRegs(int bShowFloat);
 extern void ns32016_reset_addr(uint32_t StartAddress);
-extern void ns32016_exec(unsigned int tstates);
+extern void ns32016_exec(int tstates);
 extern void ns32016_close(void);
 extern void ns32016_build_matrix(void);
 

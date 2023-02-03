@@ -35,11 +35,7 @@ static uint16_t tstate_steps = 369;	/* rcbus speed (7.4MHz)*/
 
 static uint8_t live_irq;
 
-#define IRQ_SIOA	1
-#define IRQ_SIOB	2
-#define IRQ_CTC		3
-#define IRQ_ACIA	4
-#define IRQ_16550A	5
+#define IRQ_16550A	1
 
 static nic_w5100_t *wiz;
 
@@ -50,13 +46,11 @@ static volatile int done;
 #define TRACE_ROM	4
 #define TRACE_UNK	8
 #define TRACE_PPIDE	16
-#define TRACE_512	32
+#define TRACE_IDE	32
 #define TRACE_RTC	64
-#define TRACE_ACIA	128
-#define TRACE_CTC	256
-#define TRACE_CPU	512
-#define TRACE_IRQ	1024
-#define TRACE_UART	2048
+#define TRACE_CPU	128
+#define TRACE_IRQ	256
+#define TRACE_UART	512
 
 static int trace = 0;
 
@@ -124,20 +118,22 @@ struct ide_controller *ide0;
 
 static uint8_t my_ide_read(uint16_t addr)
 {
+	if (trace & TRACE_IDE)
+		fprintf(stderr, "ide_r %d\n", addr);
 	return ide_read8(ide0, addr);
 }
 
 static void my_ide_write(uint16_t addr, uint8_t val)
 {
+	if (trace & TRACE_IDE)
+		fprintf(stderr, "ide_w %d <- %02X\n", addr, val);
 	ide_write8(ide0, addr, val);
 }
 
-/* Real time clock state machine and related state.
-
-   Give the host time and don't emulate time setting except for
-   the 24/12 hour setting.
-   
- */
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Modem lines changed - don't care */
+}
 
 uint8_t ns32016_do_port_read(uint32_t addr)
 {
@@ -184,7 +180,7 @@ void ns32016_do_port_write(uint32_t addr, uint8_t val)
 		rtc_write(rtcdev, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart)
 		uart16x50_write(uart, addr & 0x0F, val);
-	else if (addr == 0xFD) {
+	else if (0 && addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
@@ -193,7 +189,7 @@ void ns32016_do_port_write(uint32_t addr, uint8_t val)
 
 uint8_t ns32016_do_read(uint32_t addr, unsigned int debug)
 {
-	if (addr & 0x800000) {
+	if ((addr & 0x00F00000) == 0x00F00000) {
 		if (debug)
 			return 0xFF;
 		return ns32016_do_port_read(addr);
@@ -218,14 +214,14 @@ uint8_t ns32016_read8(uint32_t addr)
 
 void ns32016_write8(uint32_t addr, uint8_t val)
 {
-	if (addr & 0x800000) {
+	if ((addr & 0x00F00000) == 0x00F00000) {
 		ns32016_do_port_write(addr, val);
 		return;
 	}
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %06X = %02X\n", addr, val);
 	if (addr > 0x8000)
-		ramrom[addr] = val;
+		ramrom[addr & 0xFFFFF] = val;
 	
 }
 
