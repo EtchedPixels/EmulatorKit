@@ -97,8 +97,8 @@ rcbus-80c188: rcbus-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \
 	cc -g3 rcbus-80c188.o ide.o ppide.o rtc_bitbang.o w5100.o 80x86/*.o -o rcbus-80c188
 
-rcbus-ns32k: rcbus-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o
-	$(MAKE) --directory ns32k && \
+rcbus-ns32k: rcbus-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.o
+	$(MAKE) --directory ns32k
 	cc -g3 rcbus-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.c -o rcbus-ns32k
 
 rcbus-tms9995: rcbus-tms9995.o tms9995.o ide.o ppide.o w5100.o rtc_bitbang.o 16x50.o tms9902.o
@@ -131,8 +131,8 @@ tiny68k.o: tiny68k.c m68k/lib68k.a
 68knano.o: 68knano.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c 68knano.c
 
-mini68k: mini68k.o ide.o ppide.o 16x50.o rtc_bitbang.o m68k/lib68k.a lib765/lib/lib765.a
-	cc -g3 mini68k.o ide.o ppide.o 16x50.o rtc_bitbang.o m68k/lib68k.a lib765/lib/lib765.a -o mini68k
+mini68k: mini68k.o ide.o ppide.o 16x50.o rtc_bitbang.o sdcard.o m68k/lib68k.a lib765/lib/lib765.a
+	cc -g3 mini68k.o ide.o ppide.o 16x50.o rtc_bitbang.o sdcard.o m68k/lib68k.a lib765/lib/lib765.a -o mini68k
 
 mini68k.o: mini68k.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c mini68k.c

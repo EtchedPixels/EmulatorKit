@@ -52,12 +52,15 @@
 #include "16x50.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
+#include "sdcard.h"
 #include "lib765/include/765.h"
 
 
 /* IDE controller */
 static struct ppide *ppide;	/* MFPIC */
 static struct ppide *ppide2;	/* DiskIO */
+/* SD */
+static struct sdcard *sd[2];	/* Dual SD */
 /* Serial */
 static struct uart16x50 *uart;
 /* RTC */
@@ -216,6 +219,7 @@ static void ns202_clear16(unsigned r, unsigned n)
 }
 
 /* TODO - rotating priority */
+/* FIXME: is prio low - hi or hi - low */
 static int ns202_hipri(void)
 {
 	int n = 15;
@@ -589,6 +593,80 @@ static unsigned rtc_remap_r(unsigned v)
 	return r;
 }
 
+/*
+ *	Dual SD. Simple bitbang SD card. Nothing fancy
+ *	not even a write/read driven clock
+ *
+ *	Interrupt not currently emulated. Currently we hardcode
+ *	a card in slot 0 and none in slot 1
+ */
+
+static uint8_t dsd_op;
+static uint8_t dsd_sel = 0x10;
+static uint8_t dsd_sel_w;
+static uint8_t dsd_rx, dsd_tx;
+static uint8_t dsd_bitcnt;
+
+/* Rising edge: Value sampling */
+static void dualsd_clock_high(void)
+{
+	dsd_rx <<= 1;
+	dsd_rx |= dsd_op & 1;
+	dsd_bitcnt++;
+	if (dsd_bitcnt == 8)
+		dsd_tx = sd_spi_in(sd[0], dsd_rx);
+}
+
+/* Falling edge: Values change */
+static void dualsd_clock_low(void)
+{
+	dsd_tx <<= 1;
+}
+
+static void dualsd_write(unsigned addr, unsigned val)
+{
+	static unsigned delta;
+	if (addr & 1) {
+		dsd_sel_w = val;
+		dsd_sel &= 0xFE;
+		dsd_sel |= val & 0x01;
+		/* IRQ logic not yet emulated TODO */
+	} else {
+		delta = dsd_op ^ val;
+		dsd_op = val;
+		/* Only doing card 0 for now */
+		if ((val & 1) == 0) {
+			if (delta & 0x04) {
+				if (val & 0x04) {
+					sd_spi_lower_cs(sd[0]);
+					dsd_bitcnt = 0;
+				} else
+					sd_spi_raise_cs(sd[0]);
+			}
+			if (delta & 0x02) {
+				if (val & 0x01)
+					dualsd_clock_high();
+				else
+					dualsd_clock_low();
+			}
+		}
+	}
+}
+
+static unsigned dualsd_read(unsigned addr)
+{
+	if (addr & 1)
+		return dsd_sel;
+	else {
+		/* For now we just fake card 1 absent, 0 rw present */
+		if (dsd_sel & 1)
+			return (dsd_op & 0x06);
+		else
+			return (dsd_op & 0x06) | 0x20 | \
+				((dsd_tx & 0x80) ? 1 : 0);
+	}
+}
+
 /* FDC: TC not connected ? */
 static void fdc_log(int debuglevel, char *fmt, va_list ap)
 {
@@ -664,6 +742,9 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 	if ((address & 0xF0) == 0x30)
 		return fdc_read(address);
 	switch(address & 0xFF) {
+	case 0x08:
+	case 0x09:
+		return dualsd_read(address);
 	case 0x40:
 		return ns202_read(address);
 	case 0x42:
@@ -766,6 +847,11 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		return;
 	case 0x01:
 		m4_bank[m4_bankp] = value;
+		return;
+	/* DualSD */
+	case 0x08:
+	case 0x09:
+		dualsd_write(address, value);
 		return;
 	/* MFPIC */
 	case 0x40:
@@ -911,8 +997,9 @@ int main(int argc, char *argv[])
 	const char *diskname2 = NULL;
 	const char *patha = NULL;
 	const char *pathb = NULL;
+	const char *sdname = NULL;
 
-	while((opt = getopt(argc, argv, "012d:efi:m:r:A:B:I:")) != -1) {
+	while((opt = getopt(argc, argv, "012d:efi:m:r:s:A:B:I:")) != -1) {
 		switch(opt) {
 		case '0':
 			cputype = M68K_CPU_TYPE_68000;
@@ -940,6 +1027,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			romname = optarg;
+			break;
+		case 's':
+			sdname = optarg;
 			break;
 		case 'A':
 			patha = optarg;
@@ -1028,6 +1118,19 @@ int main(int argc, char *argv[])
 			exit(1);
 	}
 	ppide_trace(ppide2, trace & TRACE_PPIDE);
+
+	if (sdname) {
+		fd = open(sdname, O_RDWR);
+		if (fd == -1) {
+			perror(sdname);
+			exit(1);
+		}
+		sd[0] = sd_create("sd0");
+		sd[1] = sd_create("sd1");
+		sd_reset(sd[0]);
+		sd_reset(sd[1]);
+		sd_attach(sd[0], fd);
+	}
 
 	uart = uart16x50_create();
 	if (trace & TRACE_UART)
