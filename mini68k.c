@@ -25,14 +25,15 @@
  *		0x48	sio	16x50
  *	0x2x	DiskIO PPIDE
  *	0x3x	DiskIO Floppy
+ *	0x00	4Mem
+ *	0x08	DualSD
  *
- *	Low 1K, 4K or 64K can be protected
+ *	Low 1K, 4K or 64K can be protected (not emulated)
  *
- *	WIP
  *	TODO
- *	- Correct(ish) speeds
- *	- Emulate the ns202 interrupt delivery
+ *	- ns202 priority logic (esp rotating)
  *	- Finish the ns202 register model
+ *	- DualSD second card
  */
 
 #include <stdio.h>
@@ -95,6 +96,7 @@ static int trace = 0;
 #define TRACE_RTC	16
 #define TRACE_FDC	32
 #define TRACE_NS202	64
+#define TRACE_SD	128
 
 uint8_t fc;
 
@@ -606,6 +608,7 @@ static uint8_t dsd_sel = 0x10;
 static uint8_t dsd_sel_w;
 static uint8_t dsd_rx, dsd_tx;
 static uint8_t dsd_bitcnt;
+static uint8_t dsd_bit;
 
 /* Rising edge: Value sampling */
 static void dualsd_clock_high(void)
@@ -613,19 +616,28 @@ static void dualsd_clock_high(void)
 	dsd_rx <<= 1;
 	dsd_rx |= dsd_op & 1;
 	dsd_bitcnt++;
-	if (dsd_bitcnt == 8)
+	if (dsd_bitcnt == 8) {
 		dsd_tx = sd_spi_in(sd[0], dsd_rx);
+		if (trace & TRACE_SD)
+			fprintf(stderr, "sd: sent %02X got %02x\n", dsd_rx, dsd_tx);
+		dsd_bitcnt = 0;
+	}
 }
 
 /* Falling edge: Values change */
 static void dualsd_clock_low(void)
 {
+	dsd_bit = (dsd_tx & 0x80) ? 1: 0;
 	dsd_tx <<= 1;
 }
 
 static void dualsd_write(unsigned addr, unsigned val)
 {
 	static unsigned delta;
+	if (sd[0] == NULL)
+		return;
+	if (trace & TRACE_SD)
+		fprintf(stderr, "dsd_write %d %02X\n", addr & 1, val);
 	if (addr & 1) {
 		dsd_sel_w = val;
 		dsd_sel &= 0xFE;
@@ -635,7 +647,7 @@ static void dualsd_write(unsigned addr, unsigned val)
 		delta = dsd_op ^ val;
 		dsd_op = val;
 		/* Only doing card 0 for now */
-		if ((val & 1) == 0) {
+		if ((dsd_sel & 1) == 0) {
 			if (delta & 0x04) {
 				if (val & 0x04) {
 					sd_spi_lower_cs(sd[0]);
@@ -644,7 +656,7 @@ static void dualsd_write(unsigned addr, unsigned val)
 					sd_spi_raise_cs(sd[0]);
 			}
 			if (delta & 0x02) {
-				if (val & 0x01)
+				if (val & 0x02)
 					dualsd_clock_high();
 				else
 					dualsd_clock_low();
@@ -653,8 +665,10 @@ static void dualsd_write(unsigned addr, unsigned val)
 	}
 }
 
-static unsigned dualsd_read(unsigned addr)
+static unsigned do_dualsd_read(unsigned addr)
 {
+	if (sd[0] == NULL)
+		return 0xFF;
 	if (addr & 1)
 		return dsd_sel;
 	else {
@@ -662,10 +676,18 @@ static unsigned dualsd_read(unsigned addr)
 		if (dsd_sel & 1)
 			return (dsd_op & 0x06);
 		else
-			return (dsd_op & 0x06) | 0x20 | \
-				((dsd_tx & 0x80) ? 1 : 0);
+			return (dsd_op & 0x06) | 0x20 | dsd_bit;
 	}
 }
+
+static unsigned dualsd_read(unsigned addr)
+{
+	unsigned val = do_dualsd_read(addr);
+	if (trace & TRACE_SD)
+		fprintf(stderr, "dsd_read %d %02X\n", addr & 1, val);
+	return val;
+}
+
 
 /* FDC: TC not connected ? */
 static void fdc_log(int debuglevel, char *fmt, va_list ap)
@@ -1130,6 +1152,8 @@ int main(int argc, char *argv[])
 		sd_reset(sd[0]);
 		sd_reset(sd[1]);
 		sd_attach(sd[0], fd);
+		sd_trace(sd[0], trace & TRACE_SD);
+		sd_trace(sd[1], trace & TRACE_SD);
 	}
 
 	uart = uart16x50_create();
