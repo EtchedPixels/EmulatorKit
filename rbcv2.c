@@ -400,6 +400,8 @@ int main(int argc, char *argv[])
 	uart16x50_dsr_timer(uart[0]);
         if (wiznet)
             w5100_process(wiz);
+        if (uart16x50_irq_pending(uart[0]))
+            Z80INT(&cpu_z80, 0xFF);
     }
     exit(0);
 }
