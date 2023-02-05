@@ -553,7 +553,7 @@ int main(int argc, char *argv[])
 		case '2':
 			machine = 2;
 			break;
-		case 3:
+		case '3':
 			machine = 3;
 			break;
 		case 'a':	/* Australian style hires */
