@@ -56,7 +56,7 @@
 #include "zxkey.h"
 #include "z80dis.h"
 
-static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
+static uint8_t ramrom[2048 * 1024];	/* Covers the banked card and ZRC */
 
 static unsigned int bankreg[4];
 static uint8_t bankenable;
@@ -77,6 +77,7 @@ static uint32_t romsize = 65536;
 #define CPUBOARD_PDOG128	9
 #define CPUBOARD_PDOG512	10
 #define CPUBOARD_MICRO80W	11
+#define CPUBOARD_ZRC		12
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -422,7 +423,34 @@ static void mem_writezrcc(uint16_t addr, uint8_t val)
 		ramrom[bankreg[0] * 0x8000 + addr] = val;
 }
 
+static uint8_t mem_readzrc(uint16_t addr)
+{
+	uint8_t r;
+	if (addr < 0x40 && bankreg[1] == 0x3F)
+		r = zrcc_irom[addr];
+	else if (addr >= 0x8000)
+		r = ramrom[addr | 0x1F8000];	/* Top 32K is common */
+	else
+		r = ramrom[bankreg[1] * 0x8000 + addr];
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04x = %02X\n", addr, r);
+	return r;
+}
 
+static void mem_writezrc(uint16_t addr, uint8_t val)
+{
+	if (addr <= 0x40 && bankreg[1] == 0x3F) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "W %04X = %02X [ROM]\n", addr, val);
+		return;
+	}
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W %04X = %02X\n", addr, val);
+	if (addr >= 0x8000)
+		ramrom[addr | 0x1F8000] = val;
+	else
+		ramrom[bankreg[1] * 0x8000 + addr] = val;
+}
 
 struct z84c15 {
 	uint8_t scrp;
@@ -661,6 +689,9 @@ uint8_t do_mem_read(uint16_t addr, int quiet)
 	case CPUBOARD_MICRO80W:
 		r = mem_read_micro80w(addr);
 		break;
+	case CPUBOARD_ZRC:
+		r = mem_readzrc(addr);
+		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
 		exit(1);
@@ -728,6 +759,9 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_MICRO80W:
 		mem_write_micro80w(addr, val);
+		break;
+	case CPUBOARD_ZRC:
+		mem_writezrc(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -2635,6 +2669,18 @@ static void io_write_pdog(uint16_t addr, uint8_t val)
 		io_write_2014(addr, val, 0);
 }
 
+/*
+ *	ZRC has a latch at 0x1F that starts at 0x1F and controls the mappings. The
+ *	ACIA is actually a cpld emulation but for now we treat it as an ACIA
+ */
+
+static void io_write_zrc(uint16_t addr, uint8_t val)
+{
+	if ((addr & 0xFF) == 0x1F)
+		bankreg[1] = val & 0x3F;
+	else
+		io_write_2014(addr, val, 0);
+}
 
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
@@ -2670,6 +2716,9 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case CPUBOARD_MICRO80W:
 		io_write_micro80w(addr, val);
 		break;
+	case CPUBOARD_ZRC:
+		io_write_zrc(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2683,6 +2732,7 @@ uint8_t io_read(int unused, uint16_t addr)
 	case CPUBOARD_SC108:
 	case CPUBOARD_PDOG128:
 	case CPUBOARD_PDOG512:
+	case CPUBOARD_ZRC:
 		return io_read_2014(addr);
 	case CPUBOARD_SC114:
 	case CPUBOARD_SC121:
@@ -2977,8 +3027,17 @@ int main(int argc, char *argv[])
 				rom = 1;
 				switchrom = 0;
 				tstate_steps = 1100;	/* 22MHz */
+			} else if (strcmp(optarg, "zrc") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				cpuboard = CPUBOARD_ZRC;
+				bankreg[1] = 0x3F;
+				/* 14MHz CPU */
+				tstate_steps *= 2;
+				have_acia = 1;
+				indev = INDEV_ACIA;
 			} else {
-				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64.\n",
+				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64, zrcc, tinyz80, pdog128, pdog512, micro80w, zrc.\n",
 						stderr);
 				exit(EXIT_FAILURE);
 			}
@@ -3051,7 +3110,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (rom && cpuboard != CPUBOARD_Z80SBC64 && cpuboard != CPUBOARD_ZRCC) {
+	if (rom && cpuboard != CPUBOARD_Z80SBC64 && cpuboard != CPUBOARD_ZRCC && cpuboard != CPUBOARD_ZRC) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
