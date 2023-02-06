@@ -288,7 +288,7 @@ static void mem_write64(uint16_t addr, uint8_t val)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04x = %02X\n", addr, val);
 	if (addr >= 0x8000)	/* Top 32K is common */
-		ramrom[addr + 65536] = val;
+		ramrom[addr] = val;
 	else
 		ramrom[bankreg[0] * 0x8000 + addr] = val;
 }
@@ -3334,7 +3334,7 @@ int main(int argc, char *argv[])
 		}
 		int i;
 		/* 36400 T states for base RC2014 - varies for others */
-		for (i = 0; i < 50; i++) {
+		for (i = 0; i < 40; i++) {
 			int j;
 			for (j = 0; j < 100; j++) {
 				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/ 10);
@@ -3344,20 +3344,21 @@ int main(int argc, char *argv[])
 					z80copro_run(copro);
 				if (ps2)
 					ps2_event(ps2, (tstate_steps + 5) / 10);
+				if (acia)
+					acia_timer(acia);
+				if (sio2)
+					sio2_timer();
+				if (have_16x50)
+					uart_event(&uart[0]);
+				if (have_cpld_serial)
+					sbc64_cpld_timer();
 			}
-			if (acia)
-				acia_timer(acia);
-			if (sio2)
-				sio2_timer();
-			if (have_16x50)
-				uart_event(&uart[0]);
-			if (have_cpld_serial)
-				sbc64_cpld_timer();
 			if (have_ctc || have_kio) {
 				if (cpuboard != CPUBOARD_MICRO80 && cpuboard != CPUBOARD_MICRO80W)
 					ctc_tick(tstate_steps);
-				else	/* Micro80 it's not off the CPU clock */
-					ctc_tick(184);
+				else	/* Micro80 it's not off the CPU clock  but
+					   the 1.8MHz clock */
+					ctc_tick(921);
 			}
 			if (cpuboard == CPUBOARD_EASYZ80 || cpuboard == CPUBOARD_TINYZ80) {
 				/* Feed the uart clock into the CTC */
