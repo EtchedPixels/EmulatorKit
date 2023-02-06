@@ -137,6 +137,12 @@ mini68k: mini68k.o ide.o ppide.o 16x50.o rtc_bitbang.o sdcard.o m68k/lib68k.a li
 mini68k.o: mini68k.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c mini68k.c
 
+mb020: mb020.o ide.o acia.o rtc_bitbang.o m68k/lib68k.a
+	cc -g3 mb020.o ide.o acia.o rtc_bitbang.o m68k/lib68k.a -o mb020
+
+mb020.o: mb020.c m68k/lib68k.a
+	$(CC) $(CFLAGS) -Im68k -c mb020.c
+
 z80mc:	z80mc.o sdcard.o libz80/libz80.o
 	cc -g3 z80mc.o sdcard.o libz80/libz80.o -o z80mc
 
