@@ -6,7 +6,7 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	rcbus-80c188 rcbus-8085 rcbus-z8 rcbus-z180 rbcv2 searle linc80 \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
-	littleboard mini68k
+	littleboard mini68k mb020 z80retro
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2 vz300
 
@@ -137,8 +137,8 @@ mini68k: mini68k.o ide.o ppide.o 16x50.o rtc_bitbang.o sdcard.o m68k/lib68k.a li
 mini68k.o: mini68k.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c mini68k.c
 
-mb020: mb020.o ide.o acia.o rtc_bitbang.o m68k/lib68k.a
-	cc -g3 mb020.o ide.o acia.o rtc_bitbang.o m68k/lib68k.a -o mb020
+mb020: mb020.o ide.o acia.o 16x50.o rtc_bitbang.o m68k/lib68k.a
+	cc -g3 mb020.o ide.o acia.o 16x50.o rtc_bitbang.o m68k/lib68k.a -o mb020
 
 mb020.o: mb020.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c mb020.c
@@ -207,6 +207,9 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 	cc -g3 nabupc.o nabupc_sdlui.o z80dis.o ide.o tms9918a.o tms9918a_sdl2.o libz80/libz80.o -o nabupc_sdl2 -lSDL2
 
 68hc11.o: 6800.c
+
+z80retro: z80retro.o sdcard.o z80dis.o libz80/libz80.o
+	cc -g3 z80retro.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
