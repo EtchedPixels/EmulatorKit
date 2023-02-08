@@ -13,7 +13,7 @@
  *	04000000-07FFFFFF over. It can't be undone.
  *
  *	Interrupts
- *	- RC2014 autovectors for 100Hz timer and for 6850
+ *	- RC2014 autovectors for 100Hz timer and for 6850 and UART
  *
  *	The swap is used by the standard monitor
  *
@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <m68k.h>
 #include "acia.h"
+#include "16x50.h"
 #include "ide.h"
 #include "rtc_bitbang.h"
 
@@ -41,6 +42,7 @@
 static struct ide_controller *ide;
 /* Serial */
 static struct acia *acia;
+static struct uart16x50 *uart;
 /* RTC */
 static struct rtc *rtc;
 /* Has the flip latch been set */
@@ -113,6 +115,10 @@ unsigned int next_char(void)
 	return c;
 }
 
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t msr)
+{
+}
+
 void recalc_interrupts(void)
 {
 	/*  UART autovector 1 */
@@ -120,6 +126,8 @@ void recalc_interrupts(void)
 	if (timer)
 		p |= 1;
 	if (acia_irq_pending(acia))
+		p |= 2;
+	if (uart16x50_irq_pending(uart))
 		p |= 2;
 	m68k_set_irq(p);
 }
@@ -154,8 +162,10 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned int trap)
 		address &= 0xFF;
 		if (address >= 0x10 && address <= 0x17)
 			return ide_read8(ide, address & 7);
-		if (address >= 0x80 && address < 0x87)
+		if (address >= 0x80 && address <= 0x87)
 			return acia_read(acia, address & 1);
+		if (address >= 0xC0 && address <= 0xC7)
+			return uart16x50_read(uart, address & 7);
 	}
 	return 0xFF;
 }
@@ -234,6 +244,10 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 			acia_write(acia, address & 1, value);
 			return;
 		}
+		if (address >= 0xC0 && address <= 0xC7) {
+			uart16x50_write(uart, address & 1, value);
+			return;
+		}
 	}
 }
 
@@ -272,7 +286,6 @@ static void device_init(void)
 {
 	irq_pending = 0;
 	ide_reset_begin(ide);
-	acia_set_input(acia, 1);
 }
 
 static struct termios saved_term, term;
@@ -308,9 +321,12 @@ void cpu_set_fc(int fc)
 
 void usage(void)
 {
-	fprintf(stderr, "mb020: [-r rompath][-i idepath][-d debug].\n");
+	fprintf(stderr, "mb020: [-1] [-r rompath][-i idepath][-d debug].\n");
 	exit(1);
 }
+
+#define IN_ACIA		1
+#define IN_16X50	2
 
 int main(int argc, char *argv[])
 {
@@ -319,8 +335,9 @@ int main(int argc, char *argv[])
 	int opt;
 	const char *romname = "mb020mon.rom";
 	const char *diskname = "mb020.ide";
+	unsigned input = IN_ACIA;
 
-	while((opt = getopt(argc, argv, "2efd:i:r:")) != -1) {
+	while((opt = getopt(argc, argv, "2efd:i:r:1:")) != -1) {
 		switch(opt) {
 		case 'f':
 			fast = 1;
@@ -333,6 +350,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			romname = optarg;
+			break;
+		case '1':
+			input = IN_16X50;
 			break;
 		default:
 			usage();
@@ -384,8 +404,14 @@ int main(int argc, char *argv[])
 		exit(1);
 
 	acia = acia_create();
-	if (trace & TRACE_UART)
-		acia_trace(acia, 1);
+	acia_trace(acia, trace & TRACE_UART);
+	if (input == IN_ACIA)
+		acia_set_input(acia, 1);
+
+	uart = uart16x50_create();
+	uart16x50_trace(uart, trace & TRACE_UART);
+	if (input == IN_16X50)
+		uart16x50_set_input(uart, 1);
 
 	rtc = rtc_create();
 	rtc_trace(rtc, trace & TRACE_RTC);
@@ -405,6 +431,7 @@ int main(int argc, char *argv[])
 			   220000 clocks */
 			m68k_execute(2200);
 			acia_timer(acia);
+			uart16x50_event(uart);
 			recalc_interrupts();
 			/* 0.1 ms sleep */
 			if (!fast)
