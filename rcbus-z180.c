@@ -6,6 +6,8 @@
  *	RTC at 0x0C
  *	CF interface
  *	SD card via CSIO SPI
+ *	PPIDE
+ *	Floppy
  */
 
 #include <stdio.h>
@@ -639,10 +641,9 @@ static uint8_t bqrtc_read(uint16_t addr)
 	case 3:
 		return 0x00;
 	case 4:
-		if (tm->tm_hour < 12)
-			return makebcd(tm->tm_hour);
-		else
-			return 0x80 | makebcd(tm->tm_hour);
+		/* FIXME: we assume 24hr mode */
+		return makebcd(tm->tm_hour);
+		/* 12hr is 0-11 and set top bit for PM */
 	case 5:
 		return 0;
 	case 6:
@@ -652,7 +653,7 @@ static uint8_t bqrtc_read(uint16_t addr)
 	case 8:
 		return makebcd(tm->tm_wday + 1);
 	case 9:
-		return makebcd(tm->tm_mon);
+		return makebcd(tm->tm_mon + 1);
 	case 10:
 		return makebcd(tm->tm_year % 100);
 	case 11:
