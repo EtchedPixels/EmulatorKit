@@ -918,8 +918,11 @@ fdc_byte fdc_read_data (FDC_765 *self)
 /* Read the FDC's main control register */
 fdc_byte fdc_read_ctrl (FDC_765 *self)
 {
+	fdc_byte r = self->fdc_mainstat;
 	fdc_dprintf(5, "FDC: Read main status: %02x\n", self->fdc_mainstat);
-	return self->fdc_mainstat;
+	/* MODIFIED: AC - this should clear the bits - eg D0 goes to 80 on a second read */
+	self->fdc_mainstat &= 0xAF;
+	return r;
 }
 
 
