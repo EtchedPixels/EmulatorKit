@@ -6,8 +6,6 @@
  *	RTC at 0x0C
  *	CF interface
  *	SD card via CSIO SPI
- *
- *	Add support for using real CF card
  */
 
 #include <stdio.h>
@@ -44,6 +42,7 @@
 static uint8_t ramrom[1024 * 1024];	/* Low 512K is ROM */
 
 #define CPUBOARD_Z180		0
+#define CPUBOARD_DYNO		1
 
 static uint8_t cpuboard = CPUBOARD_Z180;
 
@@ -180,6 +179,7 @@ uint8_t mem_read(int unused, uint16_t addr)
 
 	switch (cpuboard) {
 	case CPUBOARD_Z180:
+	case CPUBOARD_DYNO:
 		r = do_mem_read0(addr, 0);
 		break;
 	default:
@@ -209,6 +209,7 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
 	case CPUBOARD_Z180:
+	case CPUBOARD_DYNO:
 		mem_write0(addr, val);
 		break;
 	default:
@@ -352,14 +353,9 @@ static void fdc_log(int debuglevel, char *fmt, va_list ap)
 		vfprintf(stderr, "fdc: ", ap);
 }
 
-static void fdc_write(uint8_t addr, uint8_t val)
+static void fdc_show_dor(uint8_t val)
 {
-	switch(addr) {
-	case 1:	/* Data */
-		fprintf(stderr, "FDC Data: %02X\n", val);
-		fdc_write_data(fdc, val);
-		break;
-	case 2:	/* DOR */
+	if (trace & TRACE_FDC) {
 		fprintf(stderr, "FDC DOR %02X [", val);
 		if (val & 0x80)
 			fprintf(stderr, "SPECIAL ");
@@ -380,17 +376,12 @@ static void fdc_write(uint8_t addr, uint8_t val)
 		else
 			fprintf(stderr, "DSEL0");
 		fprintf(stderr, "]\n");
-		fdc_write_dor(fdc, val);
-#if 0		
-		if ((val & 0x21) == 0x21)
-			fdc_set_motor(fdc, 2);
-		else if ((val & 0x11) == 0x10)
-			fdc_set_motor(fdc, 1);
-		else
-			fdc_set_motor(fdc, 0);
-#endif			
-		break;
-	case 3:	/* DCR */
+	}
+}
+
+static void fdc_show_dcr(uint8_t val)
+{
+	if (trace & TRACE_FDC) {
 		fprintf(stderr, "FDC DCR %02X [", val);
 		if (!(val & 4))
 			fprintf(stderr, "WCOMP");
@@ -408,15 +399,34 @@ static void fdc_write(uint8_t addr, uint8_t val)
 			fprintf(stderr, "INVALID");
 		}
 		fprintf(stderr, "]\n");
+	}
+}
+
+static void fdc_write(uint8_t addr, uint8_t val)
+{
+	switch(addr) {
+	case 1:	/* Data */
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Data: %02X\n", val);
+		fdc_write_data(fdc, val);
+		break;
+	case 2:	/* DOR */
+		fdc_show_dor(val);
+		fdc_write_dor(fdc, val);
+		break;
+	case 3:	/* DCR */
+		fdc_show_dcr(val);
 		fdc_write_drr(fdc, val & 3);	/* TODO: review */
 		break;
 	case 4:	/* TC */
 		fdc_set_terminal_count(fdc, 0);
 		fdc_set_terminal_count(fdc, 1);
-		fprintf(stderr, "FDC TC\n");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC TC\n");
 		break;
 	case 5:	/* RESET */
-		fprintf(stderr, "FDC RESET\n");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC RESET\n");
 		break;
 	default:
 		fprintf(stderr, "FDC bogus %02X->%02X\n", addr, val);
@@ -428,21 +438,26 @@ static uint8_t fdc_read(uint8_t addr)
 	uint8_t val = 0x78;
 	switch(addr) {
 	case 0:	/* Status*/
-		fprintf(stderr, "FDC Read Status: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Read Status: ");
 		val = fdc_read_ctrl(fdc);
 		break;
 	case 1:	/* Data */
-		fprintf(stderr, "FDC Read Data: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Read Data: ");
 		val = fdc_read_data(fdc);
 		break;
 	case 4:	/* TC */
-		fprintf(stderr, "FDC TC: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC TC: ");
 		break;
 	case 5:	/* RESET */
-		fprintf(stderr, "FDC RESET: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC RESET: ");
 		break;
 	default:
-		fprintf(stderr, "FDC bogus read %02X: ", addr);
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC bogus read %02X: ", addr);
 	}
 	fprintf(stderr, "%02X\n", val);
 	return val;
@@ -521,7 +536,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return acia_read(acia, addr & 1);
 	if (addr >= 0xA0 && addr <= 0xA7 && uart)
 		return uart16x50_read(uart, addr & 7);
-	if (addr >= 0x48 && addr < 0x50) 
+	if (addr >= 0x48 && addr < 0x50 && cpuboard != CPUBOARD_DYNO) 
 		return fdc_read(addr & 7);
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
@@ -556,7 +571,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		acia_write(acia, addr & 1, val);
 	else if (addr >= 0xA0 && addr <= 0xA7 && uart)
 		uart16x50_write(uart, addr & 7, val);
-	else if (addr >= 0x48 && addr < 0x50)
+	else if (addr >= 0x48 && addr < 0x50 && cpuboard != CPUBOARD_DYNO)
 		fdc_write(addr & 7, val);
 	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
@@ -592,11 +607,146 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
+/* BQ4845  - TODO split out into a driver file */
+
+static uint8_t makebcd(unsigned n)
+{
+	uint8_t r;
+	r = n % 10;
+	r |= (n / 10) << 4;
+	return r;
+}
+
+static void bqrtc_write(uint16_t addr, uint8_t val)
+{
+}
+
+static uint8_t bqrtc_read(uint16_t addr)
+{
+	time_t t;
+	struct tm *tm;
+
+	time(&t);
+	tm = gmtime(&t);
+
+	switch(addr & 0x0F) {
+	case 0:
+		return makebcd(tm->tm_sec);
+	case 1:
+		return 0x00;
+	case 2:
+		return makebcd(tm->tm_min);
+	case 3:
+		return 0x00;
+	case 4:
+		if (tm->tm_hour < 12)
+			return makebcd(tm->tm_hour);
+		else
+			return 0x80 | makebcd(tm->tm_hour);
+	case 5:
+		return 0;
+	case 6:
+		return makebcd(tm->tm_mday);
+	case 7:
+		return 0;
+	case 8:
+		return makebcd(tm->tm_wday + 1);
+	case 9:
+		return makebcd(tm->tm_mon);
+	case 10:
+		return makebcd(tm->tm_year % 100);
+	case 11:
+		return 0x00;
+	case 12:
+		return 0x00;
+	case 13:
+		return 0x01;
+	case 14:
+		return 0x02;
+	case 15:
+		return 0x00;
+	}
+	return 0xFF;
+}
+
+static void fdc_write_dyno(uint8_t addr, uint8_t val)
+{
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "fdc: W %02X <- %02X\n", addr, val);
+	switch(addr & 3) {
+	case 0:	/* MSR */
+		break;
+	case 1:	/* Data */
+		fdc_write_data(fdc, val);
+		break;
+	case 2:	/* DOR */
+		fdc_show_dor(val);
+		fdc_write_dor(fdc, val);
+		break;
+	case 3:	/* DCR */
+		fdc_show_dcr(val);
+		fdc_write_drr(fdc, val & 3);	/* TODO: review */
+		break;
+	default:
+		fprintf(stderr, "FDC bogus %02X->%02X\n", addr, val);
+	}
+}
+
+static uint8_t fdc_read_dyno(uint8_t addr)
+{
+	uint8_t val = 0x78;
+	switch(addr & 3) {
+	case 0:	/* Status*/
+		val = fdc_read_ctrl(fdc);
+		break;
+	case 1:	/* Data */
+		val = fdc_read_data(fdc);
+		break;
+	case 2:	/* TC */
+		fdc_set_terminal_count(fdc, 0);
+		fdc_set_terminal_count(fdc, 1);
+		break;
+	case 3:
+		break;
+	}
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "fdc: R %02X -> %02X\n", addr, val);
+	return val;
+}
+
+static uint8_t io_read_dyno(uint16_t addr)
+{
+	uint8_t addr8 = addr & 0xFF;
+	if (addr8 >= 0x4C && addr8 <= 0x4F && ppide)
+		return ppide_read(ppide, addr & 3);
+	if (addr8 >= 0x50 && addr8 < 0x5F)		/* CHECK */
+		return bqrtc_read(addr);
+	if (addr8 >= 0x84 && addr8 <= 0x87)
+		return fdc_read_dyno(addr);
+	return io_read_2014(addr);
+}
+
+static void io_write_dyno(uint16_t addr, uint8_t val, uint8_t known)
+{
+	uint8_t addr8 = addr & 0xFF;
+	if (addr8 >= 0x4C && addr8 <= 0x4F&& ppide)
+		ppide_write(ppide, addr & 3, val);
+	else if (addr8 >= 0x50 && addr8 < 0x5F)		/* CHECK */
+		bqrtc_write(addr, val);
+	else if (addr8 >= 0x84 && addr8 <= 0x87)
+		fdc_write_dyno(addr, val);
+	else
+		io_write_2014(addr, val, 0);
+}
+
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
 	case CPUBOARD_Z180:
 		io_write_2014(addr, val, 0);
+		break;
+	case CPUBOARD_DYNO:
+		io_write_dyno(addr, val, 0);
 		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
@@ -609,6 +759,9 @@ uint8_t io_read(int unused, uint16_t addr)
 	switch (cpuboard) {
 	case CPUBOARD_Z180:
 		return io_read_2014(addr);
+	case CPUBOARD_DYNO:
+		return io_read_dyno(addr);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -714,6 +867,14 @@ int main(int argc, char *argv[])
 				mem_map = 1;
 				/* No SPI select line */
 				sdpath = NULL;
+				break;
+			}
+			if (strcmp(optarg, "dyno") == 0) {
+				/* RCZ180 like but different PPIDE location
+				   and different RTC */
+				banked = 0;
+				input = 0;
+				cpuboard = CPUBOARD_DYNO;
 				break;
 			}
 			fprintf(stderr, "rcbus-z180: unknown machine type '%s'.\n", optarg);
