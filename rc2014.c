@@ -2034,6 +2034,7 @@ static uint8_t z84c15_read(uint8_t port)
 		break;
 	/* Watchdog: not yet emulated */
 	case 0xF0:
+		return 0xFB;
 	case 0xF1:
 		return 0xFF;
 	}
@@ -2399,7 +2400,7 @@ static uint8_t io_read_4(uint16_t addr)
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x83)
 		return sio2_read((addr & 3) ^ 1);
-	if ((addr >= 0x10 && addr <= 0x17) && ide)
+	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);
 	if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		return nic_w5100_read(wiz, addr & 3);
@@ -2419,7 +2420,7 @@ static void io_write_4(uint16_t addr, uint8_t val)
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x83)
 		sio2_write((addr & 3) ^ 1, val);
-	else if ((addr >= 0x10 && addr <= 0x17) && ide)
+	else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
 	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
@@ -2453,7 +2454,7 @@ static uint8_t io_read_5(uint16_t addr)
 	addr &= 0xFF;
 	if (addr >= 0x18 && addr <= 0x1B)
 		return sio2_read((addr & 3) ^ 1);
-	if ((addr >= 0x90 && addr <= 0x97) && ide)
+	if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
 		return my_ide_read(addr & 7);
 	if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		return nic_w5100_read(wiz, addr & 3);
@@ -2477,7 +2478,7 @@ static void io_write_5(uint16_t addr, uint8_t val)
 	addr &= 0xFF;
 	if (addr >= 0x18 && addr <= 0x1B)
 		sio2_write((addr & 3) ^ 1, val);
-	else if ((addr >= 0x90 && addr <= 0x97) && ide)
+	else if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
 		my_ide_write(addr & 7, val);
 	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
@@ -3005,6 +3006,7 @@ int main(int argc, char *argv[])
 				sio2_input = 1;
 				have_im2 = 1;
 				tstate_steps = 500;
+				indev = INDEV_SIO;
 			} else if (strcmp(optarg, "pdog128") == 0) {
 				cpuboard = CPUBOARD_PDOG128;
 				switchrom = 0;
