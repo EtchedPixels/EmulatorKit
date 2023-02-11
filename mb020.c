@@ -61,6 +61,7 @@ static unsigned timer;
 #define TRACE_CPU	2
 #define TRACE_UART	4
 #define TRACE_RTC	8
+#define TRACE_IDE	16
 
 uint8_t fc;
 
@@ -160,8 +161,15 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned int trap)
 		flipped = 1;
 	if ((address & 0xFFFFF000) == 0xFFFFF000) {
 		address &= 0xFF;
-		if (address >= 0x10 && address <= 0x17)
-			return ide_read8(ide, address & 7);
+		if (address == 0x0C)
+			return rtc_read(rtc);
+		if (address >= 0x10 && address <= 0x17) {
+			uint8_t r = ide_read8(ide, address & 7);
+			if (trace & TRACE_IDE)
+				fprintf(stderr, "ide: R %02X -> %02X\n",
+					address, r);
+			return r;
+		}
 		if (address >= 0x80 && address <= 0x87)
 			return acia_read(acia, address & 1);
 		if (address >= 0xC0 && address <= 0xC7)
@@ -236,7 +244,14 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		flipped = 1;
 	if ((address & 0xFFFFF000) == 0xFFFFF000) {
 		address &= 0xFF;
+		if (address == 0x0C) {
+			rtc_write(rtc, value);
+			return;
+		}
 		if (address >= 0x10 && address <= 0x17) {
+			if (trace & TRACE_IDE)
+				fprintf(stderr, "ide: W %02X = %02X\n",
+					address, value);
 			ide_write8(ide, address & 7, value);
 			return;
 		}
@@ -245,7 +260,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 			return;
 		}
 		if (address >= 0xC0 && address <= 0xC7) {
-			uart16x50_write(uart, address & 1, value);
+			uart16x50_write(uart, address & 7, value);
 			return;
 		}
 	}
@@ -286,6 +301,7 @@ static void device_init(void)
 {
 	irq_pending = 0;
 	ide_reset_begin(ide);
+	flipped = 0;
 }
 
 static struct termios saved_term, term;
@@ -337,7 +353,7 @@ int main(int argc, char *argv[])
 	const char *diskname = "mb020.ide";
 	unsigned input = IN_ACIA;
 
-	while((opt = getopt(argc, argv, "2efd:i:r:1:")) != -1) {
+	while((opt = getopt(argc, argv, "2efd:i:r:1")) != -1) {
 		switch(opt) {
 		case 'f':
 			fast = 1;
