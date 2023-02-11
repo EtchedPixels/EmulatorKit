@@ -645,7 +645,7 @@ void ide_write8(struct ide_controller *c, uint8_t r, uint8_t v)
     }
     /* Not clear this is the right emulation */
     if (d->present == 0 && r != ide_lba_top) {
-      ide_fault(d, "not present");
+      /* ide_fault(d, "not present");*/
       return;
     }
   }
