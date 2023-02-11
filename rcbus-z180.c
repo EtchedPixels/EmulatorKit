@@ -146,7 +146,7 @@ void z180_phys_write(int unused, uint32_t addr, uint8_t val)
 	if (addr >= ram_base)
 		ramrom[addr] = val;
 	else
-		fprintf(stderr, "[%06X: write to ROM.]\n", addr);
+		fprintf(stderr, "[%06X: write to ROM from %04X.]\n", addr, cpu_z180.M1PC);
 }
 
 /*
@@ -978,6 +978,10 @@ int main(int argc, char *argv[])
 
 	io = z180_create(&cpu_z180);
 	z180_trace(io, trace & TRACE_CPU_IO);
+	if (tstate_steps == 294)
+		z180_set_clock(io, 6144000);
+	else
+		z180_set_clock(io, 18432000);
 
 	switch(input) {
 		case 0:
