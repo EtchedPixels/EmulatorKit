@@ -79,6 +79,7 @@ struct z180_io {
     uint8_t irqpend;
     uint8_t vector;
 
+    unsigned clock;
     int trace;
 };
 
@@ -254,6 +255,40 @@ static uint8_t z180_asci_read(struct z180_io *io, uint8_t addr)
     }
 }
 
+static void z180_asci_state(struct z180_io *io, struct z180_asci *asci)
+{
+    unsigned baud;
+    if (io->trace == 0)
+        return;
+    fprintf(stderr, "[ ASCI: ");
+    if (asci->cntla & 0x80)
+        fprintf(stderr, "MPE ");
+    if (asci->cntla & 0x40)
+        fprintf(stderr, "RE ");
+    if (asci->cntla & 0x20)
+        fprintf(stderr, "TE ");
+    if (asci->cntlb & 0x80)
+        fprintf(stderr, "MPBT ");
+    if (asci->cntlb & 0x40)
+        fprintf(stderr, "MP ");
+    baud = io->clock;
+    if (asci->cntlb & 0x20)
+        baud /= 30;
+    else
+        baud /= 10;
+    if (asci->cntlb & 0x08)
+        baud /= 64;
+    else
+        baud /= 16;
+    baud /= 1 << (asci->cntlb & 0x07);
+    fprintf(stderr, "%d %c", baud, (asci->cntla & 0x04) ? '8':'7');
+    if (asci->cntla & 0x02)
+        fprintf(stderr, "%c", (asci->cntlb & 0x10) ? 'O':'E');
+    else
+        fprintf(stderr, "N");
+    fprintf(stderr, "%d ]\n", 1 + (asci->cntla & 0x01));
+}
+
 static void z180_asci_write(struct z180_io *io, uint8_t addr, uint8_t val)
 {
     struct z180_asci *asci = &io->asci[addr & 1];
@@ -266,6 +301,7 @@ static void z180_asci_write(struct z180_io *io, uint8_t addr, uint8_t val)
         break;
     case 0x02:
         asci->cntlb = val;
+        z180_asci_state(io, asci);
         z180_asci_recalc(io, asci);
         break;
     case 0x04:
@@ -889,6 +925,7 @@ struct z180_io *z180_create(Z180Context *cpu)
     io->dstat = 0x30;
     io->dcntl = 0xF0;	/* Manual disagrees with itself here */
     io->cpu = cpu;
+    io->clock = 18432000;
     return io;
 }
 
@@ -905,4 +942,9 @@ void z180_trace(struct z180_io *io, int trace)
 void z180_set_input(struct z180_io *io, int port, int onoff)
 {
     io->asci[port].input = onoff;
+}
+
+void z180_set_clock(struct z180_io *io, unsigned hz)
+{
+    io->clock = hz;
 }

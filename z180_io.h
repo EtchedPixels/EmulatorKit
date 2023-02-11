@@ -11,6 +11,7 @@ struct z180_io *z180_create(Z180Context *cpu);
 void z180_free(struct z180_io *io);
 void z180_trace(struct z180_io *io, int trace);
 void z180_set_input(struct z180_io *io, int port, int onoff);
+void z180_set_clock(struct z180_io *io, unsigned hz);
 
 /* Caller proviced */
 extern unsigned int next_char(void);
