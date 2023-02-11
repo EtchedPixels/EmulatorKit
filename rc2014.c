@@ -154,6 +154,7 @@ volatile int emulator_done;
 #define TRACE_COPRO	0x020000
 #define TRACE_COPRO_IO	0x040000
 #define TRACE_TMS9918A  0x080000
+#define TRACE_EF9345	0x080000
 #define TRACE_FDC	0x100000
 #define TRACE_PS2	0x200000
 #define TRACE_ACIA	0x400000
@@ -3274,7 +3275,7 @@ int main(int argc, char *argv[])
 		close(fd);
 		/* 16K RAM */
 		ef9345 = ef9345_create(EF9345, ef9345_vram, ef9345_rom, 0x3FFF);
-		ef9345_trace(ef9345, 1 /*!!(trace & TRACE_TMS9918A)*/);
+		ef9345_trace(ef9345, !!(trace & TRACE_EF9345));
 		ef9345rend = ef9345_renderer_create(ef9345);
 	}
 	if (have_ps2) {
@@ -3416,7 +3417,7 @@ int main(int argc, char *argv[])
 			}
 			if (have_ctc || have_kio) {
 				if (cpuboard != CPUBOARD_MICRO80 && cpuboard != CPUBOARD_MICRO80W)
-					ctc_tick(tstate_steps);
+					ctc_tick(tstate_steps * 10);
 				else	/* Micro80 it's not off the CPU clock  but
 					   the 1.8MHz clock */
 					ctc_tick(921);
