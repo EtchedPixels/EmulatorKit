@@ -304,7 +304,8 @@ void m6800_outport(uint8_t addr, uint8_t val)
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
 		bankreg[addr & 3] = val & 0x3F;
 		if (trace & TRACE_512)
-			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+			fprintf(stderr, "Bank %d set to %02X [%02X, %02X %02X %02X]\n", addr & 3, val,
+				bankreg[0], bankreg[1], bankreg[2], bankreg[3]);
 	} else if (bank512 && addr >= 0x7C && addr <= 0x7F) {
 		if (trace & TRACE_512)
 			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
