@@ -157,7 +157,7 @@ uint8_t via_read(struct via6522 *via, uint8_t addr)
 void via_write(struct via6522 *via, uint8_t addr, uint8_t val)
 {
 	if (via->trace)
-		fprintf(stderr, "[VIA write %d: %02X.]\n ", addr, val);
+		fprintf(stderr, "[VIA write %d: %02X.]\n", addr, val);
 	switch(addr) {
 		case 0:
 			via->orb = val;
