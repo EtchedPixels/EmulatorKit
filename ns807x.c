@@ -32,17 +32,8 @@ struct ns8070 {
     uint8_t a;
     uint8_t e;
     uint8_t s;
-#define S_CL	0x80		/* Carry / Link */
-#define S_OV	0x40		/* Signed overflow */
-#define S_SB	0x20		/* Buffered input B */
-#define S_SA	0x10		/* Buffered input A */
-#define S_F3	0x08		/* CPU flag outputs */
-#define S_F2	0x04		/* Basically 3 GPIO */
-#define S_F1	0x02		/* lines for bitbang */
-#define S_IE	0x01		/* Interrupt enable */
-
     uint8_t *rom;
-    uint8_t ram[32];
+    uint8_t ram[64];
 
     uint8_t i;
     uint8_t int_latch;
@@ -72,10 +63,14 @@ static uint16_t mread16(struct ns8070 *cpu, uint16_t addr)
 
 static void mwrite(struct ns8070 *cpu, uint16_t addr, uint8_t val)
 {
-    if (addr >= 0xFFC0)
+    if (addr >= 0xFFC0) {
         cpu->ram[addr - 0xFFC0] = val;
-    else if (!cpu->rom || addr >= 0xA00)
-        return mem_write(cpu, addr, val);
+        return;
+    }
+    else if (!cpu->rom || addr >= 0xA00) {
+        mem_write(cpu, addr, val);
+        return;
+    }
     if (cpu->trace)
         fprintf(stderr, "Write to ROM 0x%04X<-%02X\n", addr, val);
 }
@@ -225,7 +220,7 @@ static void fetch_instruction(struct ns8070 *cpu)
         fprintf(stderr, "%s %02X%02X %04X %04X %04X %04X",
             cpu_flags(cpu),
             cpu->e, cpu->a, cpu->t, cpu->p2, cpu->p3, cpu->sp);
-        fprintf(stderr, " :%02X", cpu->i);
+        fprintf(stderr, " :%02X ", cpu->i);
     }
 }
 
@@ -324,7 +319,7 @@ static int8_t get_off8(struct ns8070 *cpu)
 {
     int8_t v = mread(cpu, ++cpu->pc);
     if (cpu->trace)
-        fprintf(stderr, "%02X ", v);
+        fprintf(stderr, "+%02X ", v);
     return v;
 }
 
@@ -336,10 +331,12 @@ static uint8_t get_imm8(struct ns8070 *cpu)
     return v;
 }
 
-static uint8_t get_imm16(struct ns8070 *cpu)
+static uint16_t get_imm16(struct ns8070 *cpu)
 {
     uint16_t r = mread(cpu, ++cpu->pc);
     r |= mread(cpu, ++cpu->pc) << 8;
+    if (cpu->trace)
+        fprintf(stderr, "%04X ", r);
     return r;
 }
 
@@ -356,7 +353,7 @@ static unsigned int execute_high(struct ns8070 *cpu)
     unsigned int cost = 0;
 
     /* Immediate */
-    if ((op & 0x07) == 0x04) {
+    if (mode == 0x04) {
         if (op & 0x40)
             val = get_imm8(cpu);
         else
@@ -460,9 +457,6 @@ static unsigned int execute_op(struct ns8070 *cpu)
     uint8_t tmp8;
     uint16_t tmp16;
 
-    if (cpu->trace)
-        fprintf(stderr, "%02X ", cpu->i);
-
     /* The upper half of the instruction space has a rather more sane decode
        model */
     if (cpu->i & 0x80)
@@ -471,6 +465,11 @@ static unsigned int execute_op(struct ns8070 *cpu)
     switch(cpu->i) {
     case 0x00:	/* NOP */
         return 3;
+    case 0x01:	/* XCH A,E */
+        tmp8 = cpu->a;
+        cpu->a = cpu->e;
+        cpu->e = tmp8;
+        return 5;
     case 0x06:	/* LD A,S */
         cpu->a = get_s(cpu);
         return 3;
@@ -533,7 +532,7 @@ static unsigned int execute_op(struct ns8070 *cpu)
         cpu->pc |= mread(cpu, 0x21 + tmp8);
         return 16;
     case 0x20:	/* JSR  (actually PLI PC,=ADDR) */
-        push16(cpu, cpu->pc);
+        push16(cpu, cpu->pc + 2);
         cpu->pc = get_imm16(cpu);
         return 16;
     case 0x22:	/* PLI P2,=ADDR - push and load immediate - genius little instruction */

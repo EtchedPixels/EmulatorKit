@@ -18,3 +18,12 @@ extern void ns8070_setb(struct ns8070 *cpu, unsigned int b);
 extern uint8_t mem_read(struct ns8070 *cpu, uint16_t addr);
 extern void mem_write(struct ns8070 *cpu, uint16_t addr, uint8_t val);
 extern void flag_change(struct ns8070 *cpu, uint8_t fbits);
+#define S_CL	0x80		/* Carry / Link */
+#define S_OV	0x40		/* Signed overflow */
+#define S_SB	0x20		/* Buffered input B */
+#define S_SA	0x10		/* Buffered input A */
+#define S_F3	0x08		/* CPU flag outputs */
+#define S_F2	0x04		/* Basically 3 GPIO */
+#define S_F1	0x02		/* lines for bitbang */
+#define S_IE	0x01		/* Interrupt enable */
+
