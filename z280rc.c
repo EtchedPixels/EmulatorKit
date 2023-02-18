@@ -58,7 +58,7 @@ static int trace = 0;
 
 /* FIFO emulation doesn't work as the CPU emulation doesn't
    seem to correctly word fetch instructions */
-uint8_t mem_read8(unsigned addr)
+static uint8_t do_mem_read8(unsigned addr)
 {
 	if (addr < 512 && fifo_off == 0)
 		return ide_read16(ide, ide_data);
@@ -66,9 +66,19 @@ uint8_t mem_read8(unsigned addr)
 	return ram[addr & 0x1FFFF];
 }
 
+uint8_t mem_read8(unsigned addr)
+{
+	uint8_t r = do_mem_read8(addr);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04X -> %02X\n", addr, r);
+	return r;
+}
+
 void mem_write8(unsigned addr, uint8_t value)
 {
 	/* TODO FIFO model */
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W %04X <- %02X\n", addr, value);
 	ram[addr & 0x1FFFF] = value;
 }
 
