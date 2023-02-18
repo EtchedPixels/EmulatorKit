@@ -203,7 +203,201 @@ static char *cpu_flags(struct ns8070 *cpu)
     }
     return buf;
 }
-    
+
+static char *iname(uint8_t i)
+{
+    fprintf(stderr, "[%02X]", i);
+    if (i & 0x80) {
+        switch(i & 0xF8) {
+        case 0x80:
+            return "LD EA,";
+        case 0x88:
+            return "ST EA,";
+        case 0x90:
+            return "ILD A,";
+        case 0x98:
+            return "DLD A,";
+        case 0xA0:
+            return "LD T,";
+        case 0xA8:
+            return "ILL ST T,";
+        case 0xB0:
+            return "ADD EA,";
+        case 0xB8:
+            return "SUB EA,";
+        case 0xC0:
+            return "LD A,";
+        case 0xC8:
+            return "ST A,";
+        case 0xD0:
+            return "AND A,";
+        case 0xD8:
+            return "OR A,";
+        case 0xE0:
+            return "XOR A,";
+        case 0xE8:
+            return "ILL";
+        case 0xF0:
+            return "ADD A,";
+        case 0xF8:
+            return "SUB A,";
+        }
+    }
+    if (i >= 0x10 && i <= 0x1F) {
+        static char calltmp[16];
+        snprintf(calltmp, 16, "CALL%d", i & 0x0F);
+        return calltmp;
+    }
+    switch(i) {
+    case 0x00:
+        return "NOP";
+    case 0x01:
+        return "XCH A,E";
+    case 0x06:
+        return "LD A,S";
+    case 0x07:
+        return "LD S,A";
+    case 0x08:
+        return "PUSH EA";
+    case 0x09:
+        return "LD T,";
+    case 0x0A:
+        return "PUSH A,";
+    case 0x0B:
+        return "LD EA,T";
+    case 0x0C:
+        return "SR EA";
+    case 0x0D:
+        return "DIV EA,T";
+    case 0x0E:
+        return "SL A";
+    case 0x0F:
+        return "SL EA";
+    case 0x20:
+        return "JSR";
+    case 0x22:
+        return "PLI P2,";
+    case 0x23:
+        return "PLI P3,";
+    case 0x24:
+        return "JMP ";
+    case 0x25:
+        return "LD SP,";
+    case 0x26:
+        return "LD P2,";
+    case 0x27:
+        return "LD P3,";
+    case 0x2C:
+        return "MPY EA,T";
+    case 0x2D:
+        return "BND";
+    case 0x2E:
+        return "SSM P2";
+    case 0x2F:
+        return "SSM P3";
+    case 0x30:
+        return "LD EA,PC";
+    case 0x31:
+        return "LD EA,SP";
+    case 0x32:
+        return "LD EA,P2";
+    case 0x33:
+        return "LD EA,P3";
+    case 0x38:
+        return "POP A";
+    case 0x39:
+        return "AND S,";
+    case 0x3A:
+        return "POP EA";
+    case 0x3B:
+        return "OR S,";
+    case 0x3C:
+        return "SR A";
+    case 0x3D:
+        return "SRL A";
+    case 0x3E:
+        return "RR A";
+    case 0x3F:
+        return "RRL A";
+    case 0x40:
+        return "LD A,E";
+    case 0x44:
+        return "LD PC,EA";
+    case 0x45:
+        return "LD SP,EA";
+    case 0x46:
+        return "LD P2,EA";
+    case 0x47:
+        return "LD P3,EA";
+    case 0x48:
+        return "LD E,A";
+    case 0x4C:
+        return "XCH EA,PC";
+    case 0x4D:
+        return "XCH EA,SP";
+    case 0x4E:
+        return "XCH EA,P2";
+    case 0x4F:
+        return "XCH EA,P3";
+    case 0x54:
+        return "PUSH PC";
+    case 0x56:
+        return "PUSH P2";
+    case 0x57:
+        return "PUSH P3";
+    case 0x58:
+        return "OR A,E";
+    case 0x5C:
+        return "RET";
+    case 0x5E:
+        return "POP P2";
+    case 0x5F:
+        return "POP P3";
+    case 0x60:
+        return "XOR A,E";
+    case 0x64:
+        return "BP";
+    case 0x66:
+        return "BP P2";
+    case 0x67:
+        return "BP P3";
+    case 0x6C:
+        return "BZ";
+    case 0x6E:
+        return "BZ P2";
+    case 0x6F:
+        return "BZ P3";
+    case 0x70:
+        return "ADD A,E";
+    case 0x74:
+        return "BRA";
+    case 0x76:
+        return "BRA P2";
+    case 0x77:
+        return "BRA P3";
+    case 0x78:
+        return "SUB A,E";
+    case 0x7C:
+        return "BNZ";
+    case 0x7E:
+        return "BNZ P2";
+    case 0x7F:
+        return "BNZ P3";
+    default:
+        return "ILLEGAL";
+    }
+}
+
+static char *hexsigned(uint8_t v)
+{
+    static char buf[4];
+    if (v < 0)
+        snprintf(buf, 4, "-%02X", -v);
+    else
+        snprintf(buf, 4, "%02X", v);
+    return buf;
+}
+
 /*
  *	This is probably the weirdest part of the NS8070. PC is incremented
  *	on instruction fetch. This means that for example a jump to $5000 is
@@ -217,10 +411,10 @@ static void fetch_instruction(struct ns8070 *cpu)
     cpu->i = mread(cpu, cpu->pc);
     if (cpu->trace) {
         fprintf(stderr, "%04X: ", cpu->pc);
-        fprintf(stderr, "%s %02X%02X %04X %04X %04X %04X",
+        fprintf(stderr, "%s %02X:%02X %04X %04X %04X %04X",
             cpu_flags(cpu),
             cpu->e, cpu->a, cpu->t, cpu->p2, cpu->p3, cpu->sp);
-        fprintf(stderr, " :%02X ", cpu->i);
+        fprintf(stderr, " :%s ", iname(cpu->i));
     }
 }
 
@@ -237,35 +431,53 @@ static uint16_t make_address(struct ns8070 *cpu, uint8_t mode, int8_t offset)
     uint16_t addr;
     switch(mode) {
     case 0:	/* PC relative 8bit signed */
+        if (cpu->trace)
+            fprintf(stderr, "%s,PC", hexsigned(offset));
         return cpu->pc + offset;
     case 1:	/* SP relative */
+        if (cpu->trace)
+            fprintf(stderr, "%s,SP", hexsigned(offset));
         return cpu->sp + offset;
     case 2:	/* P2 relative */
+        if (cpu->trace)
+            fprintf(stderr, "%s,P2", hexsigned(offset));
         return cpu->p2 + offset;
     case 3:	/* P3 relative */
+        if (cpu->trace)
+            fprintf(stderr, "%s,P3", hexsigned(offset));
         return cpu->p3 + offset;
     case 4:	/* Immediate */
         fprintf(stderr, "Internal error: make_address of immediate.\n");
         exit(1);
     case 5:	/* Direct - which is FFxx in our case */
+        if (cpu->trace)
+            fprintf(stderr, "FF%02X", (uint8_t)offset);
         return 0xFF00 + (uint8_t)offset;
     /* Auto indexing is a bit odd. It implements negative pre-decrement and
        positive post increment. For things like stacks this makes a lot of
        sense */
     case 6:	/* Auto indexed P2 */
         if (offset < 0) {
+            if (cpu->trace)
+                fprintf(stderr, "@%s,P2", hexsigned(offset));
             cpu->p2 += offset;
             return cpu->p2;
         } else {
+            if (cpu->trace)
+                fprintf(stderr, "%s,@P2", hexsigned(offset));
             addr = cpu->p2;
             cpu->p2 += offset;
             return addr;
         }
     case 7:
         if (offset < 0) {
+            if (cpu->trace)
+                fprintf(stderr, "@%s,P3", hexsigned(offset));
             cpu->p3 += offset;
             return cpu->p3;
         } else {
+            if (cpu->trace)
+                fprintf(stderr, "%s,@P3", hexsigned(offset));
             addr = cpu->p3;
             cpu->p3 += offset;
             return addr;
@@ -318,16 +530,27 @@ static unsigned int check_interrupt(struct ns8070 *cpu)
 static int8_t get_off8(struct ns8070 *cpu)
 {
     int8_t v = mread(cpu, ++cpu->pc);
-    if (cpu->trace)
-        fprintf(stderr, "+%02X ", v);
+    if (cpu->trace) {
+        if (v >= 0)
+            fprintf(stderr, "+%02X ", v);
+        else
+            fprintf(stderr, "-%02X ", -v);
+    }
     return v;
 }
+
+static uint8_t get_imm8_q(struct ns8070 *cpu)
+{
+    uint8_t v = mread(cpu, ++cpu->pc);
+    return v;
+}
+
 
 static uint8_t get_imm8(struct ns8070 *cpu)
 {
     uint8_t v = mread(cpu, ++cpu->pc);
     if (cpu->trace)
-        fprintf(stderr, "%02X ", v);
+        fprintf(stderr, "=%02X ", v);
     return v;
 }
 
@@ -336,7 +559,7 @@ static uint16_t get_imm16(struct ns8070 *cpu)
     uint16_t r = mread(cpu, ++cpu->pc);
     r |= mread(cpu, ++cpu->pc) << 8;
     if (cpu->trace)
-        fprintf(stderr, "%04X ", r);
+        fprintf(stderr, "=%04X ", r);
     return r;
 }
 
@@ -360,7 +583,7 @@ static unsigned int execute_high(struct ns8070 *cpu)
             val = get_imm16(cpu);
         immed = 1;
     } else
-        addr = make_address(cpu, mode, get_imm8(cpu));
+        addr = make_address(cpu, mode, get_imm8_q(cpu));
 
     if (mode >= 6)
         cost += 2;
@@ -445,8 +668,15 @@ static unsigned int execute_high(struct ns8070 *cpu)
         cpu->a ^= val;
         return 7 + cost;
     case 0xE8:	/* UNUSED */
+        return 7;	/* Unclear */
     case 0xF0:	/* ADD A,, */
+        maths8add(cpu, cpu->a, val, cpu->a + val);
+        cpu->a += val;
+        return 7 + cost;
     case 0xF8:	/* SUB A,, */
+        maths8sub(cpu, cpu->a, val, cpu->a - val);
+        cpu->a -= val;
+        return 7 + cost;
     }
 }
 
@@ -456,6 +686,7 @@ static unsigned int execute_op(struct ns8070 *cpu)
 {
     uint8_t tmp8;
     uint16_t tmp16;
+    int8_t offs;
 
     /* The upper half of the instruction space has a rather more sane decode
        model */
@@ -529,7 +760,7 @@ static unsigned int execute_op(struct ns8070 *cpu)
         tmp8 = (cpu->i & 0x0F) << 1;
         push16(cpu, cpu->pc);
         cpu->pc = mread(cpu, 0x21 + tmp8) << 8;
-        cpu->pc |= mread(cpu, 0x21 + tmp8);
+        cpu->pc |= mread(cpu, 0x20 + tmp8);
         return 16;
     case 0x20:	/* JSR  (actually PLI PC,=ADDR) */
         push16(cpu, cpu->pc + 2);
@@ -561,11 +792,11 @@ static unsigned int execute_op(struct ns8070 *cpu)
         return 37;
     case 0x2D:	/* BND */
         /* Seriously weird - branch if not ascii 0-9, otherwise subtract "0" */
+        offs = get_off8(cpu);
         if (cpu->a >= 48 && cpu->a <= 57) {
             cpu->a -= 48;
-            cpu->pc++;
         } else {
-            cpu->pc += get_off8(cpu);
+            cpu->pc += offs;
         }        
         /* The low test occurs first and is 2 clocks shorter */
         return cpu->a < 48 ? 7 : 9;
@@ -574,9 +805,21 @@ static unsigned int execute_op(struct ns8070 *cpu)
     case 0x2F:	/* SSM P3 */
         return do_ssm(cpu, &cpu->p3);
     case 0x30:	/* LD EA,PC */
+        cpu->e = cpu->pc >> 8;
+        cpu->a = cpu->pc;
+        break;
     case 0x31:	/* LD EA,SP */
+        cpu->e = cpu->sp >> 8;
+        cpu->a = cpu->sp;
+        break;
     case 0x32:	/* LD EA,P2 */
+        cpu->e = cpu->p2 >> 8;
+        cpu->a = cpu->p2;
+        break;
     case 0x33:	/* LD EA,P3 */
+        cpu->e = cpu->p3 >> 8;
+        cpu->a = cpu->p3;
+        break;
     case 0x38:	/* POP A */
         cpu->a = pop8(cpu);
         return 6;
@@ -617,6 +860,8 @@ static unsigned int execute_op(struct ns8070 *cpu)
         return 3;
     /* The low bits encode the register (E,A A,E or PC/SP/P2/P3) */
     case 0x40:  /* LD A,E */
+        cpu->a = cpu->e;
+        return 5;
     case 0x44:	/* LD PC,EA */
         cpu->pc = get_ea(cpu);
         return 5;
@@ -682,38 +927,34 @@ static unsigned int execute_op(struct ns8070 *cpu)
         cpu->a ^= cpu->e;
         return 4;
     case 0x64:	/* BP (PC) */
-        if (cpu->a & 0x80)
-            cpu->pc++;
-        else
-            cpu->pc += get_off8(cpu);
+        offs = get_off8(cpu);
+        if (!(cpu->a & 0x80))
+            cpu->pc += offs;
         return 5;
     case 0x66:	/* BP P2 */
-        if (cpu->a & 0x80)
-            cpu->pc++;
-        else
-            cpu->pc = cpu->p2 + get_off8(cpu);
+        offs = get_off8(cpu);
+        if (!(cpu->a & 0x80))
+            cpu->pc = cpu->p2 + offs;
         return 5;
     case 0x67:	/* BP P3 */
-        if (cpu->a & 0x80)
-            cpu->pc++;
-        else
-            cpu->pc = cpu->p3 + get_off8(cpu);
+        offs = get_off8(cpu);
+        if (!(cpu->a & 0x80))
+            cpu->pc = cpu->p3 + offs;
         return 5;
     case 0x6C:	/* BZ */
+        offs = get_off8(cpu);
         if (cpu->a == 0)
-            cpu->pc += get_off8(cpu);
-        else
-            cpu->pc++;
+            cpu->pc += offs;
         return 5;
     case 0x6E:	/* BZ P2 */
+        offs = get_off8(cpu);
         if (cpu->a == 0)
-            cpu->pc = cpu->p2 + get_off8(cpu);
-        else
-            cpu->pc++;
+            cpu->pc = cpu->p2 + offs;
         return 5;
     case 0x6F:	/* BZ P3 */
+        offs = get_off8(cpu);
         if (cpu->a == 0)
-            cpu->pc = cpu->p3 + get_off8(cpu);
+            cpu->pc = cpu->p3 + offs;
         else
             cpu->pc++;
         return 5;
@@ -721,7 +962,8 @@ static unsigned int execute_op(struct ns8070 *cpu)
         cpu->a = maths8add(cpu, cpu->a, cpu->e, cpu->a + cpu->e);
         return 5;
     case 0x74:	/* BRA */
-        cpu->pc += get_off8(cpu);
+        offs = get_off8(cpu);
+        cpu->pc += offs;
         return 5;
     case 0x76:	/* BRA P2 */
         cpu->pc = cpu->p2 + get_off8(cpu);
@@ -733,22 +975,19 @@ static unsigned int execute_op(struct ns8070 *cpu)
         cpu->a = maths8sub(cpu, cpu->a, cpu->e, cpu->a - cpu->e);
         return 5;
     case 0x7C:	/* BNZ */
+        offs = get_off8(cpu);
         if (cpu->a)
-            cpu->pc += get_off8(cpu);
-        else
-            cpu->pc++;
+            cpu->pc += offs;
         return 5;
     case 0x7E:	/* BNZ P2 */
+        offs = get_off8(cpu);
         if (cpu->a)
-            cpu->pc = cpu->p2 + get_off8(cpu);
-        else
-            cpu->pc++;
+            cpu->pc = cpu->p2 + offs ;
         return 5;
     case 0x7F:	/* BNZ P3 */
+        offs = get_off8(cpu);
         if (cpu->a)
-            cpu->pc = cpu->p3 + get_off8(cpu);
-        else
-            cpu->pc++;
+            cpu->pc = cpu->p3 + offs;
         return 5;
     default:
         illegal(cpu);
