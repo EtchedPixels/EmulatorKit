@@ -404,15 +404,13 @@ int main(int argc, char *argv[])
 	device_init();
 
 	while (1) {
-		unsigned n = 0;
-		while(n++ < 5000) {
-			/* 8MHz 68000 */
-			m68k_execute(800);
-			acia_timer(acia);
-			via_tick(via, 800);
-			recalc_interrupts();
-			if (!fast)
-				take_a_nap();
-		}
+		/* 8MHz 68000 */
+		m68k_execute(800);
+		acia_timer(acia);
+		via_tick(via, 800);
+		recalc_interrupts();
+		/* 0.1ms sleep */
+		if (!fast)
+			take_a_nap();
 	}
 }
