@@ -451,8 +451,8 @@ int main(int argc, char *argv[])
 	while (1) {
 		unsigned n = 0;
 		while(n++ < 5000) {
-			/* A 12MHz 68000 should do 12000 cycles per 1/10000th of a
-			   second. We do a blind 0.01 second sleep so we are actually
+			/* A 12MHz 68000 should do 1200 cycles per 0.1ms
+			   We do a blind 0.01ns second sleep so we are actually
 			   emulating a bit under 12Mhz - which will do fine for
 			   testing this stuff */
 			m68k_execute(1200);
