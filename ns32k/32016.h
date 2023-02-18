@@ -12,6 +12,7 @@ extern void ns32016_reset_addr(uint32_t StartAddress);
 extern void ns32016_exec(int tstates);
 extern void ns32016_close(void);
 extern void ns32016_build_matrix(void);
+extern void ns32016_set_irq(unsigned mask);
 
 /*
  *	Platform provided

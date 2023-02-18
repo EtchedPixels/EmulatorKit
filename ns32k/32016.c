@@ -94,6 +94,7 @@ static void write_x8(uint32_t addr, uint8_t val)
 static void write_arbitary(uint32_t addr, void *data, uint32_t size)
 {
 	uint8_t *p = data;
+	/* FIXME: endian assumptions versus read_n */
 	while(size--)
 		write_x8(addr++, *p++);
 		
@@ -156,7 +157,7 @@ static uint8_t GetFunction(uint8_t FirstByte)
 		return FUNC(Format6, 0);
 	case 0xCE:
 		return FUNC(Format7, 0);
-	      CASE4(0x2E):
+	CASE4(0x2E):
 		return FUNC(Format8, 0);
 	case 0x3E:
 		return FUNC(Format9, 0);
@@ -918,8 +919,8 @@ void StringRegisterUpdate(uint32_t opcode)
 			r[2] += Size;
 		}
 	}
-
 	r[0]--;			// Adjust R0
+	fprintf(stderr, "StringRU now %d\n", r[0]);
 }
 
 uint32_t CheckCondition(uint32_t Pattern)
@@ -1084,6 +1085,13 @@ uint32_t ReturnCommon(void)
 	return 0;		// OK
 }
 
+void ns32016_disassemble(unsigned opcode, unsigned pc)
+{
+	fprintf(stderr, "%08X: %02X %02X %02X %02X\n",
+		pc, opcode & 0xFF, (opcode >> 8) & 0xFF, (opcode >> 16) & 0xFF,
+			(opcode >> 24) & 0xFF);
+}
+
 void ns32016_exec(int cycles)
 {
 	uint32_t opcode, WriteIndex;
@@ -1114,6 +1122,8 @@ void ns32016_exec(int cycles)
 
 		startpc = pc;
 		opcode = read_x32(pc);
+
+		ns32016_disassemble(opcode, pc);
 
 		if (pc == PR.hugo.BPC) {
 			SET_TRAP(BreakPointHit);
@@ -1903,6 +1913,10 @@ void ns32016_exec(int cycles)
 
 		case MOVS:
 			{
+				/* MOVS works in byte/word/dword except for translations
+				   which must be byte. We *MUST* do this one opsize at a time
+				   because the results for an overlapping copy or for an
+				   interrupted copy will not be correct otherwise */
 				if (r[0] == 0) {
 					F_FLAG = 0;
 					continue;
@@ -1910,6 +1924,7 @@ void ns32016_exec(int cycles)
 
 				temp = read_n(r[1], OpSize.Op[0]);
 
+				/* FIXME: do we need to fault here if size is not byte */
 				if (opcode & BIT(Translation)) {
 					temp = read_x8(r[3] + temp);	// Lookup the translation
 				}
@@ -2985,4 +3000,9 @@ void ns32016_exec(int cycles)
 		}
 #endif
 	}
+}
+
+void ns32016_set_irq(unsigned mask)
+{
+	ns32016_irq = mask;
 }

@@ -95,10 +95,10 @@ unsigned int next_char(void)
 
 void recalc_interrupts(void)
 {
-//	if (live_irq)
-//TODO		ins32k_set_int(INT_RST65);
-//	else
-//TODO		ins32k_clear_int(INT_RST65);
+	if (live_irq)
+		ns32016_set_irq(1);
+	else
+		ns32016_set_irq(0);
 }
 
 static void int_set(int src)
