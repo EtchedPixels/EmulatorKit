@@ -4,7 +4,7 @@
  *	Platform features
  *
  *	Z80 at 14.7MHz
- *	Zilog SIO/2 at 0x80-0x83
+ *	Zilog SIO/2 at 0x80-0x83 at 1/2 clock
  *	Memory banking Zeta style 16K page at 0x60-63
  *	Config port at 64
  *	RTC on I2C
@@ -13,8 +13,8 @@
  *	I2C/SPI use
  *	64, 68, 69
  *
- *	TODO: what are the CTC interconnections
- *	      i2c emulation
+ *	TODO:
+ *      i2c emulation
  */
 
 #include <stdio.h>
@@ -752,7 +752,8 @@ static void spi_clock_high(void)
 	bitcnt++;
 	if (bitcnt == 8) {
 		rxbits = sd_spi_in(sdcard, txbits);
-		fprintf(stderr, "spi %02X | %02X\n", rxbits, txbits);
+		if (trace & TRACE_SPI)
+			fprintf(stderr, "spi %02X | %02X\n", rxbits, txbits);
 		bitcnt = 0;
 	}
 }
