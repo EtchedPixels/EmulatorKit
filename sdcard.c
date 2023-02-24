@@ -24,6 +24,7 @@ struct sdcard {
 	int sd_cs;
 	const char *sd_name;
 	int debug;
+	unsigned block;
 };
 
 static const uint8_t sd_csd[17] = {
@@ -69,15 +70,14 @@ static uint8_t sd_process_command(struct sdcard *c)
 	case 0x40+1:		/* CMD 1 - leave idle */
 		return 0x00;	/* Immediately indicate we did */
 	case 0x40+8:		/* CMD 8 - send iface cond */
-		c->sd_out[0] = 0x01; 	/* Error */
-		c->sd_out[1] = 0x00;	/* Version 0 */
-		c->sd_out[2] = 0x00;	/* Blah... */
-		c->sd_out[3] = 0x01;	/* 0x01 - 3v3 */
-		c->sd_out[4] = c->sd_cmd[4];
-		c->sd_outlen = 5;
+		c->sd_out[0] = 0x00;	/* Version 0 */
+		c->sd_out[1] = 0x00;	/* Blah... */
+		c->sd_out[2] = 0x01;	/* 0x01 - 3v3 */
+		c->sd_out[3] = c->sd_cmd[4];
+		c->sd_outlen = 4;
 		c->sd_outp = 0;
 		c->sd_mode = 2;
-		return 0x00;
+		return 0x01;
 	case 0x40+9:		/* CMD 9 - read the CSD */
 		memcpy(c->sd_out,sd_csd, 17);
 		c->sd_outlen = 17;
@@ -101,6 +101,8 @@ static uint8_t sd_process_command(struct sdcard *c)
 		c->sd_out[1] = 0xFE;
 		c->sd_lba = c->sd_cmd[4] + 256 * c->sd_cmd[3] + 65536 * c->sd_cmd[2] +
 			16777216 * c->sd_cmd[1];
+		if (c->block)
+			c->sd_lba <<= 9;
 		if (c->debug)
 			fprintf(stderr, "%s: Read LBA %lx\n", c->sd_name, (long)c->sd_lba);
 		if (lseek(c->sd_fd, c->sd_lba, SEEK_SET) < 0 || read(c->sd_fd, c->sd_out + 2, 512) != 512) {
@@ -118,22 +120,25 @@ static uint8_t sd_process_command(struct sdcard *c)
 		c->sd_inlen = 515;	/* Data FF FF FF */
 		c->sd_lba = c->sd_cmd[4] + 256 * c->sd_cmd[3] + 65536 * c->sd_cmd[2] +
 			16777216 * c->sd_cmd[1];
+		if (c->block)
+			c->sd_lba <<= 9;
 		c->sd_inp = 0;
 		c->sd_mode = 4;	/* Send a pad then go to mode 3 */
 		return 0x00;	/* The expected OK */
-	/* We can't turn this on until we support the needed base commands */
 	case 0x40+55:
 		c->sd_ext = 1;
 		return 0x01;
 	case 0x40+58:
-		c->sd_outlen = 5;
+		/* Minimal bits of HC/XC support */
+		c->sd_outlen = 4;
 		c->sd_outp = 0;
-		c->sd_out[0] = 0;
-		c->sd_out[1] = 0x80;
-		c->sd_out[2] = 0xFF;
+		c->sd_out[0] = 0x80;
+		c->sd_out[1] = 0xFF;
+		c->sd_out[2] = 0;
 		c->sd_out[3] = 0;
-		c->sd_out[4] = 0;
 		c->sd_mode = 2;
+		if (c->block)
+			c->sd_out[0] = 0xC0;
 		return 0x00;
 	default:
 		return 0x7F;
@@ -280,4 +285,9 @@ void sd_free(struct sdcard *c)
 {
 	sd_detach(c);
 	free(c);
+}
+
+void sd_blockmode(struct sdcard *c)
+{
+	c->block = 1;
 }
