@@ -6,7 +6,7 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	rcbus-80c188 rcbus-8085 rcbus-z8 rcbus-z180 rbcv2 searle linc80 \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
-	littleboard mini68k mb020 pico68 z80retro
+	littleboard mini68k mb020 pico68 z80retro 2063
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2 vz300
 
@@ -216,6 +216,25 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 
 z80retro: z80retro.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z80retro.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
+
+2063: 2063.o sdcard.o z80dis.o libz80/libz80.o
+	cc -g3 2063.o sdcard.o z80dis.o libz80/libz80.o -lm -o 2063
+
+# TODO make rules and dependencies within z280/*
+z280rc: z280rc.o ide.o rtc_bitbang.o z280/z280uart.o z280/z80daisy.o z280/z280dasm.o z280/z280.o
+	cc -g3 z280rc.o ide.o rtc_bitbang.o z280/z280uart.o z280/z80daisy.o z280/z280dasm.o z280/z280.o -o z280rc
+
+z280/z280uart.o: z280/z280uart.c z280/z280.h
+	cc -c z280/z280uart.c -o z280/z280uart.o
+
+z280/z80daisy.o: z280/z80daisy.c z280/z280.h
+	cc -c z280/z80daisy.c -o z280/z80daisy.o
+
+z280/z280dasm.o: z280/z280dasm.c z280/z280.h
+	cc -c z280/z280dasm.c -o z280/z280dasm.o
+
+z280/z280.o: z280/z280.c z280/z280.h
+	cc -c z280/z280.c -o z280/z280.o
 
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
