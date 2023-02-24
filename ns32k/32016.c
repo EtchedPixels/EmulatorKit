@@ -190,24 +190,24 @@ const uint32_t IndexLKUP[8] = { 0x0, 0x1, 0x4, 0x5, 0x8, 0x9, 0xC, 0xD };	// See
 void ns32016_ShowRegs(int Option)
 {
 	if (Option & BIT(0)) {
-		printf("R0=%08X R1=%08X R2=%08X R3=%08X\n", r[0], r[1], r[2], r[3]);
-		printf("R4=%08X R5=%08X R6=%08X R7=%08X\n", r[4], r[5], r[6], r[7]);
+		fprintf(stderr, "\tR0=%08X R1=%08X R2=%08X R3=%08X\n", r[0], r[1], r[2], r[3]);
+		fprintf(stderr, "\tR4=%08X R5=%08X R6=%08X R7=%08X\n", r[4], r[5], r[6], r[7]);
 	}
 
 	if (Option & BIT(1)) {
-		printf("PC=%08X SB=%08X SP=%08X FP=%08X\n", pc, sb, GET_SP(), fp);
-		printf("Traps=%08X INTBASE=%08X PSR=%04X MOD=%04X\n", TrapFlags, intbase, psr, mod);
+		fprintf(stderr, "\tPC=%08X SB=%08X SP=%08X FP=%08X\n", pc, sb, GET_SP(), fp);
+		fprintf(stderr, "\tTraps=%08X INTBASE=%08X PSR=%04X MOD=%04X\n", TrapFlags, intbase, psr, mod);
 	}
 
 	if (nscfg.cfg_bits.fpu_flag) {
 		if (Option & BIT(2)) {
-			printf("F0=%f F1=%f F2=%f F3=%f\n", FR.fr32[0], FR.fr32[1], FR.fr32[4], FR.fr32[5]);
-			printf("F4=%f F5=%f F6=%f F7=%f\n", FR.fr32[8], FR.fr32[9], FR.fr32[12], FR.fr32[13]);
+			fprintf(stderr, "\tF0=%f F1=%f F2=%f F3=%f\n", FR.fr32[0], FR.fr32[1], FR.fr32[4], FR.fr32[5]);
+			fprintf(stderr, "\tF4=%f F5=%f F6=%f F7=%f\n", FR.fr32[8], FR.fr32[9], FR.fr32[12], FR.fr32[13]);
 		}
 
 		if (Option & BIT(3)) {
-			printf("D0=%lf D1=%lf D2=%lf D3=%lf\n", FR.fr64[0], FR.fr64[1], FR.fr64[2], FR.fr64[3]);
-			printf("D4=%lf D5=%lf D6=%lf D7=%lf\n", FR.fr64[4], FR.fr64[5], FR.fr64[6], FR.fr64[7]);
+			fprintf(stderr, "\tD0=%lf D1=%lf D2=%lf D3=%lf\n", FR.fr64[0], FR.fr64[1], FR.fr64[2], FR.fr64[3]);
+			fprintf(stderr, "\tD4=%lf D5=%lf D6=%lf D7=%lf\n", FR.fr64[4], FR.fr64[5], FR.fr64[6], FR.fr64[7]);
 		}
 	}
 }
@@ -1087,9 +1087,12 @@ uint32_t ReturnCommon(void)
 
 void ns32016_disassemble(unsigned opcode, unsigned pc)
 {
-	fprintf(stderr, "%08X: %02X %02X %02X %02X\n",
-		pc, opcode & 0xFF, (opcode >> 8) & 0xFF, (opcode >> 16) & 0xFF,
+	fprintf(stderr, "%08X%c: %02X %02X %02X %02X\n",
+		pc,
+		U_FLAG ? 'U': 'S',
+		opcode & 0xFF, (opcode >> 8) & 0xFF, (opcode >> 16) & 0xFF,
 			(opcode >> 24) & 0xFF);
+	ns32016_ShowRegs(3);
 }
 
 void ns32016_exec(int cycles)
@@ -1466,9 +1469,12 @@ void ns32016_exec(int cycles)
 
 		case RETT:
 			{
+				fprintf(stderr, "RETT pc was %x\n", pc);
 				if (ReturnCommon()) {
+					fprintf(stderr, "PrivTrap\n");
 					GOTO_TRAP(PrivilegedInstruction);
 				}
+				fprintf(stderr, "RETT pc is %x\n", pc);
 
 				INC_SP(temp);
 				continue;
