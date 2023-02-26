@@ -201,7 +201,7 @@ static void data_in_state(struct ide_taskfile *tf)
   /* We don't clear DRDY here, drives may well accept a command at this
      point and at least one firmware for RC2014 assumes this */
   tf->status &= ~ST_BSY;
-  tf->status |= ST_DRQ;
+  tf->status |= ST_DRQ | ST_DRDY;
   d->intrq = 1;			/* Double check */
 }
 
@@ -210,8 +210,8 @@ static void data_out_state(struct ide_taskfile *tf)
   struct ide_drive *d = tf->drive;
   d->state = IDE_DATA_OUT;
   d->dptr = d->data;
-  tf->status &= ~ (ST_BSY|ST_DRDY);
-  tf->status |= ST_DRQ;
+  tf->status &= ~ST_BSY;
+  tf->status |= ST_DRQ | ST_DRDY;
   d->intrq = 1;			/* Double check */
 }
 
@@ -924,6 +924,8 @@ int ide_make_drive(uint8_t type, int fd)
   ident[1] = le16(c);
   ident[3] = le16(h);
   ident[6] = le16(s);
+  ident[7] = le16((c * h * s) >> 16);
+  ident[8] = le16(c * h * s);
   ident[54] = ident[1];
   ident[55] = ident[3];
   ident[56] = ident[6];
