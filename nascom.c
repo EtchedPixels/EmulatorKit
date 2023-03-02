@@ -16,6 +16,10 @@
  *	Add the NASCOM2 control, shift and lf/ch etc
  *	Native keymap mode
  *	Fix disk write
+ *
+ *	There were a bunch of related systems including the
+ *	Gemini GM811 which used the same bus but were different
+ *	systems. They are not covered here.
  */
 
 #include <stdio.h>
@@ -56,7 +60,7 @@ static uint32_t texturebits[48 * CWIDTH * 16 * CHEIGHT];
 
 struct keymatrix *matrix;
 
-//static uint8_t page_mem[4][65536];
+static uint8_t mapmem[4 * 65536];
 static uint8_t base_mem[65536];
 static uint64_t is_rom;
 static uint64_t is_base;
@@ -73,6 +77,11 @@ static uint8_t sasi_en;
 
 static unsigned int nascom_ver = 1;
 static unsigned int fdc_gemini;
+static unsigned int has_gm801;
+static unsigned int has_map80;
+
+static uint8_t map80 = 0x00;
+static uint8_t map_gm801 = 0x11;
 
 #define NASFDC		1
 #define GM829		2
@@ -99,12 +108,48 @@ static int trace = 0;
 static uint8_t *mmu(uint16_t addr, bool write)
 {
 	uint64_t block = 1ULL << (addr / 1024);
+	/* Base system - eg workspace - wins over cards */
 	if (!(is_present & block))
 		return NULL;
 	if ((is_rom & block) && write)
 		return NULL;
 	if (is_base & block)
 		return base_mem + addr;
+	/* Banked memory options */
+	if (has_map80) {
+		/* Port 0xFE works as follows
+			7: reset - use Nascom mapping, set use map80 32K
+			6: clear - page lower 32K, set page upper 32K
+			5: unused
+			4-0: select 64K page, and bank */
+		if (map80 & 0x80) {
+			if ((addr & 0x8000) != ((map80 & 0x40) ? 0x8000: 0x0000))
+				return mapmem + addr;
+			/* Is being mapped */
+			return mapmem + (addr & 0x7FFF) + (map80 & 0x0F) * 0x8000;
+		} else {
+			return mapmem + addr + (map80 & 0x1E) * 0x8000;
+		}
+	}
+	/* Gemini 80 page mode. Cards are switched by port 0xFE with a simple
+	   read enable/write enable bit for each of four card positiosn (11
+	   at boot setting card 0 R card 0 W. Multiple card writes are
+	   permitted so we handle write specially below as well */
+	if (has_gm801) {
+		switch(map_gm801 & 0x0F) {
+		case 0x01:
+			return mapmem;
+		case 0x02:
+			return mapmem + 0x10000;
+		case 0x04:
+			return mapmem + 0x20000;
+		case 0x08:
+			return mapmem + 0x30000;
+		default:
+			fprintf(stderr, "*** Invalid read state %02X\n", map_gm801);
+			return NULL;
+		}
+	}
 	return NULL;
 }
 	
@@ -125,7 +170,19 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	uint8_t *p = mmu(addr, true);
 
-	if (p) {
+	/* Writes to multiple banks */
+	if (has_gm801) {
+		if (map_gm801 & 0x10)
+			mapmem[addr] = val;
+		if (map_gm801 & 0x20)
+			mapmem[addr + 0x10000] = val;
+		if (map_gm801 & 0x40)
+			mapmem[addr + 0x20000] = val;
+		if (map_gm801 & 0x80)
+			mapmem[addr + 0x30000] = val;
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "%04X <- %02X\n", addr, val);
+	} else if (p) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "%04X <- %02X\n", addr, val);
 		*p = val;
@@ -419,6 +476,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 			wd17xx_set_side(fdc, !!(fdc_latch & 0x10));
 			/* Turn on the motor for 10 seconds */
 			fdc_motor = 1000;
+			wd17xx_motor(fdc, 1);
 			/* TODO: D6 is density select */
 		}
 		break;
@@ -818,6 +876,10 @@ int main(int argc, char *argv[])
 		case '3':
 			nascom_ver = 2;
 			break;
+		case '8':
+			has_map80 = 1;
+			has_gm801 = 0;
+			break;
 		case 'A':
 			fdc_path[0] = optarg;
 			need_fdc = 1;
@@ -849,6 +911,10 @@ int main(int argc, char *argv[])
 		case 'f':
 			fast = 1;
 			break;
+		case 'g':
+			has_map80 = 0;
+			has_gm801 = 1;
+			break;
 		case 'r':
 			rom_path = optarg;
 			break;
@@ -873,11 +939,15 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "nascom: invalid bootstrap ROM size\n");
 			exit(1);
 		}
-		/* Assume a full 64K card is present */
-		is_present = 0xFFFFFFFFFFFFFFFFULL;
-		is_base = 0xFFFFFFFFFFFFFFFFULL;
+		if (has_gm801 == 0 && has_map80 == 0) {
+			/* Assume a full 64K card is present */
+			is_present = 0xFFFFFFFFFFFFFFFFULL;
+			is_base = 0xFFFFFFFFFFFFFFFFULL;
+		}
 		/* Only the F000-F7FF space is ROM */
 		is_rom = 0x3ULL << 60;
+		/* Workspace and video is at F800-FFFF */
+		is_base |= 0xFULL << 60;
 		nascom_ver = 2;
 		need_fdc = 1;
 	} else {
@@ -926,7 +996,7 @@ int main(int argc, char *argv[])
 
 	if (need_fdc) {
 		unsigned i;
-		fdc = wd17xx_create();
+		fdc = wd17xx_create(1791);
 		for (i = 0; i < 4; i++) {
 			if (fdc_path[i]) {
 				struct diskgeom *d = guess_format(fdc_path[i]);
@@ -935,6 +1005,9 @@ int main(int argc, char *argv[])
 			}
 		}
 		wd17xx_trace(fdc, trace & TRACE_FDC);
+		wd17xx_set_sector0(fdc, 1);
+		/* Weird track numbering for second side */
+		wd17xx_set_side1(fdc, 80);
 	}
 	/* GM816 RTC emulation */
 	if (hasrtc) {
@@ -1041,6 +1114,8 @@ int main(int argc, char *argv[])
 		/* Do 10ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+		if (fdc)
+			wd17xx_tick(fdc, 10);
 	}
 	exit(0);
 }

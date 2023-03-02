@@ -1032,7 +1032,7 @@ int main(int argc, char *argv[])
 	sio_reset();
 	ctc_init();
 
-	wd = wd17xx_create();
+	wd = wd17xx_create(1772);
 	/* Not clear what we do here - probably we need to add support
 	   for proper disk metadata formats as the disks came with some
 	   peculiar setings - like sectors numbering from 16 and 1K or 512
