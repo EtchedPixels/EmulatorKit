@@ -1007,7 +1007,10 @@ int main(int argc, char *argv[])
 		wd17xx_trace(fdc, trace & TRACE_FDC);
 		wd17xx_set_sector0(fdc, 1);
 		/* Weird track numbering for second side */
-		wd17xx_set_side1(fdc, 80);
+		if (cpmmap)
+			wd17xx_set_side1(fdc, 77);
+		/* When we do gemini we need to deal with gemini having
+		   sector 0 */
 	}
 	/* GM816 RTC emulation */
 	if (hasrtc) {
