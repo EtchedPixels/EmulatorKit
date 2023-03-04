@@ -34,7 +34,7 @@ static uint8_t eerom[2048];		/* EEROM - not properly emulated yet */
 static uint8_t fast = 0;
 
 static uint32_t flatahigh = 0;
-static uint8_t romen = 1;
+static uint8_t romen = 0;
 
 struct sdcard *sdcard;
 
@@ -144,7 +144,7 @@ static void flatarecalc(struct m6800 *cpu)
 	fprintf(stderr, "pactl %02X padr %02X\n", cpu->io.pactl, cpu->io.padr);
 
 	if (!(cpu->io.pactl & 0x08))
-		bits &= 0xF7;
+		bits &= 0x7F;
 	/* We should check for OC/IC function and blow up messily
 	   if set */
 	flatahigh = 0;
@@ -208,7 +208,7 @@ uint8_t m68hc11_spi_done(struct m6800 *cpu)
 
 uint8_t *m6800_map(uint16_t addr, int wr)
 {
-	if (addr >= 0xC000 && romen) {
+	if (addr >= 0xC000 && romen == 0) {
 		if (wr)
 			return NULL;
 		return rom + (addr & 0x3FFF);
@@ -274,7 +274,7 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	unsigned int cycles = 0;
 
-	while ((opt = getopt(argc, argv, "r:d:fSm:")) != -1) {
+	while ((opt = getopt(argc, argv, "r:d:fS:m:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
