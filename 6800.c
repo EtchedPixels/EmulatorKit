@@ -4308,8 +4308,12 @@ static uint8_t m68hc11_read_io(struct m6800 *cpu, uint8_t addr)
 
     switch(addr) {
         case 0x00:	/* Port A */
-            mask = 0x8F;
-            mask &= ~(cpu->io.pactl & 0x88);
+            /* Port A bits 2, 1, 0 */
+            mask = 0x07;
+            /* PA7 might be an input */
+            if (!(cpu->io.pactl & 0x80))
+                mask |= 0x80;
+            /* We return input bits plus the output bit values set */
             val = m6800_port_input(cpu, 1) & mask;
             val |= cpu->io.padr & ~mask;
             return val;
