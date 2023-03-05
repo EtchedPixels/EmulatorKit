@@ -38,9 +38,10 @@ static uint8_t romen = 0;
 
 struct sdcard *sdcard;
 
-/* The CPU E clock runs at CLK/4. The rcbus standard clock is fine
-   and makes serial rates easy */
-static uint16_t clockrate =  364/4;
+/* The CPU E clock runs at CLK/4. We clock at 8MHz with a 2MHz E */
+
+/* Clocks per 50us */
+static uint16_t clockrate =  100;
 
 static volatile int done;
 
@@ -118,7 +119,7 @@ void recalc_interrupts(void)
 void m6800_sci_change(struct m6800 *cpu)
 {
 	static uint_fast8_t pscale[4] = {1, 3, 4, 13 };
-	unsigned int baseclock = 7372800 / 4;	/* E clock */
+	unsigned int baseclock = 8000000 / 4;	/* E clock */
 	unsigned int prescale = pscale[(cpu->io.baud >> 4) & 0x03];
 	unsigned int divider = 1 << (cpu->io.baud & 7);
 
@@ -141,7 +142,8 @@ void m6800_tx_byte(struct m6800 *cpu, uint8_t byte)
 static void flatarecalc(struct m6800 *cpu)
 {
 	uint8_t bits = cpu->io.padr;
-	fprintf(stderr, "pactl %02X padr %02X\n", cpu->io.pactl, cpu->io.padr);
+	if (trace & TRACE_ROM)
+		fprintf(stderr, "pactl %02X padr %02X\n", cpu->io.pactl, cpu->io.padr);
 
 	if (!(cpu->io.pactl & 0x08))
 		bits &= 0x7F;
@@ -371,7 +373,7 @@ int main(int argc, char *argv[])
 	while (!done) {
 		unsigned int i;
 		unsigned int j;
-		/* 36400 T states for base rcbus - varies for others */
+
 		for (j = 0; j < 10; j++) {
 			for (i = 0; i < 10; i++) {
 				while(cycles < clockrate)
