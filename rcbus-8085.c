@@ -36,6 +36,9 @@
 #include "ide.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
+#include "system.h"
+#include "tms9918a.h"
+#include "tms9918a_render.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
@@ -54,6 +57,10 @@ static uint8_t acia_uart;
 struct ppide *ppide;
 struct rtc *rtcdev;
 struct uart16x50 *uart;
+static struct tms9918a *vdp;
+static struct tms9918a_renderer *vdprend;
+
+static uint8_t have_tms;
 
 static uint16_t tstate_steps = 369;	/* rcbus speed (7.4MHz)*/
 
@@ -61,15 +68,13 @@ static uint16_t tstate_steps = 369;	/* rcbus speed (7.4MHz)*/
 
 static uint8_t live_irq;
 
-#define IRQ_SIOA	1
-#define IRQ_SIOB	2
-#define IRQ_CTC		3
-#define IRQ_ACIA	4
-#define IRQ_16550A	5
+#define IRQ_ACIA	1
+#define IRQ_16550A	2
+#define IRQ_TMS9918A	3
 
 static nic_w5100_t *wiz;
 
-static volatile int done;
+volatile int emulator_done;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
@@ -79,10 +84,10 @@ static volatile int done;
 #define TRACE_512	32
 #define TRACE_RTC	64
 #define TRACE_ACIA	128
-#define TRACE_CTC	256
 #define TRACE_CPU	512
 #define TRACE_IRQ	1024
 #define TRACE_UART	2048
+#define TRACE_TMS9918A  4096
 
 static int trace = 0;
 
@@ -279,6 +284,8 @@ uint8_t i8085_inport(uint8_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		return nic_w5100_read(wiz, addr & 3);
+	if ((addr == 0x98 || addr == 0x99) && vdp)
+		return tms9918a_read(vdp, addr & 1);
 	if (addr == 0x0C && rtc)
 		return rtc_read(rtcdev);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart)
@@ -317,6 +324,8 @@ void i8085_outport(uint8_t addr, uint8_t val)
 		bankenable = val & 1;
 	} else if (addr == 0x0C && rtc)
 		rtc_write(rtcdev, val);
+	else if ((addr == 0x98 || addr == 0x99) && vdp)
+		tms9918a_write(vdp, addr & 1, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart)
 		uart16x50_write(uart, addr & 0x0F, val);
 	else if (addr == 0xFD) {
@@ -343,6 +352,10 @@ static void poll_irq_event(void)
 {
 	if (acia)
 		acia_check_irq(acia);
+	if (vdp && tms9918a_irq_pending(vdp))
+		int_set(IRQ_TMS9918A);
+	else
+		int_clear(IRQ_TMS9918A);
 }
 
 static struct termios saved_term, term;
@@ -350,7 +363,7 @@ static struct termios saved_term, term;
 static void cleanup(int sig)
 {
 	tcsetattr(0, TCSADRAIN, &saved_term);
-	done = 1;
+	emulator_done = 1;
 }
 
 static void exit_cleanup(void)
@@ -376,7 +389,7 @@ int main(int argc, char *argv[])
 	int acia_input;
 	int uart_16550a = 0;
 
-	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:RwS:")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:RwS:T")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -419,6 +432,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'R':
 			rtc = 1;
+			break;
+		case 'T':
+			have_tms = 1;
 			break;
 		case 'w':
 			wiznet = 1;
@@ -532,10 +548,15 @@ int main(int argc, char *argv[])
 			rtc_trace(rtcdev, 1);
 	}
 
-	/* 5ms - it's a balance between nice behaviour and simulation
+	if (have_tms) {
+		vdp = tms9918a_create();
+		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
+		vdprend = tms9918a_renderer_create(vdp);
+	}
+	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
+	tc.tv_nsec = 20000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -565,10 +586,10 @@ int main(int argc, char *argv[])
 	/* We run 7372000 t-states per second */
 	/* We run 369 cycles per I/O check, do that 100 times then poll the
 	   slow stuff and nap for 5ms. */
-	while (!done) {
+	while (!emulator_done) {
 		int i;
 		/* 36400 T states for base rcbus - varies for others */
-		for (i = 0; i < 100; i++) {
+		for (i = 0; i < 400; i++) {
 			i8085_exec(tstate_steps);
 			if (acia)
 				acia_timer(acia);
@@ -579,10 +600,17 @@ int main(int argc, char *argv[])
 				else
 					int_clear(IRQ_16550A);
 			}
+			/* We want to run UI events regularly it seems */
+			ui_event();
+		}
+		/* 50Hz which is near enough */
+		if (vdp) {
+			tms9918a_rasterize(vdp);
+			tms9918a_render(vdprend);
 		}
 		if (wiznet)
 			w5100_process(wiz);
-		/* Do 5ms of I/O and delays */
+		/* Do 20ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 		poll_irq_event();

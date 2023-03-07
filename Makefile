@@ -93,8 +93,11 @@ m68k/lib68k.a:
 rcbus-68008.o: rcbus-68008.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c rcbus-68008.c
 
-rcbus-8085: rcbus-8085.o intel_8085_emulator.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o 16x50.o
-	cc -g3 rcbus-8085.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o w5100.o intel_8085_emulator.o -o rcbus-8085
+rcbus-8085: rcbus-8085.o rcbus_noui.o intel_8085_emulator.o ide.o acia.o tms9918a.o tms9918a_norender.o w5100.o ppide.o rtc_bitbang.o 16x50.o
+	cc -g3 rcbus-8085.o rcbus_noui.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_norender.o w5100.o intel_8085_emulator.o -o rcbus-8085
+
+rcbus-8085_sdl2: rcbus-8085.o rcbus_sdlui.o intel_8085_emulator.o ide.o acia.o tms9918a.o tms9918a_sdl2.o w5100.o ppide.o rtc_bitbang.o 16x50.o
+	cc -g3 rcbus-8085.o rcbus_sdlui.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_sdl2.o w5100.o intel_8085_emulator.o -o rcbus-8085_sdl2 -lSDL2
 
 rcbus-80c188: rcbus-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \
