@@ -334,6 +334,7 @@ int main(int argc, char *argv[])
 		sd_attach(sdcard, fd);
 		if (trace & TRACE_SD)
 			sd_trace(sdcard, 1);
+		sd_blockmode(sdcard);
 	}
 
 	/* 5ms - it's a balance between nice behaviour and simulation
