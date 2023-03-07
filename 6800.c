@@ -4614,7 +4614,13 @@ static void m68hc11_write_io(struct m6800 *cpu, uint8_t addr, uint8_t val)
             if (cpu->io.spsr & SPSR_SPIF)
                 break;
             /* Tell the emulator an SPI transfer is beginning */
-             m68hc11_spi_begin(cpu, val);
+            /* We only emulate master so the caller must set DDRD bits
+               3 and 4 to get data. We don't check 0x20 for SS as that's
+               *way* more complicated */
+            if (cpu->io.ddrd & 0x18)
+                m68hc11_spi_begin(cpu, val);
+            else
+                m68hc11_spi_begin(cpu, 0xFF);
             /* Flat out is E/2 */
             cpu->io.spi_ticks = 16;
             if (cpu->io.spcr & 1)	/* Divide by 2 */
