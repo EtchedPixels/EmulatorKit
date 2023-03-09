@@ -1,10 +1,14 @@
-// B-em v2.2 by Tom Walker
-// 32016 parasite processor emulation (not working yet)
+/*
+ *	NS32k Emulation: from B-em via Hoglet's PiTubeDirect
+ *
+ *	Somewhat re-arranged to suit our needs
+ */
 
-// And Simon R. Ellwood
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include <math.h>
 
@@ -14,35 +18,81 @@
 #include "defs.h"
 #include "Trap.h"
 #include "Decode.h"
+#include "disassemble.h"
 
-#define CXP_UNUSED_WORD 0xAAAA
+#ifdef INCLUDE_DEBUGGER
+#include "32016_debug.h"
+#endif
 
-int nsoutput = 0;
+#define CXP_UNUSED_WORD 0xAAAAu
 
-static uint32_t r[8];
-static ProcessorRegisters PR;
+ProcessorRegisters PR;
+uint32_t r[8];
 static FloatingPointRegisters FR;
 static uint32_t FSR;
 
 static uint32_t pc;
-static uint32_t sp[2];
+uint32_t sp[2];
 static Temp64Type Immediate64;
-static uint32_t TrapFlags;
-
-#ifdef PC_SIMULATION
-uint32_t Trace = 1;
-#else
-uint32_t Trace = 0;
-#endif
 
 static uint32_t startpc;
 
-static RegLKU Regs[2];
-static uint64_t genaddr[2];
+RegLKU Regs[2];
+static uint32_t genaddr[2];
+static uint32_t *genreg[2];
 static int gentype[2];
 static OperandSizeType OpSize;
 
-static int ns32016_irq;
+uint32_t TrapFlags;
+
+static uint32_t trace;
+
+static unsigned ns32016_irq;
+
+uint8_t FunctionLookup[256];
+static const uint32_t IndexLKUP[8] = { 0x0, 0x1, 0x4, 0x5, 0x8, 0x9, 0xC, 0xD };	// See Page 2-3 of the manual!
+
+void ns32016_ShowRegs(uint32_t Option)
+{
+	if (Option & BIT(0)) {
+		fprintf(stderr, "R0=%08" PRIX32 " R1=%08" PRIX32 " R2=%08" PRIX32 " R3=%08" PRIX32, r[0], r[1], r[2], r[3]);
+		fprintf(stderr, "R4=%08" PRIX32 " R5=%08" PRIX32 " R6=%08" PRIX32 " R7=%08" PRIX32, r[4], r[5], r[6], r[7]);
+	}
+
+	if (Option & BIT(1)) {
+		fprintf(stderr, "PC=%08" PRIX32 " SB=%08" PRIX32 " SP=%08" PRIX32 " TRAP=%08" PRIX32, pc, sb, GET_SP(), TrapFlags);
+		fprintf(stderr, "FP=%08" PRIX32 " INTBASE=%08" PRIX32 " PSR=%04" PRIX32 " MOD=%04" PRIX32, fp, intbase, psr, mod);
+	}
+
+	if (nscfg.fpu_flag) {
+		if (Option & BIT(2)) {
+			fprintf(stderr, "F0=%f F1=%f F2=%f F3=%f", (double) FR.fr32[0], (double) FR.fr32[1], (double) FR.fr32[4], (double) FR.fr32[5]);
+			fprintf(stderr, "F4=%f F5=%f F6=%f F7=%f", (double) FR.fr32[8], (double) FR.fr32[9], (double) FR.fr32[12], (double) FR.fr32[13]);
+		}
+
+		if (Option & BIT(3)) {
+			fprintf(stderr, "D0=%lf D1=%lf D2=%lf D3=%lf", (double) FR.fr64[0], (double) FR.fr64[1], (double) FR.fr64[2], (double) FR.fr64[3]);
+			fprintf(stderr, "D4=%lf D5=%lf D6=%lf D7=%lf", (double) FR.fr64[4], (double) FR.fr64[5], (double) FR.fr64[6], (double) FR.fr64[7]);
+		}
+	}
+	fprintf(stderr, "\n");
+}
+
+const uint8_t FormatSizes[FormatCount + 1] =
+{
+	1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1
+};
+
+const uint32_t OpSizeLookup[6] = {
+	(sz8 << 24) | (sz8 << 16) | (sz8 << 8) | sz8,	// Integer byte
+	(sz16 << 24) | (sz16 << 16) | (sz16 << 8) | sz16,	// Integer word
+	0xFFFFFFFF,		// Illegal
+	(sz32 << 24) | (sz32 << 16) | (sz32 << 8) | sz32,	// Integer double-word
+//   (sz32 << 24) | (sz32 << 16) | (sz32 << 8) | sz32,               // Floating Point Single Precision
+//   (sz64 << 24) | (sz64 << 16) | (sz64 << 8) | sz64                // Floating Point Double Precision
+	(sz32 << 8) | sz32,	// Floating Point Single Precision
+	(sz64 << 8) | sz64	// Floating Point Double Precision
+};
 
 /*
  *	Simple memory interface
@@ -51,18 +101,6 @@ static int ns32016_irq;
 static uint8_t read_x8(uint32_t addr)
 {
 	return ns32016_read8(addr);
-}
-
-static uint32_t read_n(uint32_t addr, uint32_t size)
-{
-	uint32_t v = 0;
-	addr += size;
-	while(size--) {
-		v <<= 8;
-		/* TODO .. check this isn't backwards */
-		v |= ns32016_read8(--addr);
-	}
-	return v;
 }
 
 static uint16_t read_x16(uint32_t addr)
@@ -86,18 +124,25 @@ static uint64_t read_x64(uint32_t addr)
 	return r;
 }
 
+static uint32_t read_n(uint32_t addr, uint32_t size)
+{
+	switch(size) {
+	case sz8:
+		return read_x8(addr);
+	case sz16:
+		return read_x16(addr);
+	case sz32:
+		return read_x32(addr);
+	default:
+		fprintf(stderr, "bad readn at %06X for %d\n",
+			addr, size);
+	}
+}
+
+
 static void write_x8(uint32_t addr, uint8_t val)
 {
 	ns32016_write8(addr, val);
-}
-
-static void write_arbitary(uint32_t addr, void *data, uint32_t size)
-{
-	uint8_t *p = data;
-	/* FIXME: endian assumptions versus read_n */
-	while(size--)
-		write_x8(addr++, *p++);
-		
 }
 
 static void write_x16(uint32_t addr, uint16_t val)
@@ -118,117 +163,89 @@ static void write_x64(uint32_t addr, uint64_t val)
 	write_x32(addr + 4, val >> 32);
 }
 
-static uint8_t FunctionLookup[256];
-static const uint8_t FormatSizes[FormatCount + 1] = {
-	1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1
-};
-
-#define FUNC(FORMAT, OFFSET) (((FORMAT) << 4) + (OFFSET))
-
-static uint8_t GetFunction(uint8_t FirstByte)
+static void write_Arbitary(uint32_t addr, void *data, uint32_t size)
 {
-	switch (FirstByte & 0x0F) {
-	case 0x0A:
-		return FUNC(Format0, FirstByte >> 4);
-	case 0x02:
-		return FUNC(Format1, FirstByte >> 4);
-
-	case 0x0C:
-	case 0x0D:
-	case 0x0F:
-		{
-			if ((FirstByte & 0x70) != 0x70) {
-				return FUNC(Format2, (FirstByte >> 4) & 0x07);
-			}
-
-			return FUNC(Format3, 0);
-		}
-		// No break due to return
-	}
-
-	if ((FirstByte & 0x03) != 0x02) {
-		return FUNC(Format4, (FirstByte >> 2) & 0x0F);
-	}
-
-	switch (FirstByte) {
-	case 0x0E:
-		return FUNC(Format5, 0);	// String instruction
-	case 0x4E:
-		return FUNC(Format6, 0);
-	case 0xCE:
-		return FUNC(Format7, 0);
-	CASE4(0x2E):
-		return FUNC(Format8, 0);
-	case 0x3E:
-		return FUNC(Format9, 0);
-	case 0x7E:
-		return FUNC(Format10, 0);
-	case 0xBE:
-		return FUNC(Format11, 0);
-	case 0xFE:
-		return FUNC(Format12, 0);
-	case 0x9E:
-		return FUNC(Format13, 0);
-	case 0x1E:
-		return FUNC(Format14, 0);
-	}
-
-	return FormatBad;
+	uint8_t *p = data;
+	while(size--)
+		write_x8(addr++, *p++);
 }
-
-void ns32016_build_matrix()
-{
-	uint32_t Index;
-
-	for (Index = 0; Index < 256; Index++) {
-		FunctionLookup[Index] = GetFunction(Index);
-	}
-}
-
-const uint32_t IndexLKUP[8] = { 0x0, 0x1, 0x4, 0x5, 0x8, 0x9, 0xC, 0xD };	// See Page 2-3 of the manual!
-
-void ns32016_ShowRegs(int Option)
-{
-	if (Option & BIT(0)) {
-		fprintf(stderr, "\tR0=%08X R1=%08X R2=%08X R3=%08X\n", r[0], r[1], r[2], r[3]);
-		fprintf(stderr, "\tR4=%08X R5=%08X R6=%08X R7=%08X\n", r[4], r[5], r[6], r[7]);
-	}
-
-	if (Option & BIT(1)) {
-		fprintf(stderr, "\tPC=%08X SB=%08X SP=%08X FP=%08X\n", pc, sb, GET_SP(), fp);
-		fprintf(stderr, "\tTraps=%08X INTBASE=%08X PSR=%04X MOD=%04X\n", TrapFlags, intbase, psr, mod);
-	}
-
-	if (nscfg.cfg_bits.fpu_flag) {
-		if (Option & BIT(2)) {
-			fprintf(stderr, "\tF0=%f F1=%f F2=%f F3=%f\n", FR.fr32[0], FR.fr32[1], FR.fr32[4], FR.fr32[5]);
-			fprintf(stderr, "\tF4=%f F5=%f F6=%f F7=%f\n", FR.fr32[8], FR.fr32[9], FR.fr32[12], FR.fr32[13]);
-		}
-
-		if (Option & BIT(3)) {
-			fprintf(stderr, "\tD0=%lf D1=%lf D2=%lf D3=%lf\n", FR.fr64[0], FR.fr64[1], FR.fr64[2], FR.fr64[3]);
-			fprintf(stderr, "\tD4=%lf D5=%lf D6=%lf D7=%lf\n", FR.fr64[4], FR.fr64[5], FR.fr64[6], FR.fr64[7]);
-		}
-	}
-}
-
-static const uint32_t OpSizeLookup[6] = {
-	(sz8 << 24) | (sz8 << 16) | (sz8 << 8) | sz8,	// Integer byte
-	(sz16 << 24) | (sz16 << 16) | (sz16 << 8) | sz16,	// Integer word
-	0xFFFFFFFF,		// Illegal
-	(sz32 << 24) | (sz32 << 16) | (sz32 << 8) | sz32,	// Integer double-word
-//   (sz32 << 24) | (sz32 << 16) | (sz32 << 8) | sz32,               // Floating Point Single Precision
-//   (sz64 << 24) | (sz64 << 16) | (sz64 << 8) | sz64                // Floating Point Double Precision
-	(sz32 << 8) | sz32,	// Floating Point Single Precision
-	(sz64 << 8) | sz64	// Floating Point Double Precision
-};
 
 void ns32016_init(void)
 {
+//	init_ram();
 }
 
-void ns32016_close(void)
+#define FUNC(FORMAT, OFFSET) (((FORMAT) << 4) + (OFFSET))
+
+static uint8_t GetFunction(uint32_t FirstByte)
 {
+   switch (FirstByte & 0x0F)
+   {
+      case 0x0A:
+         return (uint8_t)FUNC(Format0, FirstByte >> 4);
+      case 0x02:
+         return (uint8_t)FUNC(Format1, FirstByte >> 4);
+
+      case 0x0C:
+      case 0x0D:
+      case 0x0F:
+      {
+         if ((FirstByte & 0x70) != 0x70)
+         {
+            return FUNC(Format2, (FirstByte >> 4) & 0x07);
+         }
+
+         return FUNC(Format3, 0);
+      }
+      // No break due to return
+   }
+
+   if ((FirstByte & 0x03) != 0x02)
+   {
+      return FUNC(Format4, (FirstByte >> 2) & 0x0F);
+   }
+
+   switch (FirstByte)
+   {
+      case 0x0E:
+         return FUNC(Format5, 0); // String instruction
+      case 0x4E:
+         return FUNC(Format6, 0);
+      case 0xCE:
+         return FUNC(Format7, 0);
+      CASE4(0x2E):
+         return FUNC(Format8, 0);
+      case 0x3E:
+         return FUNC(Format9, 0);
+      case 0x7E:
+         return FUNC(Format10, 0);
+      case 0xBE:
+         return FUNC(Format11, 0);
+      case 0xFE:
+         return FUNC(Format12, 0);
+      case 0x9E:
+         return FUNC(Format13, 0);
+      case 0x1E:
+         return FUNC(Format14, 0);
+   }
+
+   return FormatBad;
+}
+
+void ns32016_reset_addr(uint32_t StartAddress)
+{
+	uint32_t Index;
+
+	for (Index = 0; Index < 256; Index++)
+		FunctionLookup[Index] = GetFunction(Index);
+
+	pc = StartAddress;
+	psr = 0;
+
+	FSR = 0;
+
+	//PR.BPC = 0x20F; //Example Breakpoint
+	PR.BPC = 0xFFFFFFFF;
 }
 
 void ns32016_reset(void)
@@ -236,15 +253,19 @@ void ns32016_reset(void)
 	ns32016_reset_addr(0xF00000);
 }
 
-void ns32016_reset_addr(uint32_t StartAddress)
+uint32_t ns32016_get_pc(void)
 {
-	ns32016_build_matrix();
+	return pc;
+}
 
-	pc = StartAddress;
-	psr = 0;
+uint32_t ns32016_get_startpc(void)
+{
+	return startpc;
+}
 
-	//PR.BPC = 0x20F; //Example Breakpoint
-	PR.hugo.BPC = 0xFFFFFFFF;
+void ns32016_set_pc(uint32_t value)
+{
+	pc = value;
 }
 
 static void pushd(uint32_t val)
@@ -253,10 +274,10 @@ static void pushd(uint32_t val)
 	write_x32(GET_SP(), val);
 }
 
-void PushArbitary(uint64_t Value, uint32_t Size)
+static void PushArbitary(uint64_t Value, uint32_t Size)
 {
 	DEC_SP(Size);
-	write_arbitary(GET_SP(), &Value, Size);
+	write_Arbitary(GET_SP(), &Value, Size);
 }
 
 static uint16_t popw(void)
@@ -267,7 +288,7 @@ static uint16_t popw(void)
 	return temp;
 }
 
-static uint32_t popd()
+static uint32_t popd(void)
 {
 	uint32_t temp = read_x32(GET_SP());
 	INC_SP(4);
@@ -275,7 +296,7 @@ static uint32_t popd()
 	return temp;
 }
 
-uint32_t PopArbitary(uint32_t Size)
+static uint32_t PopArbitary(uint32_t Size)
 {
 	uint32_t Result = read_n(GET_SP(), Size);
 	INC_SP(Size);
@@ -297,7 +318,7 @@ int32_t GetDisplacement(uint32_t * pPC)
 	case 0:		// 7 Bit Positive
 	case 1:
 		{
-			Value = Disp.usebyteu.u8;
+			Value = Disp.u8;
 			(*pPC) += sizeof(int8_t);
 		}
 		break;
@@ -305,28 +326,28 @@ int32_t GetDisplacement(uint32_t * pPC)
 	case 2:		// 7 Bit Negative
 	case 3:
 		{
-			Value = (Disp.usebyteu.u8 | 0xFFFFFF80);
+			Value = (int32_t) (Disp.u8 | 0xFFFFFF80u);
 			(*pPC) += sizeof(int8_t);
 		}
 		break;
 
 	case 4:		// 14 Bit Positive
 		{
-			Value = (Disp.usewordu.u16 & 0x3FFF);
+			Value = (Disp.u16 & 0x3FFFu);
 			(*pPC) += sizeof(int16_t);
 		}
 		break;
 
 	case 5:		// 14 Bit Negative
 		{
-			Value = (Disp.usewordu.u16 | 0xFFFFC000);
+			Value = (int32_t) (Disp.u16 | 0xFFFFC000);
 			(*pPC) += sizeof(int16_t);
 		}
 		break;
 
 	case 6:		// 30 Bit Positive
 		{
-			Value = (Disp.u32 & 0x3FFFFFFF);
+			Value = (Disp.u32 & 0x3FFFFFFFu);
 			(*pPC) += sizeof(int32_t);
 		}
 		break;
@@ -334,7 +355,7 @@ int32_t GetDisplacement(uint32_t * pPC)
 	case 7:		// 30 Bit Negative
 	default:		// Stop it moaning about Value not being set ;)
 		{
-			Value = Disp.u32;
+			Value = (int32_t) Disp.u32;
 			(*pPC) += sizeof(int32_t);
 		}
 		break;
@@ -343,7 +364,7 @@ int32_t GetDisplacement(uint32_t * pPC)
 	return Value;
 }
 
-uint32_t Truncate(uint32_t Value, uint32_t Size)
+static uint32_t Truncate(uint32_t Value, uint32_t Size)
 {
 	switch (Size) {
 	case sz8:
@@ -355,10 +376,8 @@ uint32_t Truncate(uint32_t Value, uint32_t Size)
 	return Value;
 }
 
-uint32_t ReadGen(uint32_t c)
+static uint32_t ReadGen(uint32_t c)
 {
-	uint32_t Temp = 0;
-
 	switch (gentype[c]) {
 	case Memory:
 		{
@@ -375,8 +394,7 @@ uint32_t ReadGen(uint32_t c)
 
 	case Register:
 		{
-			Temp = *(uint32_t *) genaddr[c];
-			return Truncate(Temp, OpSize.Op[c]);
+			return Truncate(*genreg[c], OpSize.Op[c]);
 		}
 		// No break due to return
 
@@ -396,7 +414,7 @@ uint32_t ReadGen(uint32_t c)
 	return 0;
 }
 
-uint64_t ReadGen64(uint32_t c)
+static uint64_t ReadGen64(uint32_t c)
 {
 	uint64_t Temp = 0;
 
@@ -409,7 +427,7 @@ uint64_t ReadGen64(uint32_t c)
 
 	case Register:
 		{
-			Temp = *(uint64_t *) genaddr[c];
+			Temp = *(uint64_t *) genreg[c];
 		}
 		break;
 
@@ -430,27 +448,27 @@ uint64_t ReadGen64(uint32_t c)
 	return Temp;
 }
 
-uint32_t ReadAddress(uint32_t c)
+static uint32_t ReadAddress(uint32_t c)
 {
 	if (gentype[c] == Register) {
-		return *(uint32_t *) genaddr[c];
+		return *genreg[c];
 	}
 
 	return genaddr[c];
 }
 
-static void getgen(int gen, int c)
+static void getgen(uint32_t gen, int c)
 {
 	gen &= 0x1F;
-	Regs[c].Whole = gen;
+	Regs[c].Whole = (uint16_t) gen;
 
 	if (gen >= EaPlusRn) {
-		Regs[c].opbyte.UpperByte = READ_PC_BYTE();
+		Regs[c].UpperByte = READ_PC_BYTE();
 		//Regs[c].Whole |= READ_PC_BYTE() << 8;
 
-		if (Regs[c].opfelder.IdxType == Immediate) {
+		if (Regs[c].IdxType == Immediate) {
 			SET_TRAP(IllegalImmediate);
-		} else if (Regs[c].opfelder.IdxType >= EaPlusRn) {
+		} else if (Regs[c].IdxType >= EaPlusRn) {
 			SET_TRAP(IllegalDoubleIndexing);
 		}
 	}
@@ -460,31 +478,29 @@ static void GetGenPhase2(RegLKU gen, int c)
 {
 	if (gen.Whole < 0xFFFF)	// Does this Operand exist ?
 	{
-		uint32_t temp, temp2;
-
-		if (gen.opfelder.OpType <= R7) {
-			switch (gen.opfelder.RegType) {
+		if (gen.OpType <= R7) {
+			switch (gen.RegType) {
 			case Integer:
 				{
-					genaddr[c] = (uint64_t) & r[gen.opfelder.OpType];
+					genreg[c] = &r[gen.OpType];
 				}
 				break;
 
 			case SinglePrecision:
-				{
-					genaddr[c] = (uint64_t) & FR.fr32[IndexLKUP[gen.opfelder.OpType]];
+				{	// cppcheck-suppress invalidPointerCast
+					genreg[c] = (uint32_t *) & FR.fr32[IndexLKUP[gen.OpType]];
 				}
 				break;
 
 			case DoublePrecision:
-				{
-					genaddr[c] = (uint64_t) & FR.fr64[gen.opfelder.OpType];
+				{	// cppcheck-suppress invalidPointerCast
+					genreg[c] = (uint32_t *) & FR.fr64[gen.OpType];
 				}
 				break;
 
 			default:
 				{
-					//  PiWARN("Illegal RegType value: %d\n", gen.opfelder.RegType);
+					fprintf(stderr, "Illegal RegType value: %u", gen.RegType);
 				}
 			}
 
@@ -492,7 +508,7 @@ static void GetGenPhase2(RegLKU gen, int c)
 			return;
 		}
 
-		if (gen.opfelder.OpType == Immediate) {
+		if (gen.OpType == Immediate) {
 			MultiReg temp3;
 
 			if (OpSize.Op[c] == sz64) {
@@ -504,9 +520,9 @@ static void GetGenPhase2(RegLKU gen, int c)
 				// Why can't they just decided on an endian and then stick to it?
 				temp3.u32 = SWAP32(read_x32(pc));
 				if (OpSize.Op[c] == sz8)
-					genaddr[c] = temp3.usebyteu.u8;
+					genaddr[c] = temp3.u8;
 				else if (OpSize.Op[c] == sz16)
-					genaddr[c] = temp3.usewordu.u16;
+					genaddr[c] = temp3.u16;
 				else
 					genaddr[c] = temp3.u32;
 			}
@@ -518,61 +534,61 @@ static void GetGenPhase2(RegLKU gen, int c)
 
 		gentype[c] = Memory;
 
-		if (gen.opfelder.OpType <= R7_Offset) {
-			genaddr[c] = r[gen.Whole & 7] + GetDisplacement(&pc);
+		if (gen.OpType <= R7_Offset) {
+			genaddr[c] = (uint32_t) ((int) r[gen.Whole & 7] + GetDisplacement(&pc));
 			return;
 		}
-		//     uint32_t temp, temp2;
 
-		if (gen.opfelder.OpType >= EaPlusRn) {
+		uint32_t temp, temp2;
+
+		if (gen.OpType >= EaPlusRn) {
 			uint32_t Shift = gen.Whole & 3;
-			int32_t Offset;	// = ((int32_t) r[gen.opfelder.IdxReg]) * (1 << Shift);
 			RegLKU NewPattern;
-			NewPattern.Whole = gen.opfelder.IdxType;
+			NewPattern.Whole = gen.IdxType;
 			GetGenPhase2(NewPattern, c);
 
-			Offset = ((int32_t) r[gen.opfelder.IdxReg]) * (1 << Shift);
+			uint32_t Offset = r[gen.IdxReg] * (1 << Shift);
 			if (gentype[c] != Register) {
 				genaddr[c] += Offset;
 			} else {
-				genaddr[c] = *((uint32_t *) genaddr[c]) + Offset;
+				genaddr[c] = (*genreg[c]) + Offset;
 			}
 
 			gentype[c] = Memory;	// Force Memory
 			return;
 		}
 
-		switch (gen.opfelder.OpType) {
+		switch (gen.OpType) {
 		case FrameRelative:
-			temp = GetDisplacement(&pc);
-			temp2 = GetDisplacement(&pc);
+			temp = (uint32_t) GetDisplacement(&pc);
+			temp2 = (uint32_t) GetDisplacement(&pc);
 			genaddr[c] = read_x32(fp + temp);
 			genaddr[c] += temp2;
 			break;
 
 		case StackRelative:
-			temp = GetDisplacement(&pc);
-			temp2 = GetDisplacement(&pc);
+			temp = (uint32_t) GetDisplacement(&pc);
+			temp2 = (uint32_t) GetDisplacement(&pc);
 			genaddr[c] = read_x32(GET_SP() + temp);
 			genaddr[c] += temp2;
 			break;
 
 		case StaticRelative:
-			temp = GetDisplacement(&pc);
-			temp2 = GetDisplacement(&pc);
+			temp = (uint32_t) GetDisplacement(&pc);
+			temp2 = (uint32_t) GetDisplacement(&pc);
 			genaddr[c] = read_x32(sb + temp);
 			genaddr[c] += temp2;
 			break;
 
 		case Absolute:
-			genaddr[c] = GetDisplacement(&pc);
+			genaddr[c] = (uint32_t) GetDisplacement(&pc);
 			break;
 
 		case External:
 			temp = read_x32(mod + 4);
-			temp += ((int32_t) GetDisplacement(&pc)) * 4;
+			temp += (uint32_t) ((GetDisplacement(&pc)) * 4);
 			temp2 = read_x32(temp);
-			genaddr[c] = temp2 + GetDisplacement(&pc);
+			genaddr[c] = temp2 + (uint32_t) GetDisplacement(&pc);
 			break;
 
 		case TopOfStack:
@@ -581,24 +597,24 @@ static void GetGenPhase2(RegLKU gen, int c)
 			break;
 
 		case FpRelative:
-			genaddr[c] = GetDisplacement(&pc) + fp;
+			genaddr[c] = (uint32_t) GetDisplacement(&pc) + fp;
 			break;
 
 		case SpRelative:
-			genaddr[c] = GetDisplacement(&pc) + GET_SP();
+			genaddr[c] = (uint32_t) GetDisplacement(&pc) + GET_SP();
 			break;
 
 		case SbRelative:
-			genaddr[c] = GetDisplacement(&pc) + sb;
+			genaddr[c] = (uint32_t) GetDisplacement(&pc) + sb;
 			break;
 
 		case PcRelative:
-			genaddr[c] = GetDisplacement(&pc) + startpc;
+			genaddr[c] = (uint32_t) GetDisplacement(&pc) + startpc;
 			break;
 
 		default:
-			ns32016_ShowRegs(0xFF);
-			fprintf(stderr, "Bad NS32016 gen mode");
+			fprintf(stderr, "BAD NS32016 gen mode.\n");
+			ns32016_ShowRegs(3);
 			break;
 		}
 	}
@@ -608,7 +624,7 @@ static void GetGenPhase2(RegLKU gen, int c)
 static uint32_t bcd_add_16(uint32_t a, uint32_t b, uint32_t * carry)
 {
 	uint32_t t1, t2;	// unsigned 32-bit intermediate values
-	//PiTRACE("bcd_add_16: in  %08x %08x %08x\n", a, b, *carry);
+	//PiTRACE("bcd_add_16: in  %08x %08x %08x", a, b, *carry);
 	if (*carry) {
 		b++;		// I'm 90% sure its OK to handle carry this way
 	}			// i.e. its OK if the ls digit of b becomes A
@@ -621,14 +637,14 @@ static uint32_t bcd_add_16(uint32_t a, uint32_t b, uint32_t * carry)
 	t2 = t1 - t2;		// corrected BCD sum
 	*carry = (t2 & 0xFFFF0000) ? 1 : 0;
 	t2 &= 0xFFFF;
-	//PiTRACE("bcd_add_16: out %08x %08x\n", t2, *carry);
+	//PiTRACE("bcd_add_16: out %08x %08x", t2, *carry);
 	return t2;
 }
 
 static uint32_t bcd_sub_16(uint32_t a, uint32_t b, uint32_t * carry)
 {
 	uint32_t t1, t2;	// unsigned 32-bit intermediate values
-	//PiTRACE("bcd_sub_16: in  %08x %08x %08x\n", a, b, *carry);
+	//PiTRACE("bcd_sub_16: in  %08x %08x %08x", a, b, *carry);
 	if (*carry) {
 		b++;
 	}
@@ -637,7 +653,7 @@ static uint32_t bcd_sub_16(uint32_t a, uint32_t b, uint32_t * carry)
 	t2 = bcd_add_16(t1, 1, carry);
 	t2 = bcd_add_16(a, t2, carry);
 	*carry = 1 - *carry;
-	//PiTRACE("bcd_add_16: out %08x %08x\n", t2, *carry);
+	//PiTRACE("bcd_add_16: out %08x %08x", t2, *carry);
 	return t2;
 }
 
@@ -675,82 +691,28 @@ static uint32_t bcd_sub(uint32_t a, uint32_t b, int size, uint32_t * carry)
 
 static uint32_t AddCommon(uint32_t a, uint32_t b, uint32_t cin)
 {
-	uint32_t sum = a + (b + cin);
+	uint32_t sum = a + b + cin;
+	if (cin == 0)
+		C_FLAG = TEST(sum < a || sum < b);
+	else
+		C_FLAG = TEST(sum <= a || sum <= b);
+	F_FLAG = (unsigned char) TEST((a ^ sum) & (b ^ sum) & 0x80000000u);
 
-	if (b == 0xffffffff && cin == 1) {
-		C_FLAG = 1;
-		F_FLAG = 0;
-	} else {
-		// Overflow can only happen in the following cases:
-		//   A is positive, B is positive, sum is negative
-		//   A is negative, B is negative, sum is positive
-		// So the test on the sign bits is (A ^ sum) & (B ^ sum)
-		// Note: this test implies sign A == sign B
-		switch (OpSize.Op[0]) {
-		case sz8:
-			{
-				C_FLAG = TEST(sum & 0x100);
-				F_FLAG = TEST((a ^ sum) & (b ^ sum) & 0x80);
-			}
-			break;
-
-		case sz16:
-			{
-				C_FLAG = TEST(sum & 0x10000);
-				F_FLAG = TEST((a ^ sum) & (b ^ sum) & 0x8000);
-			}
-			break;
-
-		case sz32:
-			{
-				C_FLAG = TEST(sum < a);
-				F_FLAG = TEST((a ^ sum) & (b ^ sum) & 0x80000000);
-			}
-			break;
-		}
-	}
-	//PiTRACE("ADD FLAGS: C=%d F=%d\n", C_FLAG, F_FLAG);
+	//PiTRACE("ADD FLAGS: C=%d F=%d", C_FLAG, F_FLAG);
 
 	return sum;
 }
 
 static uint32_t SubCommon(uint32_t a, uint32_t b, uint32_t cin)
 {
-	uint32_t diff = a - (b + cin);
+	uint32_t diff = a - b - cin;
+	if (cin == 0)
+		C_FLAG = TEST(a < b);
+	else
+		C_FLAG = TEST(a <= b);
+	F_FLAG = (unsigned char) TEST((a ^ b) & (a ^ diff) & 0x80000000u);
 
-	if (b == 0xffffffff && cin == 1) {
-		C_FLAG = 1;
-		F_FLAG = 0;
-	} else {
-		// Overflow can only happen in the following cases:
-		//   A is positive, B is negative, diff is negative
-		//   A is negative, B is positive, diff is positive
-		// So the test on the sign bits is (A ^ B) & (A ^ diff)
-		// Note: this test implies sign diff == sign B
-		switch (OpSize.Op[0]) {
-		case sz8:
-			{
-				C_FLAG = TEST(diff & 0x100);
-				F_FLAG = TEST((a ^ b) & (a ^ diff) & 0x80);
-			}
-			break;
-
-		case sz16:
-			{
-				C_FLAG = TEST(diff & 0x10000);
-				F_FLAG = TEST((a ^ b) & (a ^ diff) & 0x8000);
-			}
-			break;
-
-		case sz32:
-			{
-				C_FLAG = TEST(diff > a);
-				F_FLAG = TEST((a ^ b) & (a ^ diff) & 0x80000000);
-			}
-			break;
-		}
-	}
-	//PiTRACE("SUB FLAGS: C=%d F=%d\n", C_FLAG, F_FLAG);
+	//PiTRACE("SUB FLAGS: C=%d F=%d", C_FLAG, F_FLAG);
 
 	return diff;
 }
@@ -763,7 +725,7 @@ static uint32_t SubCommon(uint32_t a, uint32_t b, uint32_t cin)
 static uint32_t div_operator(uint32_t a, uint32_t b)
 {
 	uint32_t ret = 0;
-	int signmask = BIT(((OpSize.Op[0] - 1) << 3) + 7);
+	uint32_t signmask = BIT(((OpSize.Op[0] - 1) << 3) + 7);
 	if ((a & signmask) && !(b & signmask)) {
 		// e.g. a = -16; b =  3 ===> a becomes -18
 		a -= b - 1;
@@ -773,15 +735,15 @@ static uint32_t div_operator(uint32_t a, uint32_t b)
 	}
 	switch (OpSize.Op[0]) {
 	case sz8:
-		ret = (int8_t) a / (int8_t) b;
+		ret = (uint32_t) ((int8_t) a / (int8_t) b);
 		break;
 
 	case sz16:
-		ret = (int16_t) a / (int16_t) b;
+		ret = (uint32_t) ((int16_t) a / (int16_t) b);
 		break;
 
 	case sz32:
-		ret = (int32_t) a / (int32_t) b;
+		ret = (uint32_t) ((int32_t) a / (int32_t) b);
 		break;
 	}
 	return ret;
@@ -830,22 +792,22 @@ static void handle_mei_dei_upper_write(uint64_t result)
 	uint32_t temp;
 	// Writing to an odd register is strictly speaking undefined
 	// But BBC Basic relies on a particular behaviour that the NS32016 has in this case
-	uint64_t reg_addr = genaddr[1] + ((Regs[1].Whole & 1) ? -4 : 4);
+	uint32_t *reg_addr = genreg[1] + ((Regs[1].Whole & 1) ? -1 : 1);
 	switch (OpSize.Op[0]) {
 	case sz8:
 		temp = (uint8_t) (result >> 8);
 		if (gentype[1] == Register)
-			*(uint8_t *) (reg_addr) = temp;
+			*(uint8_t *) (reg_addr) = (uint8_t) temp;
 		else
-			write_x8(genaddr[1] + 4, temp);
+			write_x8(genaddr[1] + 4, (uint8_t) temp);
 		break;
 
 	case sz16:
 		temp = (uint16_t) (result >> 16);
 		if (gentype[1] == Register)
-			*(uint16_t *) (reg_addr) = temp;
+			*(uint16_t *) (reg_addr) = (uint16_t) temp;
 		else
-			write_x16(genaddr[1] + 4, temp);
+			write_x16(genaddr[1] + 4, (uint16_t) temp);
 		break;
 
 	case sz32:
@@ -858,7 +820,7 @@ static void handle_mei_dei_upper_write(uint64_t result)
 	}
 }
 
-uint32_t CompareCommon(uint32_t src1, uint32_t src2)
+static uint32_t CompareCommon(uint32_t src1, uint32_t src2)
 {
 	L_FLAG = TEST(src1 > src2);
 
@@ -875,7 +837,7 @@ uint32_t CompareCommon(uint32_t src1, uint32_t src2)
 	return Z_FLAG;
 }
 
-uint32_t StringMatching(uint32_t opcode, uint32_t Value)
+static uint32_t StringMatching(uint32_t opcode, uint32_t Value)
 {
 	uint32_t Options = (opcode >> 17) & 3;
 
@@ -900,7 +862,7 @@ uint32_t StringMatching(uint32_t opcode, uint32_t Value)
 	return 0;
 }
 
-void StringRegisterUpdate(uint32_t opcode)
+static void StringRegisterUpdate(uint32_t opcode)
 {
 	uint32_t Size = OpSize.Op[0];
 
@@ -919,11 +881,11 @@ void StringRegisterUpdate(uint32_t opcode)
 			r[2] += Size;
 		}
 	}
+
 	r[0]--;			// Adjust R0
-	fprintf(stderr, "StringRU now %d\n", r[0]);
 }
 
-uint32_t CheckCondition(uint32_t Pattern)
+static uint32_t CheckCondition(uint32_t Pattern)
 {
 	uint32_t bResult = 0;
 
@@ -998,21 +960,27 @@ uint32_t CheckCondition(uint32_t Pattern)
 	return bResult;
 }
 
-uint32_t BitPrefix(void)
+static uint32_t BitPrefix(void)
 {
-	int32_t Offset = ReadGen(0);
+	uint32_t Offset = ReadGen(0);
 	uint32_t bit;
 	SIGN_EXTEND(OpSize.Op[0], Offset);
+
+	// BitPrefix() is used for the bit operations (SBIT/CBIT/IBIT/TBIT)
+	// Access class is regaddr, so morph TOS to Memory so the SP is not modified
+	if (gentype[1] == TOS) {
+		gentype[1] = Memory;
+	}
 
 	if (gentype[1] == Register) {
 		// operand 0 is a register
 		OpSize.Op[1] = sz32;
-		bit = ((uint32_t) Offset) & 31;
+		bit = (Offset) & 31;
 	} else {
 		// operand0 is memory
-		genaddr[1] += OffsetDiv8(Offset);
+		genaddr[1] += (uint32_t) OffsetDiv8((int32_t) Offset);
 		OpSize.Op[1] = sz8;
-		bit = ((uint32_t) Offset) & 7;
+		bit = (Offset) & 7;
 	}
 
 	WriteSize = OpSize.Op[1];
@@ -1020,24 +988,23 @@ uint32_t BitPrefix(void)
 	return BIT(bit);
 }
 
-void PopRegisters(void)
+static void PopRegisters(void)
 {
-	int c;
-	int32_t temp = READ_PC_BYTE();
+	uint32_t temp = READ_PC_BYTE();
 
-	for (c = 0; c < 8; c++) {
+	for (uint32_t c = 0; c < 8; c++) {
 		if (temp & BIT(c)) {
 			r[c ^ 7] = popd();
 		}
 	}
 }
 
-void TakeInterrupt(uint32_t IntBase)
+static void TakeInterrupt(uint32_t IntBase)
 {
 	uint32_t temp = psr;
 	uint32_t temp2, temp3;
 
-	psr &= ~0xF00;
+	psr &= ~0xF00u;
 	pushd((temp << 16) | mod);
 
 	while (read_x8(pc) == 0xB2)	// Do not stack the address of a WAIT instruction!
@@ -1054,67 +1021,61 @@ void TakeInterrupt(uint32_t IntBase)
 	pc = temp2 + temp3;
 }
 
-void WarnIfShiftInvalid(uint32_t shift, uint8_t size)
+static void WarnIfShiftInvalid(uint32_t shift, uint8_t size)
 {
 	size *= 8;		// 8, 16, 32
-	if ((shift >= size && shift <= 0xFF - size) || (shift > 0xFF)) {
-		//     PiWARN("Invalid shift of %08"PRIX32" for size %"PRId8"\n", shift, size);
+	// We allow a shift of +- 33 without warning, as we see examples
+	// of this in BBC Basic.
+	if ((shift > (uint32_t) size + 1 && shift < 0xFF - (uint32_t) size - 1) || (shift > 0xFF)) {
+		fprintf(stderr, "Invalid shift of %08" PRIX32 " for size %" PRId8, shift, size);
 	}
 }
 
-uint32_t ReturnCommon(void)
+static uint32_t ReturnCommon(void)
 {
-	uint16_t unstack;	// = popw();
 	if (U_FLAG) {
 		return 1;	// Trap
 	}
 
 	pc = popd();
-	unstack = popw();
+	uint16_t unstack = popw();
 
-	if (nscfg.cfg_bits.de_flag == 0) {
+	if (nscfg.de_flag == 0) {
 		mod = unstack;
 	}
 
 	psr = popw();
 
-	if (nscfg.cfg_bits.de_flag == 0) {
+	if (nscfg.de_flag == 0) {
 		sb = read_x32(mod);
 	}
 
 	return 0;		// OK
 }
 
-void ns32016_disassemble(unsigned opcode, unsigned pc)
-{
-	fprintf(stderr, "%08X%c: %02X %02X %02X %02X\n",
-		pc,
-		U_FLAG ? 'U': 'S',
-		opcode & 0xFF, (opcode >> 8) & 0xFF, (opcode >> 16) & 0xFF,
-			(opcode >> 24) & 0xFF);
-	ns32016_ShowRegs(3);
-}
-
 void ns32016_exec(int cycles)
 {
 	uint32_t opcode, WriteIndex;
-	uint32_t temp = 0, temp2, temp3;
+	uint32_t temp, temp2, temp3;
 	Temp64Type temp64;
 	uint32_t Function;
 
+	// Avoid a "might be uninitialized" warning
+	temp = 0;
+	temp64.u64 = 0;
+
 	if (ns32016_irq & 2) {
 		// NMI is edge sensitive, so it should be cleared here
-		ns32016_irq &= ~2;
+		// FIXME tube_ack_nmi();
 		TakeInterrupt(intbase + (1 * 4));
 	} else if ((ns32016_irq & 1) && (psr & 0x800)) {
 		// IRQ is level sensitive, so the called should maintain the state
 		TakeInterrupt(intbase);
 	}
 
-	while (cycles > 0) {
-		uint32_t Format;	//   = Function >> 4;
-		cycles -= 8;
 
+	while (cycles > 0) {
+		cycles -= 8;
 		CLEAR_TRAP();
 
 		WriteSize = szVaries;	// The size a result may be written as
@@ -1124,23 +1085,29 @@ void ns32016_exec(int cycles)
 		Regs[0].Whole = Regs[1].Whole = 0xFFFF;
 
 		startpc = pc;
+
+		if (trace) {
+			char tracebuf[128];
+			ns32016_disassemble(pc, tracebuf, sizeof(tracebuf));
+			fprintf(stderr, "%s\n", tracebuf);
+			if (trace & 2)
+				ns32016_ShowRegs(3);
+		}
 		opcode = read_x32(pc);
 
-		ns32016_disassemble(opcode, pc);
-
-		if (pc == PR.hugo.BPC) {
+		if (pc == PR.BPC) {
 			SET_TRAP(BreakPointHit);
 			goto DoTrap;
 		}
 
 		Function = FunctionLookup[opcode & 0xFF];
-		Format = Function >> 4;
 
-		if (Format < (FormatCount + 1)) {
-			pc += FormatSizes[Format];	// Add the basic number of bytes for a particular instruction
+		//if ((Function >> 4) < (FormatCount + 1)) // always true
+		{
+			pc += FormatSizes[Function >> 4];	// Add the basic number of bytes for a particular instruction
 		}
 
-		switch (Format) {
+		switch (Function >> 4) {
 		case Format0:
 		case Format1:
 			{
@@ -1258,7 +1225,7 @@ void ns32016_exec(int cycles)
 
 		case Format9:
 			{
-				if (nscfg.cfg_bits.fpu_flag == 0) {
+				if (nscfg.fpu_flag == 0) {
 					GOTO_TRAP(UnknownInstruction);
 				}
 
@@ -1270,7 +1237,7 @@ void ns32016_exec(int cycles)
 						WriteSize = OpSize.Op[1] = GET_F_SIZE(opcode & BIT(10));	// Destination Size (Float/ Double)
 						getgen(opcode >> 19, 0);	// Source Operand
 						getgen(opcode >> 14, 1);	// Destination Operand
-						Regs[1].opfelder.RegType = GET_PRECISION(opcode & BIT(10));
+						Regs[1].RegType = GET_PRECISION(opcode & BIT(10));
 					}
 					break;
 
@@ -1282,7 +1249,7 @@ void ns32016_exec(int cycles)
 						WriteSize = OpSize.Op[1] = ((opcode >> 8) & 3) + 1;	// Destination Size (Integer)
 						getgen(opcode >> 19, 0);	// Source Operand
 						getgen(opcode >> 14, 1);	// Destination Operand
-						Regs[0].opfelder.RegType = GET_PRECISION(opcode & BIT(10));
+						Regs[0].RegType = GET_PRECISION(opcode & BIT(10));
 					}
 					break;
 
@@ -1292,8 +1259,8 @@ void ns32016_exec(int cycles)
 						WriteSize = OpSize.Op[1] = sz64;
 						getgen(opcode >> 19, 0);	// Source Operand
 						getgen(opcode >> 14, 1);	// Destination Operand
-						Regs[0].opfelder.RegType = SinglePrecision;
-						Regs[1].opfelder.RegType = DoublePrecision;
+						Regs[0].RegType = SinglePrecision;
+						Regs[1].RegType = DoublePrecision;
 					}
 					break;
 
@@ -1303,8 +1270,8 @@ void ns32016_exec(int cycles)
 						WriteSize = OpSize.Op[1] = sz32;
 						getgen(opcode >> 19, 0);	// Source Operand
 						getgen(opcode >> 14, 1);	// Destination Operand
-						Regs[0].opfelder.RegType = DoublePrecision;
-						Regs[1].opfelder.RegType = SinglePrecision;
+						Regs[0].RegType = DoublePrecision;
+						Regs[1].RegType = SinglePrecision;
 					}
 					break;
 
@@ -1324,7 +1291,7 @@ void ns32016_exec(int cycles)
 
 				default:
 					{
-						//      PiWARN("Unexpected Format 9 Decode: Function = %"PRId32"\n", Function);
+						fprintf(stderr, "Unexpected Format 9 Decode: Function = %" PRId32, Function);
 					}
 					break;
 				}
@@ -1334,7 +1301,7 @@ void ns32016_exec(int cycles)
 		case Format11:
 		case Format12:
 			{
-				if (nscfg.cfg_bits.fpu_flag == 0) {
+				if (nscfg.fpu_flag == 0) {
 					GOTO_TRAP(UnknownInstruction);
 				}
 
@@ -1342,7 +1309,7 @@ void ns32016_exec(int cycles)
 				WriteSize = OpSize.Op[0] = OpSize.Op[1] = GET_F_SIZE(opcode & BIT(8));
 				getgen(opcode >> 19, 0);
 				getgen(opcode >> 14, 1);
-				Regs[0].opfelder.RegType = Regs[1].opfelder.RegType = GET_PRECISION(opcode & BIT(8));
+				Regs[0].RegType = Regs[1].RegType = GET_PRECISION(opcode & BIT(8));
 			}
 			break;
 
@@ -1359,31 +1326,21 @@ void ns32016_exec(int cycles)
 			break;
 		}
 
-		if (Trace) {
-			uint32_t Temp;
-			//    FredSize = OpSize;                     // Temporary hack :(
-			Temp = pc;
-			//    ShowInstruction(startpc, &Temp, opcode, Function, OpSize.Op[0]);
-		}
-
 		GetGenPhase2(Regs[0], 0);
 		GetGenPhase2(Regs[1], 1);
 
 		if (Function <= RETT) {
-			temp = GetDisplacement(&pc);
+			temp = (uint32_t) GetDisplacement(&pc);
 		}
+
 		if (TrapFlags) {
 		      DoTrap:
-//			HandleTrap();
+		      	/* TODO: a proper trap handler */
+		      	/* For now just show the registers */
+		      	fprintf(stderr, "Trapflags %x\n", TrapFlags);
+		      	ns32016_ShowRegs(3);
 			continue;
 		}
-#ifdef INSTRUCTION_PROFILING
-		IP[startpc]++;
-#endif
-
-#ifdef PROFILING
-		ProfileAdd(Function, Regs[0].Whole, Regs[1].Whole);
-#endif
 
 		switch (Function) {
 			// Format 0 : Branches
@@ -1442,9 +1399,9 @@ void ns32016_exec(int cycles)
 
 		case CXP:
 			{
-				temp2 = read_x32(mod + 4) + ((int32_t) temp) * 4;
+				temp2 = read_x32(mod + 4) + (uint32_t) (((int32_t) temp) * 4);
 
-				temp = read_x32(temp2);	// Matching Tail with CXPD, complier do your stuff
+				temp = read_x32(temp2);	// Matching Tail with CXPD, compiler do your stuff
 				pushd((CXP_UNUSED_WORD << 16) | mod);
 				pushd(pc);
 				mod = temp & 0xFFFF;
@@ -1469,12 +1426,9 @@ void ns32016_exec(int cycles)
 
 		case RETT:
 			{
-				fprintf(stderr, "RETT pc was %x\n", pc);
 				if (ReturnCommon()) {
-					fprintf(stderr, "PrivTrap\n");
 					GOTO_TRAP(PrivilegedInstruction);
 				}
-				fprintf(stderr, "RETT pc is %x\n", pc);
 
 				INC_SP(temp);
 				continue;
@@ -1518,7 +1472,7 @@ void ns32016_exec(int cycles)
 			{
 				int c;
 				temp = READ_PC_BYTE();
-				temp2 = GetDisplacement(&pc);
+				temp2 = (uint32_t) GetDisplacement(&pc);
 				pushd(fp);
 				fp = GET_SP();
 				DEC_SP(temp2);
@@ -1566,7 +1520,7 @@ void ns32016_exec(int cycles)
 		case SVC:
 			{
 				temp = psr;
-				psr &= ~0x700;
+				psr &= (uint32_t) ~ 0x700;
 				// In SVC, the address pushed is the address of the SVC opcode
 				pushd((temp << 16) | mod);
 				pushd(startpc);
@@ -1582,11 +1536,9 @@ void ns32016_exec(int cycles)
 
 		case BPT:
 			{
-//            GOTO_TRAP(BreakPointTrap);
-				cycles -= 2;	// Udo was here
+				GOTO_TRAP(BreakPointTrap);
 			}
 			// No break due to goto
-			break;	// no trap any more !
 
 			// Format 2
 
@@ -1596,6 +1548,7 @@ void ns32016_exec(int cycles)
 				NIBBLE_EXTEND(temp2);
 				temp = ReadGen(0);
 
+				SIGN_EXTEND(OpSize.Op[0], temp);
 				temp = AddCommon(temp, temp2, 0);
 			}
 			break;
@@ -1668,7 +1621,7 @@ void ns32016_exec(int cycles)
 				NIBBLE_EXTEND(temp2);
 				temp = ReadGen(0);
 				temp += temp2;
-				temp2 = GetDisplacement(&pc);
+				temp2 = (uint32_t) GetDisplacement(&pc);
 				if (Truncate(temp, OpSize.Op[0]))
 					pc = startpc + temp2;
 			}
@@ -1736,7 +1689,7 @@ void ns32016_exec(int cycles)
 			{
 				temp2 = ReadAddress(0);
 
-				temp = read_x32(temp2);	// Matching Tail with CXPD, complier do your stuff
+				temp = read_x32(temp2);	// Matching Tail with CXPD, compiler do your stuff
 				pushd((CXP_UNUSED_WORD << 16) | mod);
 				pushd(pc);
 				mod = temp & 0xFFFF;
@@ -1818,6 +1771,8 @@ void ns32016_exec(int cycles)
 				temp2 = ReadGen(0);
 				temp = ReadGen(1);
 
+				SIGN_EXTEND(OpSize.Op[0], temp2);
+				SIGN_EXTEND(OpSize.Op[1], temp);
 				temp = AddCommon(temp, temp2, 0);
 			}
 			break;
@@ -1845,6 +1800,8 @@ void ns32016_exec(int cycles)
 				temp = ReadGen(1);
 
 				temp3 = C_FLAG;
+				SIGN_EXTEND(OpSize.Op[0], temp2);
+				SIGN_EXTEND(OpSize.Op[1], temp);
 				temp = AddCommon(temp, temp2, temp3);
 			}
 			break;
@@ -1867,6 +1824,8 @@ void ns32016_exec(int cycles)
 			{
 				temp2 = ReadGen(0);
 				temp = ReadGen(1);
+				SIGN_EXTEND(OpSize.Op[0], temp2);
+				SIGN_EXTEND(OpSize.Op[1], temp);
 				temp = SubCommon(temp, temp2, 0);
 			}
 			break;
@@ -1876,6 +1835,8 @@ void ns32016_exec(int cycles)
 				temp2 = ReadGen(0);
 				temp = ReadGen(1);
 				temp3 = C_FLAG;
+				SIGN_EXTEND(OpSize.Op[0], temp2);
+				SIGN_EXTEND(OpSize.Op[1], temp);
 				temp = SubCommon(temp, temp2, temp3);
 			}
 			break;
@@ -1897,10 +1858,6 @@ void ns32016_exec(int cycles)
 		case TBIT:
 			{
 				temp2 = BitPrefix();
-				if (gentype[1] == TOS) {
-					//  PiWARN("TBIT with base==TOS is not yet implemented\n");
-					continue;	// with next instruction
-				}
 				temp = ReadGen(1);
 				F_FLAG = TEST(temp & temp2);
 				continue;
@@ -1919,10 +1876,6 @@ void ns32016_exec(int cycles)
 
 		case MOVS:
 			{
-				/* MOVS works in byte/word/dword except for translations
-				   which must be byte. We *MUST* do this one opsize at a time
-				   because the results for an overlapping copy or for an
-				   interrupted copy will not be correct otherwise */
 				if (r[0] == 0) {
 					F_FLAG = 0;
 					continue;
@@ -1930,7 +1883,6 @@ void ns32016_exec(int cycles)
 
 				temp = read_n(r[1], OpSize.Op[0]);
 
-				/* FIXME: do we need to fault here if size is not byte */
 				if (opcode & BIT(Translation)) {
 					temp = read_x8(r[3] + temp);	// Lookup the translation
 				}
@@ -1939,10 +1891,10 @@ void ns32016_exec(int cycles)
 					continue;
 				}
 
-				write_arbitary(r[2], &temp, OpSize.Op[0]);
+				write_Arbitary(r[2], &temp, OpSize.Op[0]);
 
 				StringRegisterUpdate(opcode);
-				pc = startpc;	// Not finsihed so come back again!
+				pc = startpc;	// Not finished so come back again!
 				continue;
 			}
 			// No break due to continue
@@ -1971,7 +1923,7 @@ void ns32016_exec(int cycles)
 				}
 
 				StringRegisterUpdate(opcode);
-				pc = startpc;	// Not finsihed so come back again!
+				pc = startpc;	// Not finished so come back again!
 				continue;
 			}
 			// No break due to continue
@@ -1982,7 +1934,7 @@ void ns32016_exec(int cycles)
 					GOTO_TRAP(PrivilegedInstruction);
 				}
 
-				nscfg.cfg_bytes.lsb = (opcode >> 15);	// Only sets the bottom 8 bits of which the lower 4 are used!
+				nscfg.lsb = (uint8_t) (opcode >> 15);	// Only sets the bottom 8 bits of which the lower 4 are used!
 				continue;
 			}
 			// No break due to continue
@@ -1998,7 +1950,7 @@ void ns32016_exec(int cycles)
 
 				if (opcode & BIT(Translation)) {
 					temp = read_x8(r[3] + temp);	// Lookup the translation
-					write_x8(r[1], temp);	// Write back
+					write_x8(r[1], (uint8_t) temp);	// Write back
 				}
 
 				if (StringMatching(opcode, temp)) {
@@ -2006,7 +1958,7 @@ void ns32016_exec(int cycles)
 				}
 
 				StringRegisterUpdate(opcode);
-				pc = startpc;	// Not finsihed so come back again!
+				pc = startpc;	// Not finished so come back again!
 				continue;
 			}
 			// No break due to continue
@@ -2084,13 +2036,13 @@ void ns32016_exec(int cycles)
 						// Test if the operand is also negative
 						if (temp & 0x80) {
 							// Sign extend in a portable way
-							temp = (temp >> temp2) | ((0xFF >> temp2) ^ 0xFF);
+							temp = (temp >> temp2) | ((0xFFu >> temp2) ^ 0xFFu);
 						} else {
 							temp = (temp >> temp2);
 						}
 					} else if (OpSize.Op[1] == sz16) {
 						if (temp & 0x8000) {
-							temp = (temp >> temp2) | ((0xFFFF >> temp2) ^ 0xFFFF);
+							temp = (temp >> temp2) | ((0xFFFFu >> temp2) ^ 0xFFFFu);
 						} else {
 							temp = (temp >> temp2);
 						}
@@ -2152,6 +2104,7 @@ void ns32016_exec(int cycles)
 			{
 				temp = 0;
 				temp2 = ReadGen(0);
+				SIGN_EXTEND(OpSize.Op[0], temp2);
 				temp = SubCommon(temp, temp2, 0);
 			}
 			break;
@@ -2248,11 +2201,11 @@ void ns32016_exec(int cycles)
 				uint32_t First = ReadAddress(0);
 				uint32_t Second = ReadAddress(1);
 				//temp = GetDisplacement(&pc) + OpSize.Op[0];                      // disp of 0 means move 1 byte
-				temp = (GetDisplacement(&pc) & ~(OpSize.Op[0] - 1)) + OpSize.Op[0];
+				temp = (uint32_t) (GetDisplacement(&pc) & ~(OpSize.Op[0] - 1)) + OpSize.Op[0];
 				while (temp) {
 					temp2 = read_x8(First);
 					First++;
-					write_x8(Second, temp2);
+					write_x8(Second, (uint8_t) temp2);
 					Second++;
 					temp--;
 				}
@@ -2267,9 +2220,9 @@ void ns32016_exec(int cycles)
 				uint32_t First = ReadAddress(0);
 				uint32_t Second = ReadAddress(1);
 
-				temp3 = (GetDisplacement(&pc) / temp4) + 1;
+				temp3 = (uint32_t) ((GetDisplacement(&pc) / (int) temp4) + 1);
 
-				//PiTRACE("CMP Size = %u Count = %u\n", temp4, temp3);
+				//PiTRACE("CMP Size = %u Count = %u", temp4, temp3);
 				while (temp3--) {
 					temp = read_n(First, temp4);
 					temp2 = read_n(Second, temp4);
@@ -2294,11 +2247,15 @@ void ns32016_exec(int cycles)
 				temp3 = READ_PC_BYTE();
 				temp = ReadGen(0);	// src operand
 
-				// The field can be upto 32 bits, and is independent of the opcode i bits
+				// Access class is regaddr, so morph TOS to Memory so the SP is not modified
+				if (gentype[1] == TOS) {
+					gentype[1] = Memory;
+				}
+				// The field can be up to 32 bits, and is independent of the opcode i bits
 				OpSize.Op[1] = sz32;
 				temp2 = ReadGen(1);	// base operand
 				for (c = 0; c <= (temp3 & 0x1F); c++) {
-					temp2 &= ~(BIT((c + (temp3 >> 5)) & 31));
+					temp2 &= (uint32_t) ~ (BIT((c + (temp3 >> 5)) & 31));
 					if (temp & BIT(c)) {
 						temp2 |= BIT((c + (temp3 >> 5)) & 31);
 					}
@@ -2313,9 +2270,9 @@ void ns32016_exec(int cycles)
 				uint32_t c;
 				uint32_t temp4 = 1;
 
+				// Access class is regaddr, so morph TOS to Memory so the SP is not modified
 				if (gentype[0] == TOS) {
-					//  PiWARN("EXTS with base==TOS is not yet implemented\n");
-					continue;	// with next instruction
+					gentype[0] = Memory;
 				}
 				// Read the immediate offset (3 bits) / length - 1 (5 bits) from the instruction
 				temp3 = READ_PC_BYTE();
@@ -2339,7 +2296,7 @@ void ns32016_exec(int cycles)
 		case MOVXiW:
 			{
 				if (OpSize.Op[0] != sz8) {
-					//  PiWARN("MOVXiW forcing first Operand Size\n");
+					fprintf(stderr, "MOVXiW forcing first Operand Size");
 				}
 
 				OpSize.Op[0] = sz8;
@@ -2352,7 +2309,7 @@ void ns32016_exec(int cycles)
 		case MOVZiW:
 			{
 				if (OpSize.Op[0] != sz8) {
-					//  PiWARN("MOVZiW forcing first Operand Size\n");
+					fprintf(stderr, "MOVZiW forcing first Operand Size");
 				}
 
 				OpSize.Op[0] = sz8;
@@ -2398,7 +2355,7 @@ void ns32016_exec(int cycles)
 
 		case DEI:
 			{
-				int size = OpSize.Op[0] << 3;	// 8, 16  or 32 
+				int size = OpSize.Op[0] << 3;	// 8, 16  or 32
 				temp = ReadGen(0);	// src
 				if (temp == 0) {
 					GOTO_TRAP(DivideByZero);
@@ -2414,10 +2371,10 @@ void ns32016_exec(int cycles)
 					temp64.u64 = ((temp64.u64 >> 16) & 0xFFFF0000) | (temp64.u64 & 0xFFFF);
 					break;
 				}
-				// PiTRACE("temp = %08x\n", temp);
-				// PiTRACE("temp64.u64 = %016" PRIu64 "\n", temp64.u64);
+				// PiTRACE("temp = %08x", temp);
+				// PiTRACE("temp64.u64 = %016" PRIu64 , temp64.u64);
 				temp64.u64 = ((temp64.u64 / temp) << size) | (temp64.u64 % temp);
-				//PiTRACE("result = %016" PRIu64 "\n", temp64.u64);
+				//PiTRACE("result = %016" PRIu64 , temp64.u64);
 				// Handle the writing to the upper half of dst locally here
 				handle_mei_dei_upper_write(temp64.u64);
 				// Allow fallthrough write logic to write the lower half of dst
@@ -2435,15 +2392,15 @@ void ns32016_exec(int cycles)
 
 				switch (OpSize.Op[0]) {
 				case sz8:
-					temp = (int8_t) temp2 / (int8_t) temp;
+					temp = (uint32_t) ((int8_t) temp2 / (int8_t) temp);
 					break;
 
 				case sz16:
-					temp = (int16_t) temp2 / (int16_t) temp;
+					temp = (uint32_t) ((int16_t) temp2 / (int16_t) temp);
 					break;
 
 				case sz32:
-					temp = (int32_t) temp2 / (int32_t) temp;
+					temp = (uint32_t) ((int32_t) temp2 / (int32_t) temp);
 					break;
 				}
 			}
@@ -2459,15 +2416,15 @@ void ns32016_exec(int cycles)
 
 				switch (OpSize.Op[0]) {
 				case sz8:
-					temp = (int8_t) temp2 % (int8_t) temp;
+					temp = (uint32_t) ((int8_t) temp2 % (int8_t) temp);
 					break;
 
 				case sz16:
-					temp = (int16_t) temp2 % (int16_t) temp;
+					temp = (uint32_t) ((int16_t) temp2 % (int16_t) temp);
 					break;
 
 				case sz32:
-					temp = (int32_t) temp2 % (int32_t) temp;
+					temp = (uint32_t) ((int32_t) temp2 % (int32_t) temp);
 					break;
 				}
 			}
@@ -2502,38 +2459,30 @@ void ns32016_exec(int cycles)
 		case EXT:
 			{
 				uint32_t c;
-				int32_t Offset = r[(opcode >> 11) & 7];
-				uint32_t Length = GetDisplacement(&pc);
+				uint32_t Offset = r[(opcode >> 11) & 7];
+				uint32_t Length = (uint32_t) GetDisplacement(&pc);
 				uint32_t StartBit;
-				uint32_t Source;
 
 				if (Length < 1 || Length > 32) {
-					//      PiWARN("EXT with length %08"PRIx32" is undefined\n", Length);
+					fprintf(stderr, "EXT with length %08" PRIX32 " is undefined", Length);
 					continue;	// with next instruction
 				}
-
+				// Access class is regaddr, so morph TOS to Memory so the SP is not modified
 				if (gentype[0] == TOS) {
-					// base is TOS
-					//
-					// This case is complicated because:
-					//
-					// 1. We need to avoid modifying the stack pointer.
-					//
-					// 2. We potentially need to take account of an offset.
-					//
-					//       PiWARN("EXT with base==TOS is not yet implemented; offset = %"PRId32"\n", Offset);
-					continue;	// with next instruction
-				} else if (gentype[0] == Register) {
+					gentype[0] = Memory;
+				}
+
+				if (gentype[0] == Register) {
 					// base is a register
-					StartBit = ((uint32_t) Offset) & 31;
+					StartBit = (Offset) & 31;
 				} else {
 					// base is memory
-					genaddr[0] += OffsetDiv8(Offset);
-					StartBit = ((uint32_t) Offset) & 7;
+					genaddr[0] += (uint32_t) OffsetDiv8((int32_t) Offset);
+					StartBit = (Offset) & 7;
 				}
 
 				OpSize.Op[0] = sz32;
-				Source = ReadGen(0);
+				uint32_t Source = ReadGen(0);
 
 				temp = 0;
 				for (c = 0; (c < Length) && (c + StartBit < 32); c++) {
@@ -2546,8 +2495,8 @@ void ns32016_exec(int cycles)
 
 		case CVTP:
 			{
-				int32_t Offset = r[(opcode >> 11) & 7];
-				int32_t Base = ReadAddress(0);
+				uint32_t Offset = r[(opcode >> 11) & 7];
+				uint32_t Base = ReadAddress(0);
 
 				temp = (Base * 8) + Offset;
 				WriteSize = sz32;
@@ -2556,48 +2505,37 @@ void ns32016_exec(int cycles)
 
 		case INS:
 			{
-				uint32_t c;
-				int32_t Offset = r[(opcode >> 11) & 7];
-				uint32_t Length = GetDisplacement(&pc);
+				uint32_t Offset = r[(opcode >> 11) & 7];
+				uint32_t Length = (uint32_t) GetDisplacement(&pc);
 				uint32_t Source = ReadGen(0);
 				uint32_t StartBit;
 
 				if (Length < 1 || Length > 32) {
-					//       PiWARN("INS with length %08"PRIx32" is undefined\n", Length);
+					fprintf(stderr, "INS with length %08" PRIX32 " is undefined", Length);
 					continue;	// with next instruction
 				}
-
+				// Access class is regaddr, so morph TOS to Memory so the SP is not modified
 				if (gentype[1] == TOS) {
-					// base is TOS
-					//
-					// This case is complicated because:
-					//
-					// 1. We need to avoid modifying the stack pointer,
-					// which might not be an issue as we read then write.
-					//
-					// 2. We potentially need to take account of an offset. This
-					// is harder as our current TOS read/write doesn't allow
-					// for an offset. It's also not clear what this means.
-					//
-					//    PiWARN("INS with base==TOS is not yet implemented; offset = %"PRId32"\n", Offset);
-					continue;	// with next instruction
-				} else if (gentype[1] == Register) {
+					gentype[1] = Memory;
+				}
+
+				if (gentype[1] == Register) {
 					// base is a register
-					StartBit = ((uint32_t) Offset) & 31;
+					StartBit = (Offset) & 31;
 				} else {
 					// base is memory
-					genaddr[1] += OffsetDiv8(Offset);
-					StartBit = ((uint32_t) Offset) & 7;
+					genaddr[1] += (uint32_t) OffsetDiv8((int32_t) Offset);
+					StartBit = (Offset) & 7;
 				}
 
-				// The field can be upto 32 bits, and is independent of the opcode i bits
+				// The field can be up to 32 bits, and is independent of the opcode i bits
 				OpSize.Op[1] = sz32;
 				temp = ReadGen(1);
-				for (c = 0; (c < Length) && (c + StartBit < 32); c++) {
+				for (uint32_t c = 0; (c < Length) && (c + StartBit < 32); c++) {
 					if (Source & BIT(c)) {
 						temp |= BIT(c + StartBit);
 					} else {
-						temp &= ~(BIT(c + StartBit));
+						temp &= (uint32_t) ~ (BIT(c + StartBit));
 					}
 				}
 				WriteSize = OpSize.Op[1];
@@ -2635,6 +2573,7 @@ void ns32016_exec(int cycles)
 				}
 				SIGN_EXTEND(OpSize.Op[0], temp);	// upper bound
 				SIGN_EXTEND(OpSize.Op[0], temp2);	// lower bound
+				SIGN_EXTEND(OpSize.Op[0], temp3);	// index
 
 				//PiTRACE("Reg = %u Bounds [%u - %u] Index = %u", 0, temp, temp2, temp3);
 
@@ -2693,7 +2632,7 @@ void ns32016_exec(int cycles)
 			{
 				Temp32Type Src;
 				Src.u32 = ReadGen(0);
-				if (Regs[1].opfelder.RegType == DoublePrecision) {
+				if (Regs[1].RegType == DoublePrecision) {
 					temp64.f64 = (double) Src.s32;
 				} else {
 					Temp32Type q;
@@ -2729,28 +2668,26 @@ void ns32016_exec(int cycles)
 
 		case ROUND:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					temp64.u64 = ReadGen64(0);
-					//              temp = (int32_t) round(temp64.f64);
-					temp = 0;
+					temp = (uint32_t) round(temp64.f64);
 				} else {
 					Temp32Type q;
 					q.u32 = ReadGen(0);
-					//              temp = (int32_t) roundf(q.f32);
-					temp = 0;
+					temp = (uint32_t) roundf(q.f32);
 				}
 			}
 			break;
 
 		case TRUNC:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					temp64.u64 = ReadGen64(0);
-					temp = (int32_t) temp64.f64;
+					temp = (uint32_t) temp64.f64;
 				} else {
 					Temp32Type q;
 					q.u32 = ReadGen(0);
-					temp = (int32_t) q.f32;
+					temp = (uint32_t) q.f32;
 				}
 			}
 			break;
@@ -2763,15 +2700,13 @@ void ns32016_exec(int cycles)
 
 		case FLOOR:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					temp64.u64 = ReadGen64(0);
-					//              temp = (int32_t) floor(temp64.f64);
-					temp = 0;
+					temp = (uint32_t) floor(temp64.f64);
 				} else {
 					Temp32Type q;
 					q.u32 = ReadGen(0);
-					//             temp = (int32_t) floorf(q.f32);
-					temp = 0;
+					temp = (uint32_t) floorf(q.f32);
 				}
 			}
 			break;
@@ -2779,7 +2714,7 @@ void ns32016_exec(int cycles)
 			// Format 11
 		case ADDf:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					Temp64Type Src;
 					Src.u64 = ReadGen64(0);
 					temp64.u64 = ReadGen64(1);
@@ -2798,7 +2733,7 @@ void ns32016_exec(int cycles)
 
 		case MOVf:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					temp64.u64 = ReadGen64(0);
 				} else {
 					temp = ReadGen(0);
@@ -2810,7 +2745,7 @@ void ns32016_exec(int cycles)
 			{
 				L_FLAG = 0;
 
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					Temp64Type Src;
 					Src.u64 = ReadGen64(0);
 					temp64.u64 = ReadGen64(1);
@@ -2831,7 +2766,7 @@ void ns32016_exec(int cycles)
 
 		case SUBf:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					Temp64Type Src;
 					Src.u64 = ReadGen64(0);
 					temp64.u64 = ReadGen64(1);
@@ -2850,7 +2785,7 @@ void ns32016_exec(int cycles)
 
 		case NEGf:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					Temp64Type Src;
 					Src.u64 = ReadGen64(0);
 					temp64.f64 = -Src.f64;
@@ -2865,7 +2800,7 @@ void ns32016_exec(int cycles)
 
 		case DIVf:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					Temp64Type Src;
 					Src.u64 = ReadGen64(0);
 					temp64.u64 = ReadGen64(1);
@@ -2884,7 +2819,7 @@ void ns32016_exec(int cycles)
 
 		case MULf:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					Temp64Type Src;
 					Src.u64 = ReadGen64(0);
 					temp64.u64 = ReadGen64(1);
@@ -2903,7 +2838,7 @@ void ns32016_exec(int cycles)
 
 		case ABSf:
 			{
-				if (Regs[0].opfelder.RegType == DoublePrecision) {
+				if (Regs[0].RegType == DoublePrecision) {
 					Temp64Type Src;
 					Src.u64 = ReadGen64(0);
 					temp64.f64 = fabs(Src.f64);
@@ -2933,10 +2868,10 @@ void ns32016_exec(int cycles)
 				{
 					switch (WriteSize) {
 					case sz8:
-						write_x8(genaddr[WriteIndex], temp);
+						write_x8(genaddr[WriteIndex], (uint8_t) temp);
 						break;
 					case sz16:
-						write_x16(genaddr[WriteIndex], temp);
+						write_x16(genaddr[WriteIndex], (uint16_t) temp);
 						break;
 					case sz32:
 						write_x32(genaddr[WriteIndex], temp);
@@ -2952,22 +2887,19 @@ void ns32016_exec(int cycles)
 				{
 					switch (WriteSize) {
 					case sz8:
-						*((uint8_t *) genaddr[WriteIndex]) = temp;
+						*((uint8_t *) genreg[WriteIndex]) = (uint8_t) temp;
 						break;
 					case sz16:
-						*((uint16_t *) genaddr[WriteIndex]) = temp;
+						*((uint16_t *) genreg[WriteIndex]) = (uint16_t) temp;
 						break;
 					case sz32:
-						*((uint32_t *) genaddr[WriteIndex]) = temp;
+						*((uint32_t *) genreg[WriteIndex]) = temp;
 						break;
 					case sz64:
-						*((uint64_t *) genaddr[WriteIndex]) = temp64.u64;
+						*((uint64_t *) genreg[WriteIndex]) = temp64.u64;
 						break;
 					}
 
-					if (WriteSize <= sz32) {
-						//         ShowRegisterWrite(Regs[WriteIndex], Truncate(temp, WriteSize));
-					}
 				}
 				break;
 
@@ -2984,15 +2916,14 @@ void ns32016_exec(int cycles)
 			case OpImmediate:
 				{
 					GOTO_TRAP(IllegalWritingImmediate);
-					goto DoTrap;
 				}
 			}
 		} else {
-//         PiWARN("Bad write size: %d pc=%08"PRIX32" opcode=%08"PRIX32"\n", WriteSize, startpc, opcode);
+			fprintf(stderr, "Bad write size: %d pc=%08" PRIX32 " opcode=%08" PRIX32, WriteSize, startpc, opcode);
 		}
 
 #if 0
-		switch (Regs[1].opfelder.RegType) {
+		switch (Regs[1].RegType) {
 		case SinglePrecision:
 			{
 				ns32016_ShowRegs(BIT(2));
@@ -3011,4 +2942,9 @@ void ns32016_exec(int cycles)
 void ns32016_set_irq(unsigned mask)
 {
 	ns32016_irq = mask;
+}
+
+void ns32016_trace(unsigned onoff)
+{
+	trace = onoff;
 }
