@@ -199,7 +199,7 @@ uint8_t ns32016_do_read(uint32_t addr, unsigned int debug)
 	return ramrom[addr];
 }
 
-uint8_t ns32016_debug_read8(uint16_t addr)
+uint8_t ns32016_read8_debug(uint32_t addr)
 {
 	return ns32016_do_read(addr, 1);	/* No side effects */
 }
@@ -368,8 +368,7 @@ int main(int argc, char *argv[])
 	ns32016_init();
 	ns32016_reset_addr(0);
 
-	if (trace & TRACE_CPU) {
-	}
+	ns32016_trace((trace & TRACE_CPU) ? 3 : 0);
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle

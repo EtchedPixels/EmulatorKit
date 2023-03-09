@@ -103,9 +103,9 @@ rcbus-80c188: rcbus-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \
 	cc -g3 rcbus-80c188.o ide.o ppide.o rtc_bitbang.o w5100.o 80x86/*.o -o rcbus-80c188
 
-rcbus-ns32k: rcbus-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.o
+rcbus-ns32k: rcbus-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.o ns32k/disassemble.o
 	$(MAKE) --directory ns32k
-	cc -g3 rcbus-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.c -o rcbus-ns32k
+	cc -g3 rcbus-ns32k.o ide.o ppide.o 16x50.o w5100.o rtc_bitbang.o ns32k/32016.c ns32k/disassemble.o -o rcbus-ns32k -lm
 
 rcbus-tms9995: rcbus-tms9995.o tms9995.o ide.o ppide.o w5100.o rtc_bitbang.o 16x50.o tms9902.o
 	cc -g3 rcbus-tms9995.o ide.o ppide.o w5100.o rtc_bitbang.o 16x50.o tms9902.o tms9995.o -o rcbus-tms9995
