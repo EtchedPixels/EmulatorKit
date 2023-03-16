@@ -1087,11 +1087,14 @@ void ns32016_exec(int cycles)
 		startpc = pc;
 
 		if (trace) {
-			char tracebuf[128];
-			ns32016_disassemble(pc, tracebuf, sizeof(tracebuf));
-			fprintf(stderr, "%s\n", tracebuf);
+			char tracebuf[129];
 			if (trace & 2)
 				ns32016_ShowRegs(3);
+			*tracebuf = 'S';
+			if (U_FLAG)
+				*tracebuf = 'U';
+			ns32016_disassemble(pc, tracebuf + 1, sizeof(tracebuf) - 1);
+			fprintf(stderr, "%s\n", tracebuf);
 		}
 		opcode = read_x32(pc);
 
