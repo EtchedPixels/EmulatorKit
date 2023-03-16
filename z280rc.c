@@ -265,6 +265,11 @@ void z280_debug(device_t *device, offs_t curpc)
 			cpu_get_state_z280(device,Z280_CR_MSR));
 		transpc = curpc;
 		cpu_translate_z280(device,AS_PROGRAM,0,&transpc);
+		/* Jumped into oblivion */
+		if (transpc >= sizeof(ram)) {
+			fprintf(stderr, "%06X: jumped to fishkill\n", transpc);
+			exit(1);
+		}
 		dres = cpu_disassemble_z280(device,ibuf,transpc,&ram[transpc],0);
 		fprintf(stderr, "%06X: ",transpc);
 		for (i=0;i<(dres &DASMFLAG_LENGTHMASK);i++) fprintf(stderr, "%02X",ram[transpc+i]);
