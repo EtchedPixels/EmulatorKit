@@ -64,6 +64,7 @@ static uint8_t bankenable;
 static uint8_t bank512 = 0;
 static uint8_t switchrom = 1;
 static uint32_t romsize = 65536;
+static uint8_t extreme;
 
 #define CPUBOARD_Z80		0
 #define CPUBOARD_SC108		1
@@ -123,10 +124,17 @@ static uint16_t tstate_steps = 365;	/* RC2014 speed */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
+static uint8_t intvec;		/* Current vector for IM2 */
 
 #define IRQ_SIOA	1
 #define IRQ_SIOB	2
 #define IRQ_CTC		3	/* 3 4 5 6 */
+
+static uint8_t live_nonim2;
+
+#define IRQM_VDP	1
+#define IRQM_ACIA	2
+#define IRQM_16X50	4
 
 static Z80Context cpu_z80;
 
@@ -862,7 +870,9 @@ static uint8_t acia_narrow;
 static void acia_check_irq(struct acia *acia)
 {
 	if (acia_irq_pending(acia))
-		Z80INT(&cpu_z80, 0xFF);	/* FIXME probably last data or bus noise */
+		live_nonim2 |= IRQM_ACIA;
+	else
+		live_nonim2 &= ~IRQM_ACIA;
 }
 
 
@@ -899,7 +909,9 @@ static void uart_init(struct uart16x50 *uptr, int in)
 static void uart_check_irq(struct uart16x50 *uptr)
 {
     if (uptr->irqline)
-	    Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
+	live_nonim2 |= IRQM_16X50;
+    else
+	live_nonim2 &= ~IRQM_16X50;
 }
 
 /* Compute the interrupt indicator register from what is pending */
@@ -1113,7 +1125,6 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
     return 0xFF;
 }
 
-
 struct z80_sio_chan {
 	uint8_t wr[8];
 	uint8_t rr[3];
@@ -1209,7 +1220,7 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 			live_irq = IRQ_SIOA;
 		else
 			live_irq = IRQ_SIOB;
-		Z80INT(&cpu_z80, chan->vector);
+		intvec = chan->vector;
 		return 1;
 	}
 	return 0;
@@ -1535,7 +1546,7 @@ static int ctc_check_im2(void)
 				if (trace & TRACE_IRQ)
 					fprintf(stderr, "New live interrupt is from CTC %d vector %x.\n", i, vector);
 				live_irq = IRQ_CTC + i;
-				Z80INT(&cpu_z80, vector);
+				intvec = vector;
 				return 1;
 			}
 		}
@@ -2291,14 +2302,14 @@ static uint8_t io_read_2014(uint16_t addr)
 		return my_ide_read(addr & 7);
 	if (addr >= 0x20 && addr <= 0x27 && ide == 2)
 		return ppide_read(ppide, addr & 3);
-	if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
+	if (addr >= 0x28 && addr <= 0x2C && have_wiznet && !extreme)
 		return nic_w5100_read(wiz, addr & 3);
-	if (addr >= 0x68 && addr <= 0x6F && have_pio)
+	if (addr >= 0x68 && addr <= 0x6F && have_pio && !extreme)
 		return pio_read2(addr & 3);
 
 	if (addr == 0xBB && ps2)
 		return ps2_read();
-	if (addr == 0xC0 && rtc)
+	if (addr == 0xC0 && rtc && !extreme)
 		return rtc_read(rtc);
 	/* Scott Baker is 0x90-93, suggested defaults for the
 	   Stephen Cousins boards at 0x88-0x8B. No doubt we'll get
@@ -2314,6 +2325,22 @@ static uint8_t io_read_2014(uint16_t addr)
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0x78;	/* 78 is what my actual board floats at */
+}
+
+static uint8_t io_read_2014_x(uint16_t addr)
+{
+	/* RC2014 extreme with bus extender at B8 */
+	if ((addr & 0xFF) == 0xB8) {
+		addr >>= 8;
+		if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
+			return nic_w5100_read(wiz, addr & 3);
+		if (addr == 0xC0 && rtc)
+			return rtc_read(rtc);
+		if (addr >= 0x68 && addr <= 0x6F && have_pio)
+			return pio_read2(addr & 3);
+		return 0xFF;
+	}
+	return io_read_2014(addr);
 }
 
 static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
@@ -2352,9 +2379,9 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		my_ide_write(addr & 7, val);
 	else if (addr >= 0x20 && addr <= 0x27 && ide == 2)
 		ppide_write(ppide, addr & 3, val);
-	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
+	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet && !extreme)
 		nic_w5100_write(wiz, addr & 3, val);
-	else if (addr >= 0x68 && addr <= 0x6F && have_pio)
+	else if (addr >= 0x68 && addr <= 0x6F && have_pio && !extreme)
 		pio_write2(addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
@@ -2367,7 +2394,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		bankenable = val & 1;
 	} else if (addr == 0xBB && ps2)
 		ps2_write(val);
-	else if (addr == 0xC0 && rtc)
+	else if (addr == 0xC0 && rtc && !extreme)
 		rtc_write(rtc, val);
 	else if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		ctc_write(addr & 3, val);
@@ -2392,6 +2419,22 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		printf("trace set to %d\n", trace);
 	} else if (!known && (trace & TRACE_UNK))
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+}
+
+static void io_write_2014_x(uint16_t addr, uint8_t val, uint8_t known)
+{
+	/* RC2014 extreme with bus extender at B8 */
+	if ((addr & 0xFF) == 0xB8) {
+		addr >>= 8;
+		if (addr >= 0x28 && addr <= 0x2C && have_wiznet)
+			nic_w5100_write(wiz, addr & 3, val);
+		else if (addr == 0xC0 && rtc)
+			rtc_write(rtc, val);
+		else if (addr >= 0x68 && addr <= 0x6F && have_pio)
+			pio_write2(addr & 3, val);
+		return;
+	}
+	io_write_2014(addr, val, known);
 }
 
 static uint8_t io_read_4(uint16_t addr)
@@ -2688,7 +2731,10 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
 	case CPUBOARD_Z80:
-		io_write_2014(addr, val, 0);
+		if (extreme)
+			io_write_2014_x(addr, val, 0);
+		else
+			io_write_2014(addr, val, 0);
 		break;
 	case CPUBOARD_SC108:
 		io_write_1(addr, val);
@@ -2735,7 +2781,10 @@ uint8_t io_read(int unused, uint16_t addr)
 	case CPUBOARD_PDOG128:
 	case CPUBOARD_PDOG512:
 	case CPUBOARD_ZRC:
-		return io_read_2014(addr);
+		if (extreme)
+			return io_read_2014_x(addr);
+		else
+			return io_read_2014(addr);
 	case CPUBOARD_SC114:
 	case CPUBOARD_SC121:
 		return io_read_2(addr);
@@ -2756,28 +2805,45 @@ uint8_t io_read(int unused, uint16_t addr)
 	}
 }
 
+/* Work out what our interrupt should look like */
+static void set_interrupt(void)
+{
+	if (live_irq)
+		Z80INT(&cpu_z80, intvec);
+	else if (live_nonim2)
+		Z80INT(&cpu_z80, 0x78);	/* Really rather random */
+	else
+		Z80NOINT(&cpu_z80);
+}
+
+/* Generic style interrupts */
+static void poll_irq_nonim2(void)
+{
+	if (acia)
+		acia_check_irq(acia);
+	uart_check_irq(&uart[0]);
+	if (vdp && tms9918a_irq_pending(vdp))
+		live_nonim2 |= IRQM_VDP;
+	else
+		live_nonim2 &= ~IRQM_VDP;
+	set_interrupt();
+}
+
+/* Zilog style interrupt chain */
 static void poll_irq_event(void)
 {
 	if (have_im2) {
-		if (acia)
-			acia_check_irq(acia);
-		uart_check_irq(&uart[0]);
 		if (!live_irq) {
 			if (!sio2_check_im2(sio))
 			        if (!sio2_check_im2(sio + 1))
 					ctc_check_im2();
 		}
-		/* TMS9918A no IM2 handling */
 	} else {
-		if (acia)
-			acia_check_irq(acia);
-		uart_check_irq(&uart[0]);
 		if (!sio2_check_im2(sio))
 		      sio2_check_im2(sio + 1);
 		ctc_check_im2();
-		if (vdp && tms9918a_irq_pending(vdp))
-			Z80INT(&cpu_z80, 0xFF);
 	}
+	set_interrupt();
 }
 
 static void reti_event(void)
@@ -2863,7 +2929,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:pPr:sRS:Tuw8C:Zz:")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:pPr:sRS:Tuw8C:Zz:X")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -3083,6 +3149,9 @@ int main(int argc, char *argv[])
 		case '9':
 			if (amd9511 == NULL)
 				amd9511 = amd9511_create();
+			break;
+		case 'X':
+			extreme = 1;
 			break;
 		default:
 			usage();
@@ -3464,6 +3533,8 @@ int main(int argc, char *argv[])
 		/* Do 20ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+		/* Non IM2 devices just hold interrupt */
+		poll_irq_nonim2();
 		if (int_recalc) {
 			/* If there is no pending Z80 vector IRQ but we think
 			   there now might be one we use the same logic as for
