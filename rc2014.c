@@ -2338,7 +2338,7 @@ static uint8_t io_read_2014_x(uint16_t addr)
 			return rtc_read(rtc);
 		if (addr >= 0x68 && addr <= 0x6F && have_pio)
 			return pio_read2(addr & 3);
-		return 0xFF;
+		return 0x78;
 	}
 	return io_read_2014(addr);
 }
