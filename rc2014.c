@@ -48,6 +48,8 @@
 #include "ps2.h"
 #include "rtc_bitbang.h"
 #include "sdcard.h"
+#include "tft_dumb.h"
+#include "tft_dumb_render.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 #include "w5100.h"
@@ -112,6 +114,8 @@ static struct tms9918a_renderer *vdprend;
 static struct amd9511 *amd9511;
 static struct ef9345 *ef9345;
 static struct ef9345_renderer *ef9345rend;
+static struct tft_dumb *tft;
+static struct tft_renderer *tftrend;
 
 static uint8_t ef9345_vram[16384];
 static uint8_t ef9345_rom[8192];
@@ -170,6 +174,7 @@ volatile int emulator_done;
 static int trace = 0;
 
 static void reti_event(void);
+static void poll_irq_nonim2(void);
 
 static uint8_t mem_read0(uint16_t addr)
 {
@@ -904,6 +909,7 @@ static void uart_init(struct uart16x50 *uptr, int in)
 {
     uptr->dlab = 0;
     uptr->input = in;
+    uptr->iir = 0x01;	/* No interrrupt */
 }
 
 static void uart_check_irq(struct uart16x50 *uptr)
@@ -2316,8 +2322,13 @@ static uint8_t io_read_2014(uint16_t addr)
 	   an official CTC board at another address  */
 	if (addr >= 0x88 && addr <= 0x8B && have_ctc)
 		return ctc_read(addr & 3);
-	if ((addr == 0x98 || addr == 0x99) && vdp)
-		return tms9918a_read(vdp, addr & 1);
+	if ((addr == 0x98 || addr == 0x99) && vdp) {
+		/* This can change the interrupt state and if so we need
+		   to pick it up */
+		uint8_t r = tms9918a_read(vdp, addr & 1);
+		poll_irq_nonim2();
+		return r;
+	}
 	if (addr >= 0xA0 && addr <= 0xA7 && have_16x50)
 		return uart_read(&uart[0], addr & 7);
 	if (addr == 0x6D && is_z512)
@@ -2406,6 +2417,13 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		z512_write(addr, val);
 	else if (addr == 0x6F && is_z512)
 		z512_write_wd(addr, val);
+	else if (addr == 0x32 || addr == 0x33) {
+		if (tft == NULL) {
+			tft = tft_create(0);
+			tftrend = tft_renderer_create(tft);
+		}
+		tft_write(tft, addr & 1, val);
+	}
 	/* The switchable/pageable ROM is not very well decoded */
 	else if (switchrom && (addr & 0x7F) >= 0x38 && (addr & 0x7F) <= 0x3F)
 		toggle_rom();
@@ -2808,9 +2826,16 @@ uint8_t io_read(int unused, uint16_t addr)
 /* Work out what our interrupt should look like */
 static void set_interrupt(void)
 {
-	if (live_irq)
+	static unsigned last_nim2 = 0x100;
+	if (live_irq) {
 		Z80INT(&cpu_z80, intvec);
-	else if (live_nonim2)
+		return;
+	}
+	if (last_nim2 != live_nonim2 && (trace & TRACE_IRQ)) {
+		fprintf(stderr, "nonim2 now %x\n", live_nonim2);
+		last_nim2 = live_nonim2;
+	}
+	if (live_nonim2)
 		Z80INT(&cpu_z80, 0x78);	/* Really rather random */
 	else
 		Z80NOINT(&cpu_z80);
@@ -3483,6 +3508,7 @@ int main(int argc, char *argv[])
 					uart_event(&uart[0]);
 				if (have_cpld_serial)
 					sbc64_cpld_timer();
+				poll_irq_nonim2();
 			}
 			if (have_ctc || have_kio) {
 				if (cpuboard != CPUBOARD_MICRO80 && cpuboard != CPUBOARD_MICRO80W)
@@ -3528,13 +3554,16 @@ int main(int argc, char *argv[])
 			ef9345_rasterize(ef9345);
 			ef9345_render(ef9345rend);
 		}
+		if (tft) {
+			tft_rasterize(tft);
+			tft_render(tftrend);
+		}
 		if (have_wiznet)
 			w5100_process(wiz);
 		/* Do 20ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 		/* Non IM2 devices just hold interrupt */
-		poll_irq_nonim2();
 		if (int_recalc) {
 			/* If there is no pending Z80 vector IRQ but we think
 			   there now might be one we use the same logic as for
