@@ -177,7 +177,7 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 	}
 
 	if (c->sd_mode == 0) {
-		if (in != 0xFF) {
+		if (in != 0xFF && in != 0x00) {
 			c->sd_mode = 1;	/* Command wait */
 			c->sd_cmdp = 1;
 			c->sd_cmd[0] = in;
