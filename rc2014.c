@@ -39,6 +39,7 @@
 #include "libz80/z80.h"
 #include "lib765/include/765.h"
 
+#include "16x50.h"
 #include "acia.h"
 #include "amd9511.h"
 #include "ef9345.h"
@@ -95,6 +96,7 @@ static uint8_t have_16x50;
 static uint8_t have_copro;
 static uint8_t have_tms;
 static uint8_t have_ef9345;
+static uint8_t have_kio_ext;	/* Extreme config KIO at C0-DF */
 
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
@@ -116,6 +118,7 @@ static struct ef9345 *ef9345;
 static struct ef9345_renderer *ef9345rend;
 static struct tft_dumb *tft;
 static struct tft_renderer *tftrend;
+struct uart16x50 *uart;
 
 static uint8_t ef9345_vram[16384];
 static uint8_t ef9345_rom[8192];
@@ -871,16 +874,12 @@ void recalc_interrupts(void)
 struct acia *acia;
 static uint8_t acia_narrow;
 
-
-static void acia_check_irq(struct acia *acia)
+/* Nothing to do */
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 {
-	if (acia_irq_pending(acia))
-		live_nonim2 |= IRQM_ACIA;
-	else
-		live_nonim2 &= ~IRQM_ACIA;
 }
 
-
+#if 0
 /* UART: very mimimal for the moment */
 
 struct uart16x50 {
@@ -1036,7 +1035,7 @@ static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
     switch(addr) {
     case 0:	/* If dlab = 0, then write else LS*/
         if (uptr->dlab == 0) {
-            if (uptr == &uart[0]) {
+            if (uptr == uart) {
                 putchar(val);
                 fflush(stdout);
             }
@@ -1083,7 +1082,7 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
     switch(addr) {
     case 0:
         /* receive buffer */
-        if (uptr == &uart[0] && uptr->dlab == 0) {
+        if (uptr == uart && uptr->dlab == 0) {
             uart_clear_interrupt(uptr, RXDA);
             if (check_chario() & 1)
                 return next_char();
@@ -1130,6 +1129,7 @@ static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
     }
     return 0xFF;
 }
+#endif
 
 struct z80_sio_chan {
 	uint8_t wr[8];
@@ -2274,6 +2274,118 @@ static void ps2_write(uint8_t val)
 	ps2_set_lines(ps2, !!(val & 0x01) , !!(val & 0x02));
 }
 
+static unsigned prop_curcmd;
+static unsigned prop_cmdcnt;
+static unsigned prop_cmdsize;
+static unsigned propdata[4];
+
+static void propgfx_write(unsigned cmd, uint8_t data)
+{
+	if (cmd == 0) {
+		prop_cmdcnt = 0;
+		prop_curcmd = data;
+		switch(data) {
+		case 0x00:
+			fprintf(stderr, "V:MODE ");
+			prop_cmdsize = 3;
+			break;
+		case 0x01:
+			fprintf(stderr, "V:SETPIXEL");
+			prop_cmdsize = 3;
+			break;
+		case 0x03:
+			fprintf(stderr, "V:HSCROLL ");
+			prop_cmdsize = 2;
+			break;
+		case 0x04:
+			fprintf(stderr, "V:VSCROLL ");
+			prop_cmdsize = 2;
+			break;
+		case 0x06:
+			fprintf(stderr, "V:SET_TILEMAP ");
+			prop_cmdsize = 2;
+			break;
+		case 0x07:
+			fprintf(stderr, "V:SET_SPRITEMAP ");
+			prop_cmdsize = 2;
+			break;
+		case 0x09:
+			fprintf(stderr, "V:CLR ");
+			break;
+		case 0x0B:
+			fprintf(stderr, "V:PALETTE ");
+			prop_cmdsize = 2;
+			break;
+		case 0x0C:
+			fprintf(stderr, "V:SRPITEDATA ");
+			prop_cmdsize = 2;
+			break;
+		case 0x0D:
+			fprintf(stderr, "V:TILEMAP/RBW ");
+			prop_cmdsize = 2;
+			break;
+		case 0x0E:
+			fprintf(stderr, "V:TILEBIT ");
+			prop_cmdsize = 2;
+			break;
+		default:
+			fprintf(stderr, "V:UNK %02X ", data);
+			prop_cmdsize = 0;
+		}
+		return;
+	}
+	if (prop_cmdcnt < prop_cmdsize) {
+		propdata[prop_cmdcnt] = data;
+		prop_cmdcnt++;
+		return;
+	}
+	if (prop_cmdcnt == prop_cmdsize) {
+		prop_cmdcnt++;
+		switch(prop_curcmd) {
+		case 0x00:
+			fprintf(stderr, "%02X %02X %02X\n",
+				propdata[0], propdata[1], propdata[2]);
+			break;
+		case 0x01:
+			fprintf(stderr, "Y %0d X %d C %d\n",
+				propdata[0], propdata[1], propdata[2]);
+			break;
+		case 0x03:
+		case 0x04:
+			fprintf(stderr, "%d\n",
+				(propdata[1] << 8) | propdata[0]);
+			break;
+		case 0x06:
+		case 0x07:
+			fprintf(stderr, "%04X\n",
+				(propdata[1] << 8) | propdata[0]);
+			break;
+		case 0x09:
+			break;
+		case 0x0B:
+			fprintf(stderr, "%d to %02X\n", propdata[0],
+				propdata[1]);
+			break;
+		case 0x0C:
+			fprintf(stderr, "%d\n",
+				propdata[0]);
+			break;
+		case 0x0D: {
+			uint16_t off = propdata[0] | (propdata[1] << 8);
+			fprintf(stderr, "Y %d X %d\n",
+				off / 80, off % 80);
+			}
+			break;
+		case 0x0E:
+			fprintf(stderr, "Tile %d\n",
+				(propdata[0] | (propdata[1] << 8)) >> 6);
+			break;
+		}
+		return;
+	}
+	fprintf(stderr, "V%02X ", data);
+}
+
 static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -2310,7 +2422,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return ppide_read(ppide, addr & 3);
 	if (addr >= 0x28 && addr <= 0x2C && have_wiznet && !extreme)
 		return nic_w5100_read(wiz, addr & 3);
-	if (addr >= 0x68 && addr <= 0x6F && have_pio && !extreme)
+	if (addr >= 0x68 && addr <= 0x6F && have_pio)
 		return pio_read2(addr & 3);
 
 	if (addr == 0xBB && ps2)
@@ -2330,7 +2442,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return r;
 	}
 	if (addr >= 0xA0 && addr <= 0xA7 && have_16x50)
-		return uart_read(&uart[0], addr & 7);
+		return uart16x50_read(uart, addr & 7);
 	if (addr == 0x6D && is_z512)
 		return z512_read(addr);
 	if (trace & TRACE_UNK)
@@ -2347,10 +2459,11 @@ static uint8_t io_read_2014_x(uint16_t addr)
 			return nic_w5100_read(wiz, addr & 3);
 		if (addr == 0xC0 && rtc)
 			return rtc_read(rtc);
-		if (addr >= 0x68 && addr <= 0x6F && have_pio)
-			return pio_read2(addr & 3);
 		return 0x78;
 	}
+	/* KIO at 0xC0-0xDF */
+	if (addr >= 0xC0 && addr <= 0xDF && have_kio_ext)
+		return kio_read(addr & 0x1F);
 	return io_read_2014(addr);
 }
 
@@ -2378,6 +2491,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		fdc_write(addr & 7, val);
 	else if ((addr == 0x42 || addr == 0x43) && amd9511)
 		amd9511_write(amd9511, addr, val);
+	else if (addr >= 0x40 && addr <= 0x41)
+		propgfx_write(addr & 1, val);
 	else if ((addr >= 0xA0 && addr <= 0xA7) && acia && acia_narrow == 1)
 		acia_write(acia, addr & 1, val);
 	else if ((addr >= 0x80 && addr <= 0x87) && acia && acia_narrow == 2)
@@ -2392,7 +2507,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && have_wiznet && !extreme)
 		nic_w5100_write(wiz, addr & 3, val);
-	else if (addr >= 0x68 && addr <= 0x6F && have_pio && !extreme)
+	else if (addr >= 0x68 && addr <= 0x6F && have_pio)
 		pio_write2(addr & 3, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
 	else if (bank512 && addr >= 0x78 && addr <= 0x7B) {
@@ -2412,7 +2527,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	else if ((addr == 0x98 || addr == 0x99) && vdp)
 		tms9918a_write(vdp, addr & 1, val);
 	else if (addr >= 0xA0 && addr <= 0xA7 && have_16x50)
-		uart_write(&uart[0], addr & 7, val);
+		uart16x50_write(uart, addr & 7, val);
 	else if (addr == 0x6D && is_z512)
 		z512_write(addr, val);
 	else if (addr == 0x6F && is_z512)
@@ -2448,8 +2563,11 @@ static void io_write_2014_x(uint16_t addr, uint8_t val, uint8_t known)
 			nic_w5100_write(wiz, addr & 3, val);
 		else if (addr == 0xC0 && rtc)
 			rtc_write(rtc, val);
-		else if (addr >= 0x68 && addr <= 0x6F && have_pio)
-			pio_write2(addr & 3, val);
+		return;
+	}
+	/* KIO at 0xC0-0xDF */
+	if (addr >= 0xC0 && addr <= 0xDF && have_kio_ext) {
+		kio_write(addr & 0x1F, val);
 		return;
 	}
 	io_write_2014(addr, val, known);
@@ -2844,13 +2962,13 @@ static void set_interrupt(void)
 /* Generic style interrupts */
 static void poll_irq_nonim2(void)
 {
-	if (acia)
-		acia_check_irq(acia);
-	uart_check_irq(&uart[0]);
+	live_nonim2 = 0;
+	if (acia && acia_irq_pending(acia))
+		live_nonim2 |= IRQM_ACIA;
+	if (uart && uart16x50_irq_pending(uart))
+		live_nonim2 |= IRQM_16X50;
 	if (vdp && tms9918a_irq_pending(vdp))
 		live_nonim2 |= IRQM_VDP;
-	else
-		live_nonim2 &= ~IRQM_VDP;
 	set_interrupt();
 }
 
@@ -2894,11 +3012,13 @@ static void reti_event(void)
 		/* If IM2 is not wired then all the things respond at the same
 		   time. I think they can also fight over the vector but ignore
 		   that */
-		if (sio2) {
+		/* TODO: KIO internally is consistent for IEI/IEO even if
+		   IM2 isn't being used */
+		if (sio2 || have_kio || have_kio_ext) {
 			sio2_reti(sio);
 			sio2_reti(sio + 1);
 		}
-		if (have_ctc || have_kio) {
+		if (have_ctc || have_kio || have_kio_ext) {
 			ctc_reti(0);
 			ctc_reti(1);
 			ctc_reti(2);
@@ -3177,6 +3297,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'X':
 			extreme = 1;
+			have_kio_ext = 1;
 			break;
 		default:
 			usage();
@@ -3349,8 +3470,11 @@ int main(int argc, char *argv[])
 		ctc_init();
 		pio_reset();
 	}
-	if (have_16x50)
-		uart_init(&uart[0], indev == INDEV_16C550A ? 1: 0);
+	if (have_16x50) {
+		uart = uart16x50_create();
+		if (indev == INDEV_16C550A)
+			uart16x50_set_input(uart, 1);
+	}
 	if (have_tms) {
 		vdp = tms9918a_create();
 		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
@@ -3505,7 +3629,7 @@ int main(int argc, char *argv[])
 				if (sio2)
 					sio2_timer();
 				if (have_16x50)
-					uart_event(&uart[0]);
+					uart16x50_event(uart);
 				if (have_cpld_serial)
 					sbc64_cpld_timer();
 				poll_irq_nonim2();
