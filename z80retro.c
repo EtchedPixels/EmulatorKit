@@ -68,7 +68,7 @@ volatile int emulator_done;
 #define TRACE_CTC	0x000080
 #define TRACE_IRQ	0x000100
 #define TRACE_SPI	0x000200
-#define TRACE_SD	0x008400
+#define TRACE_SD	0x000400
 
 static int trace = 0;
 
