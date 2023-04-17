@@ -2462,7 +2462,7 @@ static uint8_t io_read_2014_x(uint16_t addr)
 		return 0x78;
 	}
 	/* KIO at 0xC0-0xDF */
-	if (addr >= 0xC0 && addr <= 0xDF && have_kio_ext)
+	if ((addr  & 0xE0) == 0xC0 && have_kio_ext)
 		return kio_read(addr & 0x1F);
 	return io_read_2014(addr);
 }
@@ -2566,7 +2566,7 @@ static void io_write_2014_x(uint16_t addr, uint8_t val, uint8_t known)
 		return;
 	}
 	/* KIO at 0xC0-0xDF */
-	if (addr >= 0xC0 && addr <= 0xDF && have_kio_ext) {
+	if ((addr  & 0xE0) == 0xC0 && have_kio_ext) {
 		kio_write(addr & 0x1F, val);
 		return;
 	}
