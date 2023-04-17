@@ -81,7 +81,7 @@ static void duart_output(struct duart *d, int port, int value)
 	if (d->port[port].txdis)
 		return;
 	if (d->port[port].sr & 0x04) {
-		if (port == 0) {
+		if (d->input - 1 == port) {
 			uint8_t v = value & 0xFF;
 			write(1, &v, 1);
 		}
@@ -156,12 +156,12 @@ static void duart_count(struct duart *d, int n)
 void duart_tick(struct duart *d)
 {
 	uint8_t r = check_chario();
-	if ((r & 1) && d->port[0].rxdis == 0) {
-	        if (d->input == 1) {
+	if (r & 1) {
+		if (d->input == 1 && d->port[0].rxdis == 0) {
 		    d->port[0].rx = next_char();
 		    d->port[0].sr |= 0x01;
 		    duart_irq_raise(d, 0x02);
-                } else if (d->input == 2) {
+                } else if (d->input == 2 && d->port[1].rxdis == 0) {
 		    d->port[1].rx = next_char();
 		    d->port[1].sr |= 0x01;
 		    duart_irq_raise(d, 0x20);
