@@ -90,7 +90,7 @@ speed not the true 500Khz joy of the original.
 
 ## Software
 
-The best location is probably https://www.willegal.net/appleii.jpg which
+The best location is probably https://www.willegal.net/ which
 also has a collection of material and example software. Note that a lot of
 it gives load and execution addresses in page-offset octal format so
 remember to convert!

@@ -24,6 +24,7 @@ RC2014 and Fuzix.
 - 8008
 - 8085 - Extended from Mike Chambers 8080 emulation
 - 8086 (from Hampa Hug's pcem)
+- NS32K
 - Z8 - initial model
 - Z80 (libz80)
 - Z180 - dervied from libz80
@@ -83,6 +84,7 @@ RC2014 and Fuzix.
 - Rhyophire
 
 ## Other Systems Emulated
+- 2063
 - 68KNano
 - Ampro Littleboard/PLUS
 - Amstrad NC100
@@ -92,6 +94,7 @@ RC2014 and Fuzix.
 - Grant Searle's 9 chip Z80
 - Linc-80
 - Micro80
+- Pico 68K
 - Retrobrew N8
 - Rewtrobrew SBC v2
 - Retrobrew Mark-IV
@@ -167,7 +170,7 @@ devices, as this makes the CF much more reliable and you can run far faster.
 
 There are also designs for a lot of other systems that are not emulated.
 
-## Rhyophire
+## Rhyophyre
 
 A Z180 based machine with high resolution graphics. The graphics side is not
 currently emulated. Runs ROMWBW.
