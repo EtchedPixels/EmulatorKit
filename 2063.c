@@ -31,6 +31,8 @@
 
 #include "sdcard.h"
 #include "system.h"
+#include "tms9918a.h"
+#include "tms9918a_render.h"
 #include "libz80/z80.h"
 #include "z80dis.h"
 
@@ -40,6 +42,10 @@ static uint8_t gpio_out;
 static uint8_t gpio_in = 0xFF;		/* SD present, printer floating */
 static uint8_t flash_in = 1;
 static struct sdcard *sdcard;
+static struct tms9918a *vdp;
+static struct tms9918a_renderer *vdprend;
+
+int sdl_live;
 
 static uint8_t ram[16 * 32768];
 static uint8_t rom[16384];
@@ -68,7 +74,8 @@ volatile int emulator_done;
 #define TRACE_CTC	0x000080
 #define TRACE_IRQ	0x000100
 #define TRACE_SPI	0x000200
-#define TRACE_SD	0x008400
+#define TRACE_SD	0x000400
+#define TRACE_TMS9918A	0x000800
 
 static int trace = 0;
 
@@ -794,6 +801,10 @@ uint8_t io_read(int unused, uint16_t addr)
 		case 0x70:
 			flash_in = 0;
 			return 0xFF;
+		case 0x80:
+			if (vdp)
+				return tms9918a_read(vdp, addr & 1);
+			break;
 	}
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -817,6 +828,10 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case 0x40:
 		ctc_write(addr & 3, val);
+		break;
+	case 0x80:
+		if (vdp)
+			tms9918a_write(vdp, addr & 1, val);
 		break;
 	}
 	if (addr == 0xFD) {
@@ -876,7 +891,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "2063: [-r rompath] [-S sdcard] [-f] [-d debug]\n");
+	fprintf(stderr, "2063: [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -887,8 +902,9 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "2063.rom";
 	char *sdpath = NULL;
+	unsigned have_tms = 0;
 
-	while ((opt = getopt(argc, argv, "d:fr:S:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -901,6 +917,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'T':
+			have_tms = 1;
 			break;
 		default:
 			usage();
@@ -937,7 +956,13 @@ int main(int argc, char *argv[])
 	ctc_init();
 	sio2_input = 1;
 
-	/* 2.5ms - it's a balance between nice behaviour and simulation
+	if (have_tms) {
+		vdp = tms9918a_create();
+		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
+		vdprend = tms9918a_renderer_create(vdp);
+	}
+
+	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
 	tc.tv_nsec = 20000000L;
@@ -990,6 +1015,10 @@ int main(int argc, char *argv[])
 		}
 
 		/* Do 20ms of I/O and delays */
+		if (vdp) {
+			tms9918a_rasterize(vdp);
+			tms9918a_render(vdprend);
+		}
 		if (!fast)
 			nanosleep(&tc, NULL);
 		if (int_recalc) {

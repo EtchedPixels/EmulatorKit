@@ -223,8 +223,11 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 z80retro: z80retro.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z80retro.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
-2063: 2063.o sdcard.o z80dis.o libz80/libz80.o
-	cc -g3 2063.o sdcard.o z80dis.o libz80/libz80.o -lm -o 2063
+2063: 2063.o 2063_noui.o sdcard.o tms9918a.o tms9918a_norender.o z80dis.o libz80/libz80.o
+	cc -g3 2063.o 2063_noui.o sdcard.o tms9918a.o tms9918a_norender.o z80dis.o libz80/libz80.o -lm -o 2063
+
+2063_sdl2: 2063.o 2063_sdlui.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz80/libz80.o
+	cc -g3 2063.o 2063_sdlui.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
 
 # TODO make rules and dependencies within z280/*
 z280rc: z280rc.o ide.o rtc_bitbang.o z280/z280uart.o z280/z80daisy.o z280/z280dasm.o z280/z280.o
