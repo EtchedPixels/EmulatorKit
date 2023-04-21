@@ -823,7 +823,8 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	else if (addr >= 0x60 && addr <= 0x63) {
 		bankreg[addr & 3] = val;
 		if (trace & TRACE_BANK)
-			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
+			fprintf(stderr, "Bank %d set to %02X [%02X %02X %02X %02X]\n", addr & 3, val,
+				bankreg[0], bankreg[1], bankreg[2], bankreg[3]);
 	}
 	else if (addr >= 0x40 && addr <= 0x43)
 		ctc_write(addr & 3, val);
