@@ -63,7 +63,7 @@ attaching one to an IN and OUT port. This may well get added.
 ## Usage
 
 Assuming you don't want to toggle programs in then you can load them using
-the -l and -b option. Use -l to specify the binary path and -o the octal
+the -l and -b option. Use -l to specify the binary path and -b the octal
 load address. Remember to convert any weird page-offset notation into octal
 first.
 

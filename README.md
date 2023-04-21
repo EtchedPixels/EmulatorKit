@@ -13,7 +13,7 @@ RC2014 and Fuzix.
 ## Processors Supported
 
 - 1802 - initial model of 1802/4/5 processors
-- 6303
+- 6303 
 - 6502 - NMOS part with no illegal models (Mike Chambers)
 - 65C816 (uses a slightly modified lib65816)
 - 6800
@@ -24,14 +24,17 @@ RC2014 and Fuzix.
 - 8008
 - 8085 - Extended from Mike Chambers 8080 emulation
 - 8086 (from Hampa Hug's pcem)
-- NS32K
+- NS8070 (work in progress)
+- NS32K (from PiTubeClient)
 - Z8 - initial model
 - Z80 (libz80)
 - Z180 - dervied from libz80
+- Z280 
 
-## RC2014 / BP80 Processor Cards Emulated
+## RCbus / RC2014 / BP80 Processor Cards Emulated
 - Z80
 - Z180 (only in linear memory mode at the moment)
+- Z280
 - 1802
 - 6303/6803
 - 6502
@@ -42,16 +45,20 @@ RC2014 and Fuzix.
 - 68HC11
 - 80C85
 - 80C188
+- NS32K (prototype)
 - TMS9995
 - Z8
 
-## RC2014 / BP80 Integrated Systems Emulated
+## RCbus / BP80 Integrated Systems Emulated
 - SC108
 - SC114
 - SC126
 
-## Systems with RC2014 bus connector
+## Systems with RCbus connector
 - Easy Z80
+- T68KRC
+- MB020
+- Z280RC
 - Z80MB64
 - Z80SBC64
 
@@ -65,7 +72,7 @@ RC2014 and Fuzix.
 - Switchable ROM
 - 64K RAM
 
-## RC2014 Card Emulation (Other)
+## RCbus Card Emulation (Other)
 - 16x50
 - CTC
 - EF9345
@@ -81,7 +88,7 @@ RC2014 and Fuzix.
 - SBC v2
 - Mark IV
 - N8
-- Rhyophire
+- Rhyophyre
 
 ## Other Systems Emulated
 - 2063
@@ -95,6 +102,7 @@ RC2014 and Fuzix.
 - Linc-80
 - Micro80
 - Pico 68K
+- PZ1
 - Retrobrew N8
 - Rewtrobrew SBC v2
 - Retrobrew Mark-IV
@@ -147,6 +155,14 @@ https://retrobrewcomputers.org along with a forum. Most systems use the
 ROMWBW (see RC2014).
 
 This site also hosts many of the other designs like the Tiny68K.
+
+## 2063
+
+A Z80 based system with bitbang SD card and 32K memory banking.
+
+https://github.com/Z80-Retro/2063-Z80
+
+Youtube channel: https://www.youtube.com/watch?v=oekucjDcNbA&list=PL3by7evD3F51Cf9QnsAEdgSQ4cz7HQZX5
 
 ## Ampro Littleboard
 
@@ -212,4 +228,11 @@ This kit is available from http://www.sunrise-ev.com/z80.htm. The emulation
 is of the full build, and does not emulate the LED display or keypad.
 
 All needed emulation material is available from the site as well.
+
+## Z80 Retro
+
+A fairly standard Z80 retro build with Zilog peripherals and 4 x 16K memory
+banking.
+
+https://github.com/peterw8102/Z80-Retro/wiki
 
