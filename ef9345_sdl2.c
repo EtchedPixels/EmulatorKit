@@ -43,7 +43,7 @@ void ef9345_render(struct ef9345_renderer *render)
     sr.x = 0;
     sr.y = 0;
     sr.w = 492;		/* 336 in 40 col mode */
-    sr.h = 300;		/* Less for NTSC */
+    sr.h = 280;		/* Less for NTSC */
 
     SDL_UpdateTexture(render->texture, NULL, ef9345_get_raster(render->ef9345), 492 * 4);
     SDL_RenderClear(render->render);
@@ -82,7 +82,7 @@ struct ef9345_renderer *ef9345_renderer_create(struct ef9345 *ef9345)
     render->window = SDL_CreateWindow("EF9345",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
-        492 * 2, 600,
+        492 * 2, 560,
         SDL_WINDOW_RESIZABLE);
     if (render->window == NULL) {
         fprintf(stderr, "Unable to create window: %s.\n", SDL_GetError());
@@ -94,12 +94,12 @@ struct ef9345_renderer *ef9345_renderer_create(struct ef9345 *ef9345)
         exit(1);
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-    SDL_RenderSetLogicalSize(render->render, 492, 300);
+    SDL_RenderSetLogicalSize(render->render, 492, 280);
 
     render->texture = SDL_CreateTexture(render->render,
                         SDL_PIXELFORMAT_ARGB8888,
                         SDL_TEXTUREACCESS_STREAMING,
-                        492, 300);
+                        492, 280);
     if (render->render == NULL) {
         fprintf(stderr, "Unable to create renderer: %s.\n", SDL_GetError());
         exit(1);

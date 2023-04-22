@@ -2404,7 +2404,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return kio_read(addr & 0x1F);
 	if (addr >= 0x48 && addr < 0x50) 
 		return fdc_read(addr & 7);
-	if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20 )
+	if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20 && !extreme)
 		return ef9345_read(ef9345, ef_latch);
 	if ((addr == 0x42 || addr == 0x43) && amd9511)
 		return amd9511_read(amd9511, addr);
@@ -2459,6 +2459,8 @@ static uint8_t io_read_2014_x(uint16_t addr)
 			return nic_w5100_read(wiz, addr & 3);
 		if (addr == 0xC0 && rtc)
 			return rtc_read(rtc);
+		if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20)
+			return ef9345_read(ef9345, ef_latch);
 		return 0x78;
 	}
 	/* KIO at 0xC0-0xDF */
@@ -2483,9 +2485,9 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	addr &= 0xFF;
 	if (addr >= 0x80 && addr <= 0x9F && have_kio)
 		kio_write(addr & 0x1F, val);
-	else if (addr == 0x44 && ef9345)
+	else if (addr == 0x44 && ef9345 && !extreme)
 		ef_latch = val;
-	else if (addr == 0x46 && ef9345 && ((ef_latch & 0xF0) == 0x20))
+	else if (addr == 0x46 && ef9345 && ((ef_latch & 0xF0) == 0x20) && !extreme)
 		ef9345_write(ef9345, ef_latch, val);
 	else if (addr >= 0x48 && addr < 0x50)
 		fdc_write(addr & 7, val);
@@ -2563,6 +2565,10 @@ static void io_write_2014_x(uint16_t addr, uint8_t val, uint8_t known)
 			nic_w5100_write(wiz, addr & 3, val);
 		else if (addr == 0xC0 && rtc)
 			rtc_write(rtc, val);
+		else if (addr == 0x44 && ef9345)
+			ef_latch = val;
+		else if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20)
+			ef9345_write(ef9345, ef_latch, val);
 		return;
 	}
 	/* KIO at 0xC0-0xDF */
