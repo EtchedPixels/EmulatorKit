@@ -2,9 +2,13 @@
 struct tft_dumb
 {
     uint8_t cmd;
-    uint16_t row;
-    uint16_t col;
+    uint16_t top;
+    uint16_t bottom;
+    uint16_t left;
+    uint16_t right;
     uint32_t data;
+    uint16_t xpos;
+    uint16_t ypos;
     unsigned step;
 
     unsigned width;
@@ -13,6 +17,7 @@ struct tft_dumb
 
     uint8_t row_port;
     uint8_t col_port;
+    uint8_t start_port;
     uint8_t data_port;
     uint32_t *rasterbuffer;
 
