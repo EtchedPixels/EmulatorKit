@@ -8,7 +8,8 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80
 
-sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 z180-mini-itx_sdl2 vz300
+sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
+	z180-mini-itx_sdl2 vz300 2063_sdl2
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
