@@ -774,8 +774,10 @@ static void gpio_write(uint16_t addr, uint8_t val)
 	if (delta & 4) {
 		if (gpio_out & 4)
 			sd_spi_raise_cs(sdcard);
-		else
+		else {
 			sd_spi_lower_cs(sdcard);
+			bitcnt = 0;
+		}
 	}
 	if (delta & 2) {
 		if (gpio_out & 2)
