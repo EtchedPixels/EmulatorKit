@@ -821,19 +821,21 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	switch(addr & 0xF0) {
 	case 0x10:
 		gpio_write(addr, val);
-		break;
+		return;
 	case 0x20:
 		/* Printer */
 		break;
 	case 0x30:
 		sio2_write(addr & 3, val);
-		break;
+		return;
 	case 0x40:
 		ctc_write(addr & 3, val);
-		break;
+		return;
 	case 0x80:
-		if (vdp)
+		if (vdp){
 			tms9918a_write(vdp, addr & 1, val);
+			return;
+		}
 		break;
 	}
 	if (addr == 0xFD) {
