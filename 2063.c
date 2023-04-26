@@ -1016,6 +1016,7 @@ int main(int argc, char *argv[])
 			}
 			ctc_tick(tstate_steps);
 			/* We want to run UI events regularly it seems */
+			ui_event();
 		}
 
 		/* Do 20ms of I/O and delays */
