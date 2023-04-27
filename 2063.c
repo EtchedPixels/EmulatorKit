@@ -39,7 +39,7 @@
 static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
 static uint8_t gpio_out;
-static uint8_t gpio_in = 0xFF;		/* SD present, printer floating */
+static uint8_t gpio_in = 0xFF;		/* SD not present, printer floating */
 static uint8_t flash_in = 1;
 static struct sdcard *sdcard;
 static struct tms9918a *vdp;
@@ -951,6 +951,7 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 		sd_attach(sdcard, fd);
+		gpio_in &= ~0x40;	/* Pulled down by card */
 	}
 	if (trace & TRACE_SD)
 		sd_trace(sdcard, 1);
