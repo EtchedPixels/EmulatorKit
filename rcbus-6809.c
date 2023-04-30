@@ -8,9 +8,10 @@
  *	First 512K ROM Second 512K RAM (0-31, 32-63)
  *	RTC at $FE0C
  *	WizNET ethernet
- *	6840 at 0x60
+ *	6840 at 0xFE60
+ *	6821 at 0xFE68 TODO CHECK
  *
- *	Alternate MMU option using highmmu on 8085/MMU card
+ *	Alternate MMU option using highmmu on 8085/MMU card at FEFF
  *
  *	TODO:
  *	Lots - this is just an initial hack for testing
@@ -31,9 +32,11 @@
 #include "e6809.h"
 #include "ide.h"
 #include "16x50.h"
+#include "6821.h"
 #include "6840.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
+#include "sdcard.h"
 #include "w5100.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
@@ -50,8 +53,10 @@ static uint8_t wiznet = 0;
 
 struct ppide *ppide;
 struct rtc *rtcdev;
+struct sdcard *sdcard;
 struct uart16x50 *uart;
 struct m6840 *ptm;
+struct m6821 *pia;
 
 /* The CPU runs at CLK/4 so for sane RS232 we run at the usual clock
    rate and get 115200 baud - which is pushing it admittedly! */
@@ -63,6 +68,7 @@ static uint8_t live_irq;
 
 #define IRQ_16550A	1
 #define IRQ_PTM		2
+#define IRQ_PIA		4
 
 static nic_w5100_t *wiz;
 
@@ -79,6 +85,9 @@ static volatile int done;
 #define TRACE_IRQ	256
 #define TRACE_UART	512
 #define TRACE_PTM	1024
+#define TRACE_PIA	2048
+#define TRACE_SPI	4096
+#define TRACE_SD	8192
 
 static int trace = 0;
 
@@ -136,10 +145,82 @@ void recalc_interrupts(void)
 		int_set(IRQ_16550A);
 	else
 		int_clear(IRQ_16550A);
+	if (m6821_irq_pending(pia))
+		int_set(IRQ_PIA);
+	else
+		int_clear(IRQ_PIA);
 	if (m6840_irq_pending(ptm))
 		int_set(IRQ_PTM);
 	else
 		int_clear(IRQ_PTM);
+}
+
+static uint8_t bitcnt;
+static uint8_t txbits, rxbits;
+static uint8_t pia_a, pia_b;
+static uint8_t pia_a_in;
+
+static void spi_clock_high(void)
+{
+	txbits <<= 1;
+	txbits |= !!(pia_a & 2);
+	bitcnt++;
+	if (bitcnt == 8) {
+		rxbits = sd_spi_in(sdcard, txbits);
+		if (trace & TRACE_SPI)
+			fprintf(stderr, "spi %02X | %02X\n", rxbits, txbits);
+		bitcnt = 0;
+	}
+}
+
+static void spi_clock_low(void)
+{
+	pia_a_in &= 0x7F;
+	pia_a_in |= (rxbits & 0x80);
+	rxbits <<= 1;
+	rxbits |= 1;
+}
+
+
+uint8_t m6821_input(struct m6821 *pia, int port)
+{
+	if (port == 1)
+		return 0xFF;
+	return pia_a_in;
+}
+
+void m6821_output(struct m6821 *pia, int port, uint8_t data)
+{
+	if (port == 1)
+		pia_b = data;
+	else {
+		uint8_t delta = data ^ pia_a;
+		pia_a = data;
+		if (delta & 4) {
+			if (data & 4) {
+				bitcnt = 0;
+				sd_spi_raise_cs(sdcard);
+			} else {
+				sd_spi_lower_cs(sdcard);
+			}
+		}
+		if (delta & 1) {
+			if (data & 1)
+				spi_clock_high();
+			else
+				spi_clock_low();
+		}
+	}
+}
+
+/* We don't use the strobe */
+void m6821_strobe(struct m6821 *pia, int port)
+{
+}
+
+/* We don't use the control signals */
+void m6821_ctrl_change(struct m6821 *pia, uint8_t ctrl)
+{
 }
 
 static int ide = 0;
@@ -184,6 +265,8 @@ static uint8_t m6809_do_inport(uint8_t addr)
 		return nic_w5100_read(wiz, addr & 3);
 	if (addr >= 0x60 && addr <= 0x67)
 		return m6840_read(ptm, addr & 7);
+	if (addr >= 0x68 && addr <= 0x6F)
+		return m6821_read(pia, addr & 7);
 	if (addr == 0x0C && rtc)
 		return rtc_read(rtcdev);
 	if (addr >= 0xC0 && addr <= 0xC7)
@@ -223,8 +306,10 @@ void m6809_outport(uint8_t addr, uint8_t val)
 		ppide_write(ppide, addr & 3, val);
 	else if (addr >= 0x28 && addr <= 0x2C && wiznet)
 		nic_w5100_write(wiz, addr & 3, val);
-	else if (addr >= 0x60 && addr < 0x68)
+	else if (addr >= 0x60 && addr <= 0x67)
 		m6840_write(ptm, addr & 7, val);
+	else if (addr >= 0x68 && addr <= 0x6F)
+		m6821_write(pia, addr & 7, val);
 	else if (addr >= 0xC0 && addr <= 0xC7)
 		uart16x50_write(uart, addr & 7, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
@@ -389,7 +474,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rcbus-6809: [-b] [-f] [-R] [-i idepath] [-I ppidepath] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus-6809: [-b] [-f] [-R] [-i idepath] [-I ppidepath] [-S sdcardpath] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -400,10 +485,11 @@ int main(int argc, char *argv[])
 	int fd;
 	int rom = 1;
 	char *rompath = "rcbus-6809.rom";
-	char *idepath;
+	char *idepath = NULL;
+	char *sdpath = NULL;
 	unsigned int cycles = 0;
 
-	while ((opt = getopt(argc, argv, "1abBd:fi:I:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:fi:I:r:RS:w")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -434,6 +520,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'R':
 			rtc = 1;
+			break;
+		case 'S':
+			sdpath = optarg;
 			break;
 		case 'w':
 			wiznet = 1;
@@ -506,12 +595,28 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	sdcard = sd_create("sd0");
+	if (sdpath) {
+		fd = open(sdpath, O_RDWR);
+		if (fd == -1) {
+			perror(sdpath);
+			exit(1);
+		}
+		sd_attach(sdcard, fd);
+	}
+	if (trace & TRACE_SD)
+		sd_trace(sdcard, 1);
+	sd_blockmode(sdcard);
+
 	uart = uart16x50_create();
 	uart16x50_trace(uart, trace & TRACE_UART);
 	uart16x50_set_input(uart, 1);
 
 	ptm = m6840_create();
 	m6840_trace(ptm, trace & TRACE_PTM);
+
+	pia = m6821_create();
+	m6821_trace(pia, trace & TRACE_PIA);
 
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
