@@ -121,6 +121,8 @@ uint8_t m6821_read(struct m6821 *pia, uint8_t addr)
     case 3:
         return pia->crb;
     }
+    /* Not reachable - fix gcc warning */
+    return 0xFF;
 }
 
 /*
@@ -134,10 +136,10 @@ void m6821_write(struct m6821 *pia, uint8_t addr, uint8_t val)
     case 0:
         if (pia->cra & 0x04) {
             pia->pra = val; 
-            m6821_output(pia, val & pia->ddra);
+            m6821_output(pia, 0, val & pia->ddra);
         } else { 
             pia->ddra = val;
-            m6821_output(pia, pia->pra & pia->ddra);
+            m6821_output(pia, 0, pia->pra & pia->ddra);
         }
         break;
     case 1:
@@ -146,7 +148,7 @@ void m6821_write(struct m6821 *pia, uint8_t addr, uint8_t val)
     case 2:
         if (pia->crb & 4) {
             pia->prb = val; 
-            m6821_output(pia, val & pia->ddrb);
+            m6821_output(pia, 1, val & pia->ddrb);
             if ((pia->crb & 0x30) == 0x20) {
                 /* Write strobe and write low until ack */
                 if (pia->crb & 0x08)
@@ -160,7 +162,7 @@ void m6821_write(struct m6821 *pia, uint8_t addr, uint8_t val)
             }
         } else {
             pia->ddrb = val;
-            m6821_output(pia, pia->prb & pia->ddra);
+            m6821_output(pia, 1, pia->prb & pia->ddrb);
         }
         break;
     case 3:
@@ -266,6 +268,12 @@ void m6821_set_control(struct m6821 *pia, int cline, int onoff)
         }
         break;
     }
+}
+
+void m6821_reset(struct m6821 *pia)
+{
+    memset(pia, 0, sizeof(struct m6821));
+    /* CA1/CA2 will be on if we ever model them */
 }
 
 struct m6821 *m6821_create(void)

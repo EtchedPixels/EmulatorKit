@@ -21,5 +21,5 @@ extern void m6821_free(struct m6821 *pia);
 /* User supplied */
 extern void m6821_ctrl_change(struct m6821 *pia, uint8_t ctrl);
 extern uint8_t m6821_input(struct m6821 *pia, int port);
-extern void m6821_output(struct m6821 *pia, uint8_t data);
+extern void m6821_output(struct m6821 *pia, int port, uint8_t data);
 extern void m6821_strobe(struct m6821 *pia, int pin);
