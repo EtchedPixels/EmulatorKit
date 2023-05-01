@@ -79,8 +79,8 @@ rcbus-65c816-mini.o: rcbus-65c816-mini.c lib65816/config.h
 rcbus-6800: rcbus-6800.o 6800.o ide.o acia.o 16x50.o
 	cc -g3 rcbus-6800.o ide.o acia.o 6800.o 16x50.o -o rcbus-6800
 
-rcbus-6809: rcbus-6809.o d6809.o e6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o
-	cc -g3 rcbus-6809.o ide.o ppide.o w5100.o rtc_bitbang.o 6840.o 16x50.o d6809.o e6809.o -o rcbus-6809
+rcbus-6809: rcbus-6809.o d6809.o e6809.o ide.o ppide.o sdcard.o  w5100.o rtc_bitbang.o 6821.o 6840.o 16x50.o
+	cc -g3 rcbus-6809.o ide.o ppide.o sdcard.o w5100.o rtc_bitbang.o 6821.o 6840.o 16x50.o d6809.o e6809.o -o rcbus-6809
 
 rcbus-68hc11: rcbus-68hc11.o 68hc11.o ide.o w5100.o ppide.o rtc_bitbang.o sdcard.o
 	cc -g3 rcbus-68hc11.o ide.o ppide.o rtc_bitbang.o sdcard.o w5100.o 68hc11.o -o rcbus-68hc11
