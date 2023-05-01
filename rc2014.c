@@ -427,7 +427,7 @@ static uint8_t mem_readzrcc(uint16_t addr)
 
 static void mem_writezrcc(uint16_t addr, uint8_t val)
 {
-	if (addr <= 0x40 && bankreg[1]) {
+	if (addr <= 0x40 && bankreg[1] == 0) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W %04X = %02X [ROM]\n", addr, val);
 		return;
