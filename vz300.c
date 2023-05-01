@@ -455,7 +455,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "vz300: [-2] [-3] [-f] [-r rompath] [-s sdcard] [-d debug]\n");
+	fprintf(stderr, "vz300: [-2] [-3] [-a] [-f] [-r rompath] [-R sdrompath] [-s sdcard] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
