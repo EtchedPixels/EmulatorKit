@@ -3092,7 +3092,6 @@ int main(int argc, char *argv[])
 			have_acia = 1;
 			acia_narrow = 1;
 			indev = INDEV_ACIA;
-			sio2_input = 0;
 			break;
 		case '8':
 			have_acia = 1;
@@ -3105,7 +3104,6 @@ int main(int argc, char *argv[])
 			break;
 		case 's':
 			sio2 = 1;
-			sio2_input = 1;
 			indev = INDEV_SIO;
 			if (!acia_narrow)
 				have_acia = 0;
@@ -3182,7 +3180,7 @@ int main(int argc, char *argv[])
 				have_acia = 0;
 				have_ctc = 1;
 				sio2 = 1;
-				sio2_input = 1;
+				indev = INDEV_SIO;
 				have_im2 = 1;
 				tstate_steps = 400;
 			} else if (strcmp(optarg, "sc121") == 0) {
@@ -3190,7 +3188,7 @@ int main(int argc, char *argv[])
 				bank512 = 0;
 				cpuboard = CPUBOARD_SC121;
 				sio2 = 1;
-				sio2_input = 1;
+				indev = INDEV_SIO;
 				have_ctc = 1;
 				rom = 0;
 				have_acia = 0;
@@ -3200,7 +3198,7 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_MICRO80;
 				have_ctc = 1;
 				sio2 = 1;
-				sio2_input = 1;
+				indev = INDEV_SIO;
 				have_im2 = 1;
 				have_acia = 0;
 				rom = 1;
@@ -3221,7 +3219,7 @@ int main(int argc, char *argv[])
 				have_acia = 0;
 				have_ctc = 1;
 				sio2 = 1;
-				sio2_input = 1;
+				indev = INDEV_SIO;
 				have_im2 = 1;
 				tstate_steps = 500;
 				indev = INDEV_SIO;
@@ -3241,7 +3239,7 @@ int main(int argc, char *argv[])
 				cpuboard = CPUBOARD_MICRO80W;
 				have_ctc = 1;
 				sio2 = 1;
-				sio2_input = 1;
+				indev = INDEV_SIO;
 				have_im2 = 1;
 				have_acia = 0;
 				rom = 1;
