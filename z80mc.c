@@ -457,10 +457,11 @@ static void qreg_write(uint8_t reg, uint8_t v)
 {
     if (trace & TRACE_QREG)
         fprintf(stderr, "Q%d -> %d.\n", reg, v);
-    qreg[reg] = v;
 
     if (qreg[reg] == v)
         return;
+
+    qreg[reg] = v;
 
     if ((trace & TRACE_LED) && reg == 2)
         fprintf(stderr, "Yellow LED to %d.\n", v);
@@ -612,7 +613,7 @@ int main(int argc, char *argv[])
        matched with that. The scheme here works fine except when the host
        is loaded though */
 
-    /* 4MHz Z80 - 4,000,000 tstates / second, and 1000 inits/sec */
+    /* 4MHz Z80 - 4,000,000 tstates / second, and 1000 ints/sec */
     while (!done) {
         Z80ExecuteTStates(&cpu_z80, 4000);
 	/* Do 1ms of I/O and delays */
