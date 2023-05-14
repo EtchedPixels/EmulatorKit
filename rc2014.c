@@ -863,6 +863,8 @@ unsigned int next_char(void)
 	}
 	if (c == 0x0A)
 		c = '\r';
+	else if (c == 0x7F)
+		c = '\b';
 	return c;
 }
 
