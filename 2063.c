@@ -50,7 +50,7 @@ int sdl_live;
 static uint8_t ram[16 * 32768];
 static uint8_t rom[16384];
 
-static uint16_t tstate_steps = 500;	/* 10MHz speed */
+static uint16_t tstate_steps = 50;	/* 10MHz speed */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
@@ -967,10 +967,9 @@ int main(int argc, char *argv[])
 		vdprend = tms9918a_renderer_create(vdp);
 	}
 
-	/* 20ms - it's a balance between nice behaviour and simulation
-	   smoothness */
+	/* 60Hz for the VDP */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 20000000L;
+	tc.tv_nsec = 16666667L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -1009,13 +1008,15 @@ int main(int argc, char *argv[])
 			break;
 		}
 		int i;
-		for (i = 0; i < 40; i++) {
+		/* This is very slightly out but then so are most can oscillators ;) */
+		/* Ideal would be about 334 x 499 */
+		for (i = 0; i < 333; i++) {
 			int j;
-			for (j = 0; j < 100; j++) {
-				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/ 10);
+			for (j = 0; j < 10; j++) {
+				Z80ExecuteTStates(&cpu_z80, tstate_steps);
+				ctc_tick(tstate_steps);
 				sio2_timer();
 			}
-			ctc_tick(tstate_steps);
 			/* We want to run UI events regularly it seems */
 			ui_event();
 		}
