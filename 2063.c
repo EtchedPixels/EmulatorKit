@@ -31,6 +31,7 @@
 
 #include "sdcard.h"
 #include "system.h"
+#include "joystick.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 #include "libz80/z80.h"
@@ -60,6 +61,9 @@ static uint8_t live_irq;
 #define IRQ_CTC		3	/* 3 4 5 6 */
 /* TOOD: PIO */
 
+#define IRQ_J7		(1 << 1)	/* A8_1, U6, pin 4 (D1) */
+static uint8_t j7 = 1;			/* J7 default installed */
+
 static Z80Context cpu_z80;
 
 volatile int emulator_done;
@@ -76,6 +80,7 @@ volatile int emulator_done;
 #define TRACE_SPI	0x000200
 #define TRACE_SD	0x000400
 #define TRACE_TMS9918A	0x000800
+#define TRACE_JOY	0x001000
 
 static int trace = 0;
 
@@ -807,6 +812,20 @@ uint8_t io_read(int unused, uint16_t addr)
 			if (vdp)
 				return tms9918a_read(vdp, addr & 1);
 			break;
+		case 0xA0:
+			if (vdp) {
+				if ( addr == 0xA8 ) {
+					uint8_t joy0port;
+					joy0port = joystick_read(0);
+					if (j7 && tms9918a_irq_pending(vdp)) {
+						joy0port &= ~IRQ_J7;
+						if (trace & TRACE_IRQ)
+							fprintf (stderr,"VDP IRQ pending via J7: %02X\n", joy0port);
+					}
+					return joy0port;
+				} else if ( addr == 0xA9 )
+					return joystick_read(1);
+			}
 	}
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -895,7 +914,9 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "2063: [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
+	fprintf(stderr, "2063: [-r rompath] [-S sdcard]"
+	" [-T] [-j] [-J] [-i]"
+	" [-f] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -908,7 +929,7 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	unsigned have_tms = 0;
 
-	while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
+	while ((opt = getopt(argc, argv, "d:fijr:JS:T")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -924,6 +945,18 @@ int main(int argc, char *argv[])
 			break;
 		case 'T':
 			have_tms = 1;
+			break;
+		case 'j':
+			/* Enable Joystick 0 */
+			Joystick_slots_enabled[0] = true;
+			break;
+		case 'J':
+			/* Enable Joystick 1, use without -j to map controller 0 to joystick 1 */
+			Joystick_slots_enabled[1] = true;
+			break;
+		case 'i':
+			/* Disable VDP /INT status polling via J7 */
+			j7 = 0;
 			break;
 		default:
 			usage();
@@ -965,6 +998,9 @@ int main(int argc, char *argv[])
 		vdp = tms9918a_create();
 		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 		vdprend = tms9918a_renderer_create(vdp);
+		/* SDL init called in tms9918a_renderer_create */
+		joystick_create();
+		joystick_trace( !! (trace & TRACE_JOY ));
 	}
 
 	/* 60Hz for the VDP */
