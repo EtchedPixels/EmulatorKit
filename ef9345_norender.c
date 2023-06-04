@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <SDL2/SDL.h>
 
 #include "ef9345.h"
 #include "ef9345_render.h"
