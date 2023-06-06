@@ -25,7 +25,7 @@ struct joystick_info {
 
 static const uint16_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
     1 << 0,  // SDL_CONTROLLER_BUTTON_A
-    0,       // SDL_CONTROLLER_BUTTON_B
+    1 << 4,  // SDL_CONTROLLER_BUTTON_B
     0,       // SDL_CONTROLLER_BUTTON_X
     0,       // SDL_CONTROLLER_BUTTON_Y
     0,       // SDL_CONTROLLER_BUTTON_BACK
