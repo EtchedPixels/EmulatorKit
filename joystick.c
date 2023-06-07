@@ -32,7 +32,7 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
 
-struct joystick_info {
+struct joystick {
 	int                 instance_id;
 	SDL_GameController *controller;
 	uint8_t             button_mask;
@@ -57,7 +57,7 @@ static const uint16_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
 };
 
 static bool trace = false;
-static struct joystick_info *Joystick_controllers     = NULL;
+static struct joystick *Joystick_controllers     = NULL;
 static int                   Num_joystick_controllers = 0;
 
 static void
@@ -70,12 +70,12 @@ resize_joystick_controllers(int new_size)
 		return;
 	}
 
-	struct joystick_info *old_controllers = Joystick_controllers;
-	Joystick_controllers = (struct joystick_info *)malloc(sizeof(struct joystick_info) * new_size);
+	struct joystick *old_controllers = Joystick_controllers;
+	Joystick_controllers = (struct joystick *)malloc(sizeof(struct joystick) * new_size);
 
 	int min_size = new_size < Num_joystick_controllers ? new_size : Num_joystick_controllers;
 	if (min_size > 0) {
-		memcpy(Joystick_controllers, old_controllers, sizeof(struct joystick_info) * min_size);
+		memcpy(Joystick_controllers, old_controllers, sizeof(struct joystick) * min_size);
 		free(old_controllers);
 	}
 
@@ -87,7 +87,7 @@ resize_joystick_controllers(int new_size)
 }
 
 static void
-add_joystick_controller(struct joystick_info *info)
+add_joystick_controller(struct joystick *info)
 {
 	int i;
 	if (trace)
@@ -95,7 +95,7 @@ add_joystick_controller(struct joystick_info *info)
 
 	for (i = 0; i < Num_joystick_controllers; ++i) {
 		if (Joystick_controllers[i].instance_id == -1) {
-			memcpy(&Joystick_controllers[i], info, sizeof(struct joystick_info));
+			memcpy(&Joystick_controllers[i], info, sizeof(struct joystick));
 			return;
 		}
 	}
@@ -103,7 +103,7 @@ add_joystick_controller(struct joystick_info *info)
 	i = Num_joystick_controllers;
 	resize_joystick_controllers(Num_joystick_controllers << 1);
 
-	memcpy(&Joystick_controllers[i], info, sizeof(struct joystick_info));
+	memcpy(&Joystick_controllers[i], info, sizeof(struct joystick));
 }
 
 static void
@@ -121,7 +121,7 @@ remove_joystick_controller(int instance_id)
 	}
 }
 
-static struct joystick_info *
+static struct joystick *
 find_joystick_controller(int instance_id)
 {
 	for (int i = 0; i < Num_joystick_controllers; ++i) {
@@ -160,7 +160,7 @@ joystick_create(void)
 	const int num_joysticks = SDL_NumJoysticks();
 
 	Num_joystick_controllers = num_joysticks > 16 ? num_joysticks : 16;
-	Joystick_controllers     = malloc(sizeof(struct joystick_info) * Num_joystick_controllers);
+	Joystick_controllers     = malloc(sizeof(struct joystick) * Num_joystick_controllers);
 
 	for (int i = 0; i < Num_joystick_controllers; ++i) {
 		Joystick_controllers[i].instance_id = -1;
@@ -216,7 +216,7 @@ joystick_add(int index)
 			}
 		}
 
-		struct joystick_info new_info;
+		struct joystick new_info;
 		new_info.instance_id = instance_id;
 		new_info.controller  = controller;
 		new_info.button_mask = 0xFF;
@@ -249,7 +249,7 @@ joystick_remove(int instance_id)
 void
 joystick_button_down(int instance_id, uint8_t button)
 {
-	struct joystick_info *joy = find_joystick_controller(instance_id);
+	struct joystick *joy = find_joystick_controller(instance_id);
 	if (joy != NULL) {
 		joy->button_mask &= ~(button_map[button]);
 		if (trace)
@@ -260,7 +260,7 @@ joystick_button_down(int instance_id, uint8_t button)
 void
 joystick_button_up(int instance_id, uint8_t button)
 {
-	struct joystick_info *joy = find_joystick_controller(instance_id);
+	struct joystick *joy = find_joystick_controller(instance_id);
 	if (joy != NULL) {
 		joy->button_mask |= button_map[button];
 		if (trace)
@@ -273,7 +273,7 @@ uint8_t
 joystick_read( uint8_t i )
 {
 	uint8_t Joystick_data = 0xFF;
-	struct joystick_info *joy = find_joystick_controller(Joystick_slots[i]);
+	struct joystick *joy = find_joystick_controller(Joystick_slots[i]);
 	if (joy != NULL) {
 		Joystick_data = joy->button_mask;
 	}
