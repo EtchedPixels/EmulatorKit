@@ -929,7 +929,7 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	unsigned have_tms = 0;
 
-	while ((opt = getopt(argc, argv, "d:fijr:JS:T")) != -1) {
+	while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -945,18 +945,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'T':
 			have_tms = 1;
-			break;
-		case 'j':
-			/* Enable Joystick 0 */
-			Joystick_slots_enabled[0] = true;
-			break;
-		case 'J':
-			/* Enable Joystick 1, use without -j to map controller 0 to joystick 1 */
-			Joystick_slots_enabled[1] = true;
-			break;
-		case 'i':
-			/* Disable VDP /INT status polling via J7 */
-			j7 = 0;
 			break;
 		default:
 			usage();
