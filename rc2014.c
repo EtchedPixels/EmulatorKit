@@ -97,6 +97,7 @@ static uint8_t have_copro;
 static uint8_t have_tms;
 static uint8_t have_ef9345;
 static uint8_t have_kio_ext;	/* Extreme config KIO at C0-DF */
+static uint8_t have_busstop;
 
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
@@ -105,6 +106,7 @@ static uint8_t int_recalc = 0;
 static uint8_t is_z512;
 static uint8_t z512_control = 0;
 static uint8_t ef_latch = 0;
+static uint16_t bs_latch;
 
 static struct ppide *ppide;
 static struct sdcard *sdcard;
@@ -2147,6 +2149,11 @@ static uint8_t io_read_2014(uint16_t addr)
 	if (zxkey && (addr & 0xFC) == 0xFC)
 		return zxkey_scan(zxkey, addr);
 
+	if (have_busstop && (addr & 0xFF) >= 0xE0) {
+		bs_latch = addr;
+		Z80NMI(&cpu_z80);
+		/* The I/O still happens before the NMI hits */
+	}
 	addr &= 0xFF;
 
 	if (addr >= 0x80 && addr <= 0x9F && have_kio)
@@ -2194,6 +2201,13 @@ static uint8_t io_read_2014(uint16_t addr)
 		return uart16x50_read(uart, addr & 7);
 	if (addr == 0x6D && is_z512)
 		return z512_read(addr);
+	if (have_busstop && addr >= 0xDC && addr <= 0xDF) {
+		Z80NMI_Clear(&cpu_z80);
+		if (addr & 1)
+			return bs_latch >> 8;
+		else
+			return bs_latch;
+	}
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0x78;	/* 78 is what my actual board floats at */
@@ -2829,7 +2843,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:pPr:sRS:Tuw8C:Zz:X")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:npPr:sRS:Tuw8C:Zz:X")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -3008,6 +3022,9 @@ int main(int argc, char *argv[])
 						stderr);
 				exit(EXIT_FAILURE);
 			}
+			break;
+		case 'n':
+			have_busstop = 1;
 			break;
 		case 'd':
 			trace = atoi(optarg);
