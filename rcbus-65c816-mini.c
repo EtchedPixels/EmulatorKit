@@ -9,6 +9,12 @@
  *	RTC at 0x0C
  *	16550A at 0xC0
  *	Minimal 6522VIA emulation
+ *
+ *	Also supports the protected mode card. In this configuration
+ *	memory is split 56K/8K and there is a user/kernel flip flop. This
+ *	goes into kernel mode on a vector pull and can be put back into user
+ *	mode by a write to FEFE. I/O access in user mode is blocked and a
+ *	watchdog runs to catch stuff that blocks interrupts etc.
  */
 
 #include <stdio.h>
@@ -35,10 +41,14 @@ static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
 static unsigned int bankreg[4];
 static uint8_t bankenable;
+static uint8_t bankhigh;
 
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 static uint8_t iopage = 0xFE;
+static uint8_t mmureg;
+static uint8_t mmumode = 1;
+static unsigned watchdog;
 
 static uint16_t tstate_steps = 200;
 
@@ -147,8 +157,6 @@ void via_handshake_b(struct via6522 *via)
 {
 }
 
-
-
 uint8_t mmio_read_65c816(uint8_t addr)
 {
 	if (trace & TRACE_IO)
@@ -187,11 +195,11 @@ void mmio_write_65c816(uint8_t addr, uint8_t val)
 	else if (addr >= 0x60 && addr <= 0x6F)
 		via_write(via, addr & 0x0F, val);
 	/* FIXME: real bank512 alias at 0x70-77 for 78-7F */
-	else if (addr >= 0x78 && addr <= 0x7B) {
+	else if (addr >= 0x78 && addr <= 0x7B && !bankhigh) {
 		bankreg[addr & 3] = val & 0x3F;
 		if (trace & TRACE_512)
 			fprintf(stderr, "Bank %d set to %d\n", addr & 3, val);
-	} else if (addr >= 0x7C && addr <= 0x7F) {
+	} else if (addr >= 0x7C && addr <= 0x7F && !bankhigh) {
 		if (trace & TRACE_512)
 			fprintf(stderr, "Banking %sabled.\n", (val & 1) ? "en" : "dis");
 		bankenable = val & 1;
@@ -199,7 +207,12 @@ void mmio_write_65c816(uint8_t addr, uint8_t val)
 		rtc_write(rtc, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart)
 		uart16x50_write(uart, addr & 0x0F, val);
-	else if (addr == 0x00) {
+	else if (addr == 0xFF && bankhigh) {
+		mmureg = val;
+		mmumode = !(addr & 1);
+		if (trace & TRACE_512)
+			fprintf(stderr, "MMUreg set to %02X\n", val);
+	} else if (addr == 0x00) {
 		printf("trace set to %d\n", val);
 		trace = val;
 		if (trace & TRACE_CPU)
@@ -210,10 +223,35 @@ void mmio_write_65c816(uint8_t addr, uint8_t val)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
 
-/* FIXME: emulate paging off correctly, also be nice to emulate with less
-   memory fitted */
 uint8_t do_65c816_read(uint16_t addr)
 {
+	/* TODO: fix this so we can tell vector pull from the emulation */
+	if (addr >= 0xFFF0 && bankhigh) {
+		/* Emulate the 2nd generation board for now */
+		mmureg = 2;
+		mmumode = 1;	/* Kernel mode */
+		/* TODO: clear NMI */
+	}
+	if (bankhigh) {
+		uint8_t reg = mmureg;
+		uint8_t val;
+		uint32_t higha;
+		if (addr < 0xE000)
+			reg >>= 1;
+		higha = (reg & 0x40) ? 1 : 0;
+		higha |= (reg & 0x10) ? 2 : 0;
+		higha |= (reg & 0x4) ? 4 : 0;
+		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
+
+		val = ramrom[(higha << 16) + addr];
+		if (trace & TRACE_MEM) {
+			fprintf(stderr, "R %04X[%02X] = %02X\n",
+				(unsigned int)addr,
+				(unsigned int)higha,
+				(unsigned int)val);
+		}
+		return val;
+	}
 	if (bankenable) {
 		unsigned int bank = (addr & 0xC000) >> 14;
 		if (trace & TRACE_MEM)
@@ -233,7 +271,7 @@ uint8_t read65c816(uint32_t addr, uint8_t debug)
 
 	addr &= 0xFFFF;
 	
-	if (addr >> 8 == iopage) {
+	if (addr >> 8 == iopage && mmumode == 1) {
 		if (debug)
 			return 0xFF;
 		else
@@ -247,8 +285,32 @@ void write65c816(uint32_t addr, uint8_t val)
 {
 	addr &= 0xFFFF;
 
-	if (addr >> 8 == iopage) {
+	if (addr >> 8 == iopage && mmumode) {
 		mmio_write_65c816(addr, val);
+		return;
+	}
+	if (bankhigh) {
+		uint8_t reg = mmureg;
+		uint8_t higha;
+		if (addr < 0xE000)
+			reg >>= 1;
+		higha = (reg & 0x40) ? 1 : 0;
+		higha |= (reg & 0x10) ? 2 : 0;
+		higha |= (reg & 0x4) ? 4 : 0;
+		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
+
+		if (trace & TRACE_MEM) {
+			fprintf(stderr, "W %04X[%02X] = %02X\n",
+				(unsigned int)addr,
+				(unsigned int)higha,
+				(unsigned int)val);
+		}
+		if (!(higha & 8)) {
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "[Discard: ROM]\n");
+			return;
+		}
+		ramrom[(higha << 16)+ addr] = val;
 		return;
 	}
 	if (bankenable) {
@@ -305,7 +367,15 @@ void system_process(void)
 		else
 			CPU_clearIRQ(IRQ_16550A);
 	}
-
+	if (bankhigh) {
+		if (mmumode == 0) {
+			watchdog++;
+			/* TODO: right value in terms of clocking rate and tsteps */
+			if (watchdog == 65536)
+				CPU_nmi();
+		} else
+			watchdog = 0;
+	}
 	if (n++ == 100) {
 		n = 0;
 		if (wiznet)
@@ -331,7 +401,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "rcbus: [-1] [-A] [-a] [-c] [-f] [-R] [-r rompath] [-w] [-d debug]\n");
+	fprintf(stderr, "rcbus: [-1] [-A] [-a] [-c] [-f] [-R] [-B] [-r rompath] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -344,7 +414,7 @@ int main(int argc, char *argv[])
 	int input = 0;
 	int hasrtc = 0;
 
-	while ((opt = getopt(argc, argv, "1Aad:fi:r:Rw")) != -1) {
+	while ((opt = getopt(argc, argv, "1Aad:fi:r:RwB")) != -1) {
 		switch (opt) {
 		case '1':
 			input = 2;
@@ -375,6 +445,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'w':
 			wiznet = 1;
+			break;
+		case 'B':
+			bankhigh = 1;
 			break;
 		default:
 			usage();
