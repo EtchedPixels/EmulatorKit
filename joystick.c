@@ -40,7 +40,7 @@ struct joystick {
 	uint8_t             button_mask;
 };
 
-static const uint16_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
+static const uint8_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
     1 << 0,  // SDL_CONTROLLER_BUTTON_A
     1 << 4,  // SDL_CONTROLLER_BUTTON_B
     0,       // SDL_CONTROLLER_BUTTON_X
@@ -58,7 +58,7 @@ static const uint16_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
     1 << 5,  // SDL_CONTROLLER_BUTTON_DPAD_RIGHT
 };
 
-static bool trace = false;
+static unsigned trace = 0;
 static struct joystick joystick[NUM_JS];
 static int num_js = 0;
 
@@ -73,15 +73,12 @@ static struct joystick *js_find(int id)
 	return NULL;
 }
 
-void joystick_trace(bool enable)
+void joystick_trace(unsigned enable)
 {
-	if (enable)
-		trace = true;
-	else
-		trace = false;
+	trace = !!enable;
 }
 
-bool joystick_create(void)
+void joystick_create(void)
 {
 	struct joystick *js = joystick;
 	int i;
@@ -102,8 +99,6 @@ bool joystick_create(void)
 	for (i = 0; i < num_js; ++i) {
 		joystick_add(i);
 	}
-
-	return true;
 }
 
 void joystick_add(int index)

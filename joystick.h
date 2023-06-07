@@ -31,12 +31,11 @@
 #define JOYSTICK_H
 
 #include <stdint.h>
-#include <stdbool.h>
 
 #define NUM_JS	2
 
 // initialize SDL controllers
-bool joystick_create(void);
+void joystick_create(void);
 
 void joystick_add(int index);
 void joystick_remove(int index);
@@ -44,7 +43,7 @@ void joystick_remove(int index);
 void joystick_button_down(int instance_id, uint8_t button);
 void joystick_button_up(int instance_id, uint8_t button);
 
-void joystick_trace(bool enable);
+void joystick_trace(unsigned enable);
 
 uint8_t joystick_read(int i);
 
