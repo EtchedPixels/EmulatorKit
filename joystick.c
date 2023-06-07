@@ -1,5 +1,7 @@
 /*
 
+	Dervied from code:
+
 	Copyright (c) 2019 Michael Steil
 
 	Redistribution and use in source and binary forms, with or without
@@ -57,230 +59,139 @@ static const uint16_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
 };
 
 static bool trace = false;
-static struct joystick *Joystick_controllers     = NULL;
-static int                   Num_joystick_controllers = 0;
+static struct joystick joystick[NUM_JS];
+static int num_js = 0;
 
-static void
-resize_joystick_controllers(int new_size)
+static struct joystick *js_find(int id)
 {
-	if (new_size == 0) {
-		free(Joystick_controllers);
-		Joystick_controllers     = NULL;
-		Num_joystick_controllers = 0;
-		return;
+	struct joystick *js = joystick;
+	while(js < &joystick[NUM_JS]) {
+		if (js->instance_id == id)
+			return js;
+		js++;
 	}
-
-	struct joystick *old_controllers = Joystick_controllers;
-	Joystick_controllers = (struct joystick *)malloc(sizeof(struct joystick) * new_size);
-
-	int min_size = new_size < Num_joystick_controllers ? new_size : Num_joystick_controllers;
-	if (min_size > 0) {
-		memcpy(Joystick_controllers, old_controllers, sizeof(struct joystick) * min_size);
-		free(old_controllers);
-	}
-
-	for (int i = min_size; i < new_size; ++i) {
-		Joystick_controllers[i].instance_id = -1;
-		Joystick_controllers[i].controller  = NULL;
-		Joystick_controllers[i].button_mask = 0xFF;
-	}
-}
-
-static void
-add_joystick_controller(struct joystick *info)
-{
-	int i;
-	if (trace)
-		fprintf(stderr,"add_joystick_controller\n");
-
-	for (i = 0; i < Num_joystick_controllers; ++i) {
-		if (Joystick_controllers[i].instance_id == -1) {
-			memcpy(&Joystick_controllers[i], info, sizeof(struct joystick));
-			return;
-		}
-	}
-
-	i = Num_joystick_controllers;
-	resize_joystick_controllers(Num_joystick_controllers << 1);
-
-	memcpy(&Joystick_controllers[i], info, sizeof(struct joystick));
-}
-
-static void
-remove_joystick_controller(int instance_id)
-{
-	if (trace )
-		fprintf(stderr,"remove_joystick_controller\n");
-
-	for (int i = 0; i < Num_joystick_controllers; ++i) {
-		if (Joystick_controllers[i].instance_id == instance_id) {
-			Joystick_controllers[i].instance_id = -1;
-			Joystick_controllers[i].controller  = NULL;
-			return;
-		}
-	}
-}
-
-static struct joystick *
-find_joystick_controller(int instance_id)
-{
-	for (int i = 0; i < Num_joystick_controllers; ++i) {
-		if (Joystick_controllers[i].instance_id == instance_id) {
-			return &Joystick_controllers[i];
-		}
-	}
-
 	return NULL;
 }
 
-bool Joystick_slots_enabled[NUM_JOYSTICKS] = {false, false};
-static int Joystick_slots[NUM_JOYSTICKS];
-
-void
-joystick_trace(bool enable)
+void joystick_trace(bool enable)
 {
-	if ( enable )
+	if (enable)
 		trace = true;
 	else
 		trace = false;
 }
 
-bool
-joystick_create(void)
+bool joystick_create(void)
 {
+	struct joystick *js = joystick;
+	int i;
+
 	if (trace)
 		fprintf(stderr,"joystick_create\n");
 
 	SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
-	for (int i = 0; i < NUM_JOYSTICKS; ++i) {
-		Joystick_slots[i] = -1;
+	/* Set up the table */
+	for (i = 0; i < NUM_JS; ++i) {
+		js->instance_id = -1;
+		js->button_mask = 0xFF;
 	}
 
-	const int num_joysticks = SDL_NumJoysticks();
-
-	Num_joystick_controllers = num_joysticks > 16 ? num_joysticks : 16;
-	Joystick_controllers     = malloc(sizeof(struct joystick) * Num_joystick_controllers);
-
-	for (int i = 0; i < Num_joystick_controllers; ++i) {
-		Joystick_controllers[i].instance_id = -1;
-		Joystick_controllers[i].controller  = NULL;
-		Joystick_controllers[i].button_mask = 0xFF;
-	}
-
-	for (int i = 0; i < num_joysticks; ++i) {
+	/* Add the joysticks */
+	num_js = SDL_NumJoysticks();
+	for (i = 0; i < num_js; ++i) {
 		joystick_add(i);
 	}
 
 	return true;
 }
 
-void
-joystick_add(int index)
+void joystick_add(int index)
 {
+	SDL_GameController *c;
+	SDL_JoystickID id;
+	struct joystick *js;
+
 	if (trace)
 		fprintf(stderr,"joystick_add\n");
 
-	if (!SDL_IsGameController(index)) {
+	if (!SDL_IsGameController(index))
 		return;
-	}
 
-	SDL_GameController *controller = SDL_GameControllerOpen(index);
-	if (controller == NULL) {
+	c = SDL_GameControllerOpen(index);
+	if (c == NULL) {
 		fprintf(stderr, "Could not open controller %d: %s\n", index, SDL_GetError());
 		return;
 	}
 
-	SDL_JoystickID instance_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
-	bool           exists      = false;
-	for (int i = 0; i < NUM_JOYSTICKS; ++i) {
-		if (!Joystick_slots_enabled[i]) {
-			continue;
+	id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(c));
+
+	js = js_find(id);
+
+	if (js == NULL) {
+		js = js_find(-1);
+		if (js != NULL) {
+			js->instance_id = id;
+			js->controller = c;
+			js->button_mask = 0xFF;
 		}
-
-		if (Joystick_slots[i] == instance_id) {
-			exists = true;
-			break;
-		}
-	}
-
-	if (!exists) {
-		for (int i = 0; i < NUM_JOYSTICKS; ++i) {
-			if (!Joystick_slots_enabled[i]) {
-				continue;
-			}
-
-			if (Joystick_slots[i] == -1) {
-				Joystick_slots[i] = instance_id;
-				break;
-			}
-		}
-
-		struct joystick new_info;
-		new_info.instance_id = instance_id;
-		new_info.controller  = controller;
-		new_info.button_mask = 0xFF;
-		add_joystick_controller(&new_info);
 	}
 }
 
-void
-joystick_remove(int instance_id)
+void joystick_remove(int id)
 {
+	struct joystick *js;
+	SDL_GameController *c;
+
 	if (trace)
 		fprintf(stderr,"joystick_remove\n");
 
-	for (int i = 0; i < NUM_JOYSTICKS; ++i) {
-		if (Joystick_slots[i] == instance_id) {
-			Joystick_slots[i] = -1;
-			break;
-		}
-	}
+	js = js_find(id);
 
-	SDL_GameController *controller = SDL_GameControllerFromInstanceID(instance_id);
-	if (controller == NULL) {
-		fprintf(stderr, "Could not find controller from instance_id %d: %s\n", instance_id, SDL_GetError());
+	if (js == NULL)
+		return;
+
+	c = SDL_GameControllerFromInstanceID(id);
+	if (c == NULL) {
+		fprintf(stderr, "Could not find controller from instance_id %d: %s\n", id, SDL_GetError());
 	} else {
-		SDL_GameControllerClose(controller);
-		remove_joystick_controller(instance_id);
+		SDL_GameControllerClose(c);
+		js->controller = NULL;
+		js->instance_id = -1;
 	}
 }
 
-void
-joystick_button_down(int instance_id, uint8_t button)
+void joystick_button_down(int id, uint8_t button)
 {
-	struct joystick *joy = find_joystick_controller(instance_id);
-	if (joy != NULL) {
-		joy->button_mask &= ~(button_map[button]);
+	struct joystick *js = js_find(id);
+	if (js != NULL) {
+		js->button_mask &= ~(button_map[button]);
 		if (trace)
-			fprintf(stderr,"joystick_button_down: %02X\n",joy->button_mask);
+			fprintf(stderr,"joystick_button_down: %02X\n",js->button_mask);
 	}
 }
 
-void
-joystick_button_up(int instance_id, uint8_t button)
+void joystick_button_up(int id, uint8_t button)
 {
-	struct joystick *joy = find_joystick_controller(instance_id);
-	if (joy != NULL) {
-		joy->button_mask |= button_map[button];
+	struct joystick *js = js_find(id);
+	if (js != NULL) {
+		js->button_mask |= button_map[button];
 		if (trace)
-			fprintf(stderr,"joystick_button_up: %02X\n",joy->button_mask);
+			fprintf(stderr,"joystick_button_up: %02X\n",js->button_mask);
 	}
 }
 
 
-uint8_t
-joystick_read( uint8_t i )
+uint8_t joystick_read(int id)
 {
-	uint8_t Joystick_data = 0xFF;
-	struct joystick *joy = find_joystick_controller(Joystick_slots[i]);
-	if (joy != NULL) {
-		Joystick_data = joy->button_mask;
-	}
+	uint8_t data = 0xFF;
+	struct joystick *js = js_find(id);
+	if (js)
+		data = js->button_mask;
 #if 0
 	if (trace)
-		fprintf(stderr,"joystick_read: %02x\n", Joystick_data);
+		fprintf(stderr,"joystick_read: %02x\n", data);
 #endif
-	return Joystick_data;
+	return data;
 }
 

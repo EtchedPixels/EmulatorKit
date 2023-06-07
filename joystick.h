@@ -33,9 +33,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define NUM_JOYSTICKS 2
-
-extern bool Joystick_slots_enabled[NUM_JOYSTICKS];
+#define NUM_JS	2
 
 // initialize SDL controllers
 bool joystick_create(void);
@@ -48,6 +46,6 @@ void joystick_button_up(int instance_id, uint8_t button);
 
 void joystick_trace(bool enable);
 
-uint8_t joystick_read(uint8_t i);
+uint8_t joystick_read(int i);
 
 #endif
