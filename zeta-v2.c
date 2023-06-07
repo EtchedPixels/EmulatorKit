@@ -528,7 +528,7 @@ static void ctc_irq_check(void)
 	static unsigned last_ui;
 	unsigned ui = uart16x50_irq_pending(uart);
 	if (ui && !last_ui)
-		ctc_pulse(2);
+		ctc_receive_pulse(2);
 	last_ui = ui;
 }
 
@@ -640,6 +640,7 @@ int main(int argc, char *argv[])
 				ppide_trace(ppide, 1);
 		}
 	}
+	ppide_reset(ppide);
 	if (ppath) {
 	        pprop = pprop_create(ppath);
 	        pprop_set_input(pprop, 0);
@@ -729,7 +730,7 @@ int main(int argc, char *argv[])
 			uart16x50_event(uart);
 			ctc_irq_check();
 			/* Runs at 0.916MHz properly - FIXME */
-			ctc_pulse(0);
+			ctc_receive_pulse(0);
 		}
 
 		/* Do 20ms of I/O and delays */
