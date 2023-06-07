@@ -40,8 +40,8 @@ void joystick_create(void);
 void joystick_add(int index);
 void joystick_remove(int index);
 
-void joystick_button_down(int instance_id, uint8_t button);
-void joystick_button_up(int instance_id, uint8_t button);
+void joystick_button_down(int instance_id, uint8_t button, const uint8_t *button_map);
+void joystick_button_up(int instance_id, uint8_t button, const uint8_t *button_map);
 
 void joystick_trace(unsigned enable);
 

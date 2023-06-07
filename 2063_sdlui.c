@@ -8,6 +8,24 @@
 #include "system.h"
 #include "joystick.h"
 
+static const uint8_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
+    1 << 0,  // SDL_CONTROLLER_BUTTON_A
+    1 << 4,  // SDL_CONTROLLER_BUTTON_B
+    0,       // SDL_CONTROLLER_BUTTON_X
+    0,       // SDL_CONTROLLER_BUTTON_Y
+    0,       // SDL_CONTROLLER_BUTTON_BACK
+    0,       // SDL_CONTROLLER_BUTTON_GUIDE
+    0,       // SDL_CONTROLLER_BUTTON_START
+    0,       // SDL_CONTROLLER_BUTTON_LEFTSTICK
+    0,       // SDL_CONTROLLER_BUTTON_RIGHTSTICK
+    0,       // SDL_CONTROLLER_BUTTON_LEFTSHOULDER
+    0,       // SDL_CONTROLLER_BUTTON_RIGHTSHOULDER
+    1 << 7,  // SDL_CONTROLLER_BUTTON_DPAD_UP
+    1 << 6,  // SDL_CONTROLLER_BUTTON_DPAD_DOWN
+    1 << 2,  // SDL_CONTROLLER_BUTTON_DPAD_LEFT
+    1 << 5,  // SDL_CONTROLLER_BUTTON_DPAD_RIGHT
+};
+
 void ui_event(void)
 {
 	SDL_Event ev;
@@ -20,10 +38,10 @@ void ui_event(void)
 			joystick_remove(ev.jdevice.which);
 			break;
 		case SDL_CONTROLLERBUTTONDOWN:
-			joystick_button_down(ev.cbutton.which, ev.cbutton.button);
+			joystick_button_down(ev.cbutton.which, ev.cbutton.button, button_map);
 			break;
 		case SDL_CONTROLLERBUTTONUP:
-			joystick_button_up(ev.cbutton.which, ev.cbutton.button);
+			joystick_button_up(ev.cbutton.which, ev.cbutton.button, button_map);
 			break;
 		case SDL_QUIT:
 			emulator_done = 1;
