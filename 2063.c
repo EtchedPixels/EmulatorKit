@@ -913,9 +913,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "2063: [-r rompath] [-S sdcard]"
-	" [-T] [-j] [-J] [-i]"
-	" [-f] [-d debug]\n");
+	fprintf(stderr, "2063: [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
