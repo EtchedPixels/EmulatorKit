@@ -23,11 +23,11 @@ lib765/lib/lib765.a:
 am9511/libam9511.a:
 	$(MAKE) --directory am9511
 
-rc2014:	rc2014.o rc2014_noui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_norender.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o zxkey_none.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a
-	cc -g3 rc2014.o rc2014_noui.o zxkey_none.o 16x50.o acia.o amd9511.o ef9345.o ef9345_norender.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o  tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
+rc2014:	rc2014.o rc2014_noui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o zxkey_none.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o rc2014_noui.o zxkey_none.o 16x50.o acia.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z80copro.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
 
-rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a
-	cc -g3 rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
+rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
 
 rb-mbc:	rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 	cc -g3 rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
