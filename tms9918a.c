@@ -314,7 +314,7 @@ static void tms9918a_rasterize_g2(struct tms9918a *vdp)
         }
         fp += 7 * 256;
     }
-//    tms9918a_raster_sprites(vdp);
+    tms9918a_raster_sprites(vdp);
 }
 
 /* Rasterize a 4 x 4 pixel block */
