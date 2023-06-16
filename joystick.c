@@ -107,11 +107,12 @@ void joystick_add(int index)
 
 	if (js == NULL) {
 		js = js_find(-1);
-		if (js != NULL) {
-			js->instance_id = id;
-			js->controller = c;
-			js->button_mask = 0xFF;
-		}
+	}
+
+	if (js != NULL) {
+		js->instance_id = id;
+		js->controller = c;
+		js->button_mask = 0xFF;
 	}
 }
 
