@@ -74,6 +74,7 @@ void joystick_create(void)
 	for (i = 0; i < NUM_JS; ++i) {
 		js->instance_id = -1;
 		js->button_mask = 0xFF;
+		js++;
 	}
 
 	/* Add the joysticks */
