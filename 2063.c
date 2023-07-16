@@ -29,6 +29,7 @@
 #include <errno.h>
 #include <sys/select.h>
 
+#include "16x50.h"
 #include "sdcard.h"
 #include "system.h"
 #include "joystick.h"
@@ -45,6 +46,7 @@ static uint8_t flash_in = 1;
 static struct sdcard *sdcard;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
+static struct uart16x50 *uart;
 
 int sdl_live;
 
@@ -59,6 +61,7 @@ static uint8_t live_irq;
 #define IRQ_SIOA	1
 #define IRQ_SIOB	2
 #define IRQ_CTC		3	/* 3 4 5 6 */
+#define INT_UART	4
 /* TOOD: PIO */
 
 #define VDP_J7		(1 << 1)	/* A8_1, U6, pin 4 (D1) */
@@ -80,6 +83,7 @@ volatile int emulator_done;
 #define TRACE_SD	0x000400
 #define TRACE_TMS9918A	0x000800
 #define TRACE_JOY	0x001000
+#define TRACE_UART	0x002000
 
 static int trace = 0;
 
@@ -222,7 +226,9 @@ void recalc_interrupts(void)
 	int_recalc = 1;
 }
 
-
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t bits)
+{
+}
 
 struct z80_sio_chan {
 	uint8_t wr[8];
@@ -804,6 +810,10 @@ uint8_t io_read(int unused, uint16_t addr)
 			return sio2_read(addr & 3);
 		case 0x40:
 			return ctc_read(addr & 3);
+		case 0x50:
+			if (uart && (addr & 8))
+				return uart16x50_read(uart, addr & 7);
+			break;
 		case 0x70:
 			flash_in = 0;
 			return 0xFF;
@@ -849,6 +859,12 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case 0x40:
 		ctc_write(addr & 3, val);
 		return;
+	case 0x50:
+		if (uart && (addr & 8)) {
+			uart16x50_write(uart, addr & 7, val);
+			return;
+		}
+		break;
 	case 0x80:
 		if (vdp){
 			tms9918a_write(vdp, addr & 1, val);
@@ -873,7 +889,11 @@ static void poll_irq_event(void)
 	if (!live_irq)
 		if (!sio2_check_im2(sio))
 		        if (!sio2_check_im2(sio + 1))
-				ctc_check_im2();
+				if (!ctc_check_im2()) {
+					if (uart16x50_irq_pending(uart))
+						Z80INT(&cpu_z80, 0xFF);
+				}
+	/* If a real IM2 source is live then the serial int won't be seen */
 }
 
 static void reti_event(void)
@@ -913,7 +933,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "2063: [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
+	fprintf(stderr, "2063: [-1] [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -925,9 +945,13 @@ int main(int argc, char *argv[])
 	char *rompath = "2063.rom";
 	char *sdpath = NULL;
 	unsigned have_tms = 0;
+	unsigned have_16x50 = 0;
 
 	while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
 		switch (opt) {
+		case 1:
+			have_16x50 = 1;
+			break;
 		case 'r':
 			rompath = optarg;
 			break;
@@ -977,7 +1001,13 @@ int main(int argc, char *argv[])
 
 	sio_reset();
 	ctc_init();
-	sio2_input = 1;
+	if (have_16x50) {
+		uart = uart16x50_create();
+		uart16x50_trace(uart, trace & TRACE_UART);
+		uart16x50_set_input(uart, 1);
+		uart16x50_reset(uart);
+	} else
+		sio2_input = 1;
 
 	if (have_tms) {
 		vdp = tms9918a_create();
