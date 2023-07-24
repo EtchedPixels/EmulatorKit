@@ -890,7 +890,7 @@ static void poll_irq_event(void)
 		if (!sio2_check_im2(sio))
 		        if (!sio2_check_im2(sio + 1))
 				if (!ctc_check_im2()) {
-					if (uart16x50_irq_pending(uart))
+					if (uart && uart16x50_irq_pending(uart))
 						Z80INT(&cpu_z80, 0xFF);
 				}
 	/* If a real IM2 source is live then the serial int won't be seen */
