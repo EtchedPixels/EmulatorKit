@@ -71,19 +71,21 @@ static uint8_t switchrom = 1;
 static uint32_t romsize = 65536;
 static uint8_t extreme;
 
-#define CPUBOARD_Z80		0
-#define CPUBOARD_SC108		1
-#define CPUBOARD_SC114		2
-#define CPUBOARD_Z80SBC64	3
-#define CPUBOARD_EASYZ80	4
+#define CPUBOARD_Z80		0		/* Standard setup */
+#define CPUBOARD_SC108		1		/* Like paged but 0x38 bit 7 controls RAM A16 */
+#define CPUBOARD_SC114		2		/* Similar but moved to 0x30 bit 0 */
+#define CPUBOARD_Z80SBC64	3		/* 128K, upper fixed 3x32K lower */
+#define CPUBOARD_EASYZ80	4		/* Faster SBC design with CTC and SIO and IM2 */
 #define CPUBOARD_SC121		5
-#define CPUBOARD_MICRO80	6
-#define CPUBOARD_ZRCC		7
-#define CPUBOARD_TINYZ80	8
-#define CPUBOARD_PDOG128	9
-#define CPUBOARD_PDOG512	10
-#define CPUBOARD_MICRO80W	11
-#define CPUBOARD_ZRC		12
+#define CPUBOARD_MICRO80	6		/* Z84C15 with weird memory layout */
+#define CPUBOARD_ZRCC		7		/* SBC Top 32K fixed, low one of many banks, small bootstrap ROM */
+#define CPUBOARD_TINYZ80	8		/* Onboard CTC/SIO, IM2 support, 10MHz */
+#define CPUBOARD_PDOG128	9		/* Memory card with 32K banking */
+#define CPUBOARD_PDOG512	10		/* Memory card, fixed 32K upper, low bank on 0x78 or 0x7C */
+#define CPUBOARD_MICRO80W	11		/* 22MHz SBC with 16K banking */
+#define CPUBOARD_ZRC		12		/* Similar to ZRCC but not quite the same */
+#define CPUBOARD_SC720		13		/* Low 32K bankswitched, high 32K fixed */
+#define CPUBOARD_SC707		14		/* SC114 stype memry board but with ROM bankable using 0x20/0x28 */
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -476,6 +478,68 @@ static void mem_writezrc(uint16_t addr, uint8_t val)
 		ramrom[bankreg[1] * 0x8000 + addr] = val;
 }
 
+static uint8_t mem_read_sc720(uint16_t addr)
+{
+	uint8_t r;
+	/* Top 32K always */
+	if (addr & 0x8000)
+		r = ramrom[(addr & 0x7FFF) + 0x78000];
+	else
+		r = ramrom[(addr & 0x7FFF) + bankreg[0] * 0x8000];
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04x = %02X\n", addr, r);
+	return r;
+}
+
+static void mem_write_sc720(uint16_t addr, uint8_t val)
+{
+	/* Top 32K always */
+	if (addr & 0x8000)
+		ramrom[(addr & 0x7FFF) + 0x78000] = val;
+	else if (bankreg[0] < 0x10) {
+		fprintf(stderr, "W %04X = %02X ***ROM***\n", addr, val);
+		return;
+	} else
+		ramrom[(addr & 0x7FFF) + bankreg[0] * 0x8000] = val;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W %04x = %02X\n", addr, val);
+}
+
+static uint8_t mem_read_sc707(uint16_t addr)
+{
+	uint32_t aphys;
+	/* ROM - can be banked */
+	if (addr < 0x8000 && !(port38 & 0x01)) {
+		aphys = addr + bankreg[0] * 0x8000;
+	}
+	else if (port38 & 0x01)
+		aphys = addr + 0x30000;
+	else
+		aphys = addr + 0x20000;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %05X = %02X\n", aphys, ramrom[aphys]);
+	return ramrom[aphys];
+}
+
+static void mem_write_sc707(uint16_t addr, uint8_t val)
+{
+	uint32_t aphys;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W: %04X = %02X\n", addr, val);
+	if (addr < 0x8000 && !(port38 & 0x01)) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "[Discarded: ROM]\n");
+		return;
+	} else if (port38 & 0x80)
+		aphys = addr + 0x30000;
+	else
+		aphys = addr + 0x20000;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W: aphys %05X\n", aphys);
+	ramrom[aphys] = val;
+}
+
+
 struct z84c15 {
 	uint8_t scrp;
 	uint8_t wcr;
@@ -716,6 +780,12 @@ uint8_t do_mem_read(uint16_t addr, int quiet)
 	case CPUBOARD_ZRC:
 		r = mem_readzrc(addr);
 		break;
+	case CPUBOARD_SC720:
+		r = mem_read_sc720(addr);
+		break;
+	case CPUBOARD_SC707:
+		r = mem_read_sc707(addr);
+		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
 		exit(1);
@@ -786,6 +856,12 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_ZRC:
 		mem_writezrc(addr, val);
+		break;
+	case CPUBOARD_SC720:
+		mem_write_sc720(addr, val);
+		break;
+	case CPUBOARD_SC707:
+		mem_write_sc707(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -2644,6 +2720,59 @@ static void io_write_zrc(uint16_t addr, uint8_t val)
 		io_write_2014(addr, val, 0);
 }
 
+static void io_write_sc720(uint16_t addr, uint8_t val)
+{
+	unsigned known = 0;
+	/* Handle the special case bits */
+	switch(addr & 0xFE) {
+	case 0:
+	case 2:
+		known = 1;
+		/* LED lights */
+		break;
+	case 0x78:
+		/* 0x78/79 - MMU fakery */
+		bankreg[0] = (val >> 1) & 0x1F;
+		if (trace & TRACE_512)
+			printf("*** Lower bank now %02X\n", bankreg[0]);
+		return;
+	}
+	io_write_2014(addr, val, known);
+}
+
+/* A partial decode of a bit addressible latch. Not all used */
+
+static void io_write_sc707(uint16_t addr, uint8_t val)
+{
+	unsigned known = 0;
+	switch(addr & 0xFC) {
+	case 0x00:	/* LED2 */
+	case 0x08:	/* LED1 */
+		known = 1;
+		break;
+	/* 10/18 not wired */
+	case 0x20:	/* ROM A16 */
+		bankreg[0] &= 1;
+		bankreg[0] |= (val & 1) << 1;
+		known = 1;
+		break;
+	case 0x28:	/* ROM A15 */
+		bankreg[0] &= 2;
+		bankreg[0] |= val & 1;
+		known = 1;
+		break;
+	case 0x30:	/* RAM A16 */
+		port30 = val & 1;
+		known = 1;
+		break;
+	case 0x38:	/* ROM / RAM low */
+		port38 = val & 1;
+		known = 1;
+		break;
+	}
+	io_write_2014(addr, val, known);
+}
+
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
@@ -2684,6 +2813,12 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case CPUBOARD_ZRC:
 		io_write_zrc(addr, val);
 		break;
+	case CPUBOARD_SC720:
+		io_write_sc720(addr, val);
+		break;
+	case CPUBOARD_SC707:
+		io_write_sc707(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2698,6 +2833,8 @@ uint8_t io_read(int unused, uint16_t addr)
 	case CPUBOARD_PDOG128:
 	case CPUBOARD_PDOG512:
 	case CPUBOARD_ZRC:
+	case CPUBOARD_SC720:
+	case CPUBOARD_SC707:
 		if (extreme)
 			return io_read_2014_x(addr);
 		else
@@ -3030,8 +3167,19 @@ int main(int argc, char *argv[])
 				tstate_steps *= 2;
 				have_acia = 1;
 				indev = INDEV_ACIA;
+			} else if (strcmp(optarg, "sc720") == 0) {
+				switchrom = 0;
+				bank512 = 1;	/* Its 512/512 but a subset */
+				cpuboard = CPUBOARD_SC720;
+				sio2 = 1;
+				indev = INDEV_SIO;
+				have_acia = 0;
+			} else if (strcmp(optarg, "sc707") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				cpuboard = CPUBOARD_SC707;
 			} else {
-				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, z80sbc64, z80mb64, zrcc, tinyz80, pdog128, pdog512, micro80w, zrc.\n",
+				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, sc707, sc720, z80sbc64, z80mb64, zrcc, tinyz80, pdog128, pdog512, micro80w, zrc.\n",
 						stderr);
 				exit(EXIT_FAILURE);
 			}
