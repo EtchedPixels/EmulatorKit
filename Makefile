@@ -192,6 +192,15 @@ s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 mini11: mini11.o 68hc11.o sdcard.o
 	cc -g3 mini11.o sdcard.o 68hc11.o -o mini11
 
+mini-riscv: mini-riscv.o riscv-disas.o sdcard.o
+	cc -g3 mini-riscv.o riscv-disas.o sdcard.o -o mini-riscv
+
+mini-riscv.o: mini-riscv.c riscv/mini-rv32ima.h riscv-disas.h
+	$(CC) -c $(CFLAGS) -std=gnu2x mini-riscv.c
+
+riscv-disas.o: riscv-disas.c riscv-disas.h
+	$(CC) -c $(CFLAGS) -std=gnu2x riscv-disas.c
+
 scelbi: scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o
 	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o -o scelbi
 
