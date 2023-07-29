@@ -2734,7 +2734,7 @@ static void io_write_sc720(uint16_t addr, uint8_t val)
 		/* 0x78/79 - MMU fakery */
 		bankreg[0] = (val >> 1) & 0x1F;
 		if (trace & TRACE_512)
-			printf("*** Lower bank now %02X\n", bankreg[0]);
+			fprintf(stderr, "*** Lower bank now %02X\n", bankreg[0]);
 		return;
 	}
 	io_write_2014(addr, val, known);
