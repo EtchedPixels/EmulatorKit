@@ -207,8 +207,8 @@ scelbi: scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_
 scelbi_sdl2: scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o
 	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o -o scelbi_sdl2 -lSDL2
 
-nascom: nascom.o keymatrix.o 58174.o libz80/libz80.o z80dis.o wd17xx.o sasi.o
-	cc -g3 nascom.o keymatrix.o 58174.o sasi.o wd17xx.o libz80/libz80.o z80dis.o -lSDL2 -o nascom
+nascom: nascom.o keymatrix.o 58174.o libz80/libz80.o z80dis.o wd17xx.o sasi.o ide.o
+	cc -g3 nascom.o keymatrix.o 58174.o ide.o sasi.o wd17xx.o libz80/libz80.o z80dis.o -lSDL2 -o nascom
 
 uk101: uk101.o keymatrix.o acia.o 6502.o 6502dis.o
 	cc -g3 uk101.o keymatrix.o acia.o 6502.o 6502dis.o -lSDL2 -o uk101
@@ -237,9 +237,7 @@ z80retro: z80retro.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 2063.o 2063_noui.o sdcard.o 16x50.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
 
 2063_sdl2: 2063.o 2063_sdlui.o sdcard.o 16x50.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o
-	cc -g3 2063.o 2063_sdlui.o sdcard.o 16x50.o tms9918a.o
-	tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2
-	-lSDL2
+	cc -g3 2063.o 2063_sdlui.o sdcard.o 16x50.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
 
 zeta-v2: zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a
 	cc -g3 zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a -o zeta-v2
