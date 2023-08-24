@@ -43,12 +43,12 @@
 #include "nasfont.h"
 
 #include "58174.h"
+#include "ide.h"
+#include "sasi.h"
 #include "wd17xx.h"
 
 #include "libz80/z80.h"
 #include "z80dis.h"
-
-#include "sasi.h"
 
 #define CWIDTH 8
 #define CHEIGHT 15
@@ -74,14 +74,16 @@ static struct mm58174 *rtc;
 static uint8_t kbd_row;
 static struct sasi_bus *sasi;
 static uint8_t sasi_en;
+static struct ide_controller *ide;
 
 static unsigned int nascom_ver = 1;
 static unsigned int fdc_gemini;
-static unsigned int has_gm801;
+static unsigned int has_gm802;
 static unsigned int has_map80;
+static unsigned int has_gm833;
 
 static uint8_t map80 = 0x00;
-static uint8_t map_gm801 = 0x11;
+static uint8_t map_gm802 = 0x11;
 
 #define NASFDC		1
 #define GM829		2
@@ -100,6 +102,7 @@ volatile int emulator_done;
 #define TRACE_KEY	0x000020
 #define TRACE_FDC	0x000040
 #define TRACE_RTC	0x000080
+#define TRACE_IDE	0x000100
 
 static int trace = 0;
 
@@ -135,18 +138,18 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	   read enable/write enable bit for each of four card positiosn (11
 	   at boot setting card 0 R card 0 W. Multiple card writes are
 	   permitted so we handle write specially below as well */
-	if (has_gm801) {
-		switch(map_gm801 & 0x0F) {
+	if (has_gm802) {
+		switch(map_gm802 & 0x0F) {
 		case 0x01:
-			return mapmem;
+			return mapmem + addr;
 		case 0x02:
-			return mapmem + 0x10000;
+			return mapmem + 0x10000 + addr;
 		case 0x04:
-			return mapmem + 0x20000;
+			return mapmem + 0x20000 + addr;
 		case 0x08:
-			return mapmem + 0x30000;
+			return mapmem + 0x30000 + addr;
 		default:
-			fprintf(stderr, "*** Invalid read state %02X\n", map_gm801);
+			fprintf(stderr, "*** Invalid read state %02X\n", map_gm802);
 			return NULL;
 		}
 	}
@@ -169,16 +172,17 @@ uint8_t mem_read(int unused, uint16_t addr)
 void mem_write(int unused, uint16_t addr, uint8_t val)
 {
 	uint8_t *p = mmu(addr, true);
+	uint64_t block = 1ULL << (addr / 1024);
 
-	/* Writes to multiple banks */
-	if (has_gm801) {
-		if (map_gm801 & 0x10)
+	/* Writes to multiple banks (low 48K is paged) */
+	if (has_gm802 && !(block & is_base)) {
+		if (map_gm802 & 0x10)
 			mapmem[addr] = val;
-		if (map_gm801 & 0x20)
+		if (map_gm802 & 0x20)
 			mapmem[addr + 0x10000] = val;
-		if (map_gm801 & 0x40)
+		if (map_gm802 & 0x40)
 			mapmem[addr + 0x20000] = val;
-		if (map_gm801 & 0x80)
+		if (map_gm802 & 0x80)
 			mapmem[addr + 0x30000] = val;
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "%04X <- %02X\n", addr, val);
@@ -293,12 +297,94 @@ static SDL_Keycode keyboard[] = {
 	SDLK_BACKSPACE, SDLK_RETURN, SDLK_MINUS, SDLK_LCTRL, SDLK_LSHIFT, SDLK_AT, 0/* FIXME */
 };
 
+static uint8_t pioide_data = 0xFF, pioide_status = 0xFF, pioide_ctrl = 0xFF;
+
+#define IDE_ADDR	0x07
+#define	IDE_CS0		0x08
+#define	IDE_CS1		0x10	/* Not emulated at this point */
+#define IDE_R		0x20
+#define IDE_W		0x40
+#define IDE_RESET	0x80
+
+/* Very minimal model - we need to emulate and check direction and mode etc */
+static void pioide_control_w(uint8_t v)
+{
+	uint8_t delta = pioide_ctrl ^ v;
+	/* No chip select no action */
+	if (trace & TRACE_IDE)
+		fprintf(stderr, "ide: ctrl %02X: ", v);
+	if (delta & IDE_RESET) {
+		if (!(v & IDE_RESET)) {
+			if (trace & TRACE_IDE)
+				fprintf(stderr, "reset ");
+			ide_reset_begin(ide);
+		}
+	}
+	if (!(v & IDE_RESET) || (v & IDE_CS0)) {
+		if (trace & TRACE_IDE)
+			fprintf(stderr, "\n");
+		return;
+	}
+	if (delta & IDE_W) {
+		if (v & IDE_W) { /* Rising edge - do write */
+			if (trace & TRACE_IDE)
+				fprintf(stderr, "write %d<-%02X ", v & IDE_ADDR, pioide_data);
+			ide_write8(ide, v & IDE_ADDR, pioide_data);
+		}
+	}
+	if (delta & IDE_R) {
+		/* Falling edge capture read - not quite right but good enough */
+		if (!(v & IDE_R)) {
+			pioide_data = ide_read8(ide, v & IDE_ADDR);
+			if (trace & TRACE_IDE)
+				fprintf(stderr, "read %d->%02X ", v & IDE_ADDR, pioide_data);
+		} else
+			pioide_data = 0xFF;
+	}
+	pioide_ctrl = v;
+	if (trace & TRACE_IDE)
+		fprintf(stderr, "\n");
+}
+
 static void z80pio_write(uint8_t addr, uint8_t val)
 {
+	switch(addr & 3) {
+	case 0:
+		/* Data A */
+		/* IDE control bits */
+		if (ide)
+			pioide_control_w(val);
+		break;
+	case 1:
+		/* Data B */
+		/* TODO: check direction etc */
+		pioide_data = val;
+		break;
+	case 2:
+		/* Control A */
+		return;
+	case 3:
+		/* Control B */
+		return;
+	}
 }
 
 static uint8_t z80pio_read(uint8_t addr)
 {
+	switch(addr & 3) {
+	case 0:
+		/* Data A */
+		return pioide_status;
+	case 1:
+		/* Data B */
+		return pioide_data;
+	case 2:
+		/* Control A */
+		return 0xFF;
+	case 3:
+		/* Control B */
+		return 0xFF;
+	}
 	return 0xFF;
 }
 
@@ -513,10 +599,9 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 				r |= 0x80;
 			return r;
 		} else {
-			if (trace & TRACE_FDC) {
+			if (trace & TRACE_FDC)
 				fprintf(stderr, "fdc: latch read as %x\n", fdc_latch & 0x5F);
-				return fdc_latch & 0x5F;
-			}
+			return fdc_latch & 0x5F;
 		}
 		break;
 	case 0x05:
@@ -546,6 +631,44 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 		return gemini_scsi_read(addr);
 	}
 	return 0xFF;
+}
+
+static uint8_t gm833_track;
+static uint8_t gm833_sector;
+static uint8_t gm833_byte;
+
+/* Emulate a pair of 512K cards */
+static uint8_t gm833_ram[32][256][128];
+
+static void gm833_write(uint16_t addr, uint8_t val)
+{
+	switch(addr) {
+	case 0xFB:
+		gm833_track = val;
+		/* Writing the track bits clears the byte counter, see circuit diagrsm */
+		gm833_byte = 0;
+		break;
+	case 0xFC:
+		gm833_sector = val;
+		break;
+	case 0xFD:
+/*		fprintf(stderr, "gm833: w %d %d %d %02X\n", gm833_track, gm833_sector, gm833_byte, val); */
+		if (gm833_track < 32)
+			gm833_ram[gm833_track][gm833_sector][gm833_byte++] = val;
+		gm833_byte &= 0x7F;
+		break;
+	}
+}
+
+static uint8_t gm833_read(uint16_t addr)
+{
+	uint8_t r = 0xFF;
+	if (addr == 0xFD && gm833_track < 32) {
+		r = gm833_ram[gm833_track][gm833_sector][gm833_byte++];
+/*		fprintf(stderr, "gm833: r %d %d %d %02X\n", gm833_track, gm833_sector, gm833_byte - 1, r); */
+		gm833_byte &= 0x7F;
+	}
+	return r;
 }
 
 void io_write(int unused, uint16_t addr, uint8_t val)
@@ -586,6 +709,11 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	/* Settable by jumpers but all software used 0xE0 */
 	else if (fdc && port >= 0xE0 && port <= 0xE7)
 		lucas_fdc_write(addr & 0x07, val);
+	else if (has_gm833 && port >= 0xFB && port <= 0xFD)
+		gm833_write(port, val);
+	/* Page mode */
+	else if (port == 0xFF)
+		map_gm802 = val;
 }
 
 static uint8_t do_io_read(int unused, uint16_t addr)
@@ -617,6 +745,8 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 	}
 	if (fdc && port >= 0xE0 && port <= 0xE7)
 		return lucas_fdc_read(addr & 0x07);
+	if (has_gm833 && port >= 0xFB && port <= 0xFD)
+		return gm833_read(port);
 	return 0xFF;
 }
 
@@ -849,7 +979,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int base, unsigned i
 
 static void usage(void)
 {
-	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-b basic] [-c] [-e eprom] [-r rom] [-m] [-R] [-d debug]\n");
+	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-b basic] [-c] [-e eprom] [-i idepath] [-g] [-r rom] [-m] [-R] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -861,13 +991,14 @@ int main(int argc, char *argv[])
 	char *rom_path = "nassys3.nal";
 	char *basic_path = NULL;
 	char *eprom_path = NULL;
+	char *ide_path = NULL;
 	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
 	int romsize;
 	unsigned int hasrtc = 0;
 	unsigned int maxmem = 0;
 	static unsigned int need_fdc = 0;
 
-	while ((opt = getopt(argc, argv, "123b:cd:e:fmr:A:B:C:D:R")) != -1) {
+	while ((opt = getopt(argc, argv, "1238b:cd:e:fgi:mr:A:B:C:D:RM")) != -1) {
 		switch (opt) {
 		case '1':
 			nascom_ver = 1;
@@ -878,7 +1009,7 @@ int main(int argc, char *argv[])
 			break;
 		case '8':
 			has_map80 = 1;
-			has_gm801 = 0;
+			has_gm802 = 0;
 			break;
 		case 'A':
 			fdc_path[0] = optarg;
@@ -913,7 +1044,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'g':
 			has_map80 = 0;
-			has_gm801 = 1;
+			has_gm802 = 1;
+			break;
+		case 'i':
+			ide_path = optarg;
 			break;
 		case 'r':
 			rom_path = optarg;
@@ -923,6 +1057,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'R':
 			hasrtc = 1;
+			break;
+		case 'M':
+			has_gm833 = 1;
 			break;
 		default:
 			usage();
@@ -939,7 +1076,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "nascom: invalid bootstrap ROM size\n");
 			exit(1);
 		}
-		if (has_gm801 == 0 && has_map80 == 0) {
+		if (has_gm802 == 0 && has_map80 == 0) {
 			/* Assume a full 64K card is present */
 			is_present = 0xFFFFFFFFFFFFFFFFULL;
 			is_base = 0xFFFFFFFFFFFFFFFFULL;
@@ -948,6 +1085,7 @@ int main(int argc, char *argv[])
 		is_rom = 0x3ULL << 60;
 		/* Workspace and video is at F800-FFFF */
 		is_base |= 0xFULL << 60;
+		is_present |= is_rom | is_base;
 		nascom_ver = 2;
 		need_fdc = 1;
 	} else {
@@ -989,6 +1127,10 @@ int main(int argc, char *argv[])
 	if (nascom_ver == 2)
 		tstates = 400;
 
+	/* GM802 banked memory wherever there is no existing base memory */
+	if (has_gm802)
+		is_present |= 0xFFFFFFFFFFFFFFFFULL;
+	/* Maxmem option - all memory all base */
 	if (maxmem) {
 		is_present |= 0xFFFFFFFFFFFFULL << 8;
 		is_base |= 0xFFFFFFFFFFFFULL << 8;
@@ -1016,6 +1158,17 @@ int main(int argc, char *argv[])
 	if (hasrtc) {
 		rtc = mm58174_create();
 		mm58174_trace(rtc, trace & TRACE_RTC);
+	}
+	if (ide_path) {
+		int ide_fd;
+		ide = ide_allocate("pio0");
+		ide_fd = open(ide_path, O_RDWR);
+		if (ide_fd == -1) {
+			perror(ide_path);
+			exit(1);
+		}
+		ide_attach(ide, 0, ide_fd);
+		ide_reset_begin(ide);
 	}
 	matrix = keymatrix_create(9, 7, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
