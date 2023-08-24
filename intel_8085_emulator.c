@@ -1138,10 +1138,10 @@ int i8085_exec(int cycles) {
 				reg8[H] = i8085_read(reg16_DE + 1);
 				cycles -= 10;
 				break;
-			case 0xFD:
+			case 0xFD: // JK
 				temp16 = (uint8_t)i8085_read(reg_PC);
 				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
-				if (!test_K()) {
+				if (test_K()) {
 					reg_PC = temp16;
 					cycles -= 10;
 				} else {
