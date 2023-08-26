@@ -9,7 +9,7 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
-	z180-mini-itx_sdl2 vz300 2063_sdl2
+	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -94,11 +94,11 @@ m68k/lib68k.a:
 rcbus-68008.o: rcbus-68008.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c rcbus-68008.c
 
-rcbus-8085: rcbus-8085.o rcbus_noui.o intel_8085_emulator.o ide.o acia.o tms9918a.o tms9918a_norender.o w5100.o ppide.o rtc_bitbang.o 16x50.o
-	cc -g3 rcbus-8085.o rcbus_noui.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_norender.o w5100.o intel_8085_emulator.o -o rcbus-8085
+rcbus-8085: rcbus-8085.o rcbus_noui.o intel_8085_emulator.o ide.o acia.o tms9918a.o tms9918a_norender.o w5100.o ppide.o rtc_bitbang.o 16x50.o sasi.o ncr5380.o
+	cc -g3 rcbus-8085.o rcbus_noui.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_norender.o w5100.o sasi.o ncr5380.o intel_8085_emulator.o -o rcbus-8085
 
-rcbus-8085_sdl2: rcbus-8085.o rcbus_sdlui.o intel_8085_emulator.o ide.o acia.o tms9918a.o tms9918a_sdl2.o w5100.o ppide.o rtc_bitbang.o 16x50.o
-	cc -g3 rcbus-8085.o rcbus_sdlui.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_sdl2.o w5100.o intel_8085_emulator.o -o rcbus-8085_sdl2 -lSDL2
+rcbus-8085_sdl2: rcbus-8085.o rcbus_sdlui.o intel_8085_emulator.o ide.o acia.o tms9918a.o tms9918a_sdl2.o w5100.o ppide.o rtc_bitbang.o 16x50.o sasi.o ncr5380.o
+	cc -g3 rcbus-8085.o rcbus_sdlui.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_sdl2.o w5100.o sasi.o ncr5380.o intel_8085_emulator.o -o rcbus-8085_sdl2 -lSDL2
 
 rcbus-80c188: rcbus-80c188.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \

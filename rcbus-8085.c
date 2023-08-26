@@ -40,6 +40,8 @@
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 #include "w5100.h"
+#include "sasi.h"
+#include "ncr5380.h"
 
 static uint8_t ramrom[1024 * 1024];	/* Covers the banked card */
 
@@ -59,6 +61,8 @@ struct rtc *rtcdev;
 struct uart16x50 *uart;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
+static struct sasi_bus *sasi;
+static struct ncr5380 *ncr;
 
 static uint8_t have_tms;
 
@@ -88,8 +92,11 @@ volatile int emulator_done;
 #define TRACE_IRQ	1024
 #define TRACE_UART	2048
 #define TRACE_TMS9918A  4096
+#define TRACE_SCSI 	8192
 
 static int trace = 0;
+
+static void poll_irq_event(void);
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
@@ -270,7 +277,7 @@ void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 	/* Modem lines changed - don't care */
 }
 
-uint8_t i8085_inport(uint8_t addr)
+static uint8_t do_i8085_inport(uint8_t addr)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
@@ -288,11 +295,21 @@ uint8_t i8085_inport(uint8_t addr)
 		return tms9918a_read(vdp, addr & 1);
 	if (addr == 0x0C && rtc)
 		return rtc_read(rtcdev);
-	else if (addr >= 0xC0 && addr <= 0xCF && uart)
+	if (addr >= 0xC0 && addr <= 0xCF && uart)
 		return uart16x50_read(uart, addr & 0x0F);
+	if (addr >= 0x58 && addr <= 0x5F && ncr)
+		return ncr5380_read(ncr, addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
+}
+
+uint8_t i8085_inport(uint8_t addr)
+{
+	uint8_t r = do_i8085_inport(addr);
+	/* Get the IRQ flag back righr */
+	poll_irq_event();
+	return r;
 }
 
 void i8085_outport(uint8_t addr, uint8_t val)
@@ -328,11 +345,14 @@ void i8085_outport(uint8_t addr, uint8_t val)
 		tms9918a_write(vdp, addr & 1, val);
 	else if (addr >= 0xC0 && addr <= 0xCF && uart)
 		uart16x50_write(uart, addr & 0x0F, val);
+	else if (addr >= 0x58 && addr <= 0x5F && ncr)
+		ncr5380_write(ncr, addr & 7, val);
 	else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+	poll_irq_event();
 }
 
 /* For now we don't emulate the bitbang port */
@@ -385,11 +405,12 @@ int main(int argc, char *argv[])
 	int rom = 1;
 	int rombank = 0;
 	char *rompath = "rcbus-8085.rom";
+	char *sasipath = NULL;
 	char *idepath;
 	int acia_input;
 	int uart_16550a = 0;
 
-	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:r:RwS:T")) != -1) {
+	while ((opt = getopt(argc, argv, "1abBd:e:fi:I:N:r:RwS:T")) != -1) {
 		switch (opt) {
 		case '1':
 			uart_16550a = 1;
@@ -429,6 +450,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'N':
+			sasipath = optarg;
 			break;
 		case 'R':
 			rtc = 1;
@@ -522,6 +546,14 @@ int main(int argc, char *argv[])
 				ppide_trace(ppide, 1);
 		}
 	}
+	if (sasipath) {
+		sasi = sasi_bus_create();
+		sasi_disk_attach(sasi, 0, sasipath, 512);
+		sasi_bus_reset(sasi);
+		ncr = ncr5380_create(sasi);
+		ncr5380_trace(ncr, trace & TRACE_SCSI);
+	}
+
 
 	if (acia_uart) {
 		acia = acia_create();
