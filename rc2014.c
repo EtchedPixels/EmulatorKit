@@ -2282,7 +2282,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return uart16x50_read(uart, addr & 7);
 	if (addr == 0x6D && is_z512)
 		return z512_read(addr);
-	if (addr >= 0x58 && addr < 0x5C && ncr && !extreme)
+	if (addr >= 0x58 && addr <= 0x5F && ncr && !extreme)
 		return ncr5380_read(ncr, addr & 7);
 	if (have_busstop && addr >= 0xDC && addr <= 0xDF) {
 		Z80NMI_Clear(&cpu_z80);
@@ -2307,7 +2307,7 @@ static uint8_t io_read_2014_x(uint16_t addr)
 			return rtc_read(rtc);
 		if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20)
 			return ef9345_read(ef9345, ef_latch);
-		if (addr >= 0x58 && addr <= 0x5B && ncr)
+		if (addr >= 0x58 && addr <= 0x5F && ncr)
 			return ncr5380_read(ncr, addr & 7);
 		return 0x78;
 	}
@@ -2388,7 +2388,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 			tftrend = tft_renderer_create(tft);
 		}
 		tft_write(tft, addr & 1, val);
-	} else if (addr >= 0x58 && addr <= 0x5B && ncr && !extreme)
+	} else if (addr >= 0x58 && addr <= 0x5F && ncr && !extreme)
 		ncr5380_write(ncr, addr & 7, val);
 	/* The switchable/pageable ROM is not very well decoded */
 	else if (switchrom && (addr & 0x7F) >= 0x38 && (addr & 0x7F) <= 0x3F)
@@ -2418,7 +2418,7 @@ static void io_write_2014_x(uint16_t addr, uint8_t val, uint8_t known)
 			ef_latch = val;
 		else if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20)
 			ef9345_write(ef9345, ef_latch, val);
-		else if (addr >= 0x58 && addr <= 0x5B && ncr)
+		else if (addr >= 0x58 && addr <= 0x5F && ncr)
 			ncr5380_write(ncr, addr & 7, val);
 		return;
 	}
