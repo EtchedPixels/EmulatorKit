@@ -156,6 +156,12 @@ pico68: pico68.o acia.o 6522.o sdcard.o m68k/lib68k.a
 pico68.o: pico68.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c pico68.c
 
+p90mb: p90mb.o ide.o p90ce201.o m68k/lib68k.a
+	cc -g3 p90mb.o ide.o p90ce201.o m68k/lib68k.a -o p90mb
+
+p90mb.o: p90mb.c m68k/lib68k.a
+	$(CC) $(CFLAGS) -Im68k -c p90mb.c
+
 z80mc:	z80mc.o sdcard.o libz80/libz80.o
 	cc -g3 z80mc.o sdcard.o libz80/libz80.o -o z80mc
 
