@@ -84,7 +84,8 @@ enum
 	M68K_CPU_TYPE_68EC020,
 	M68K_CPU_TYPE_68020,
 	M68K_CPU_TYPE_68030,	/* Supported by disassembler ONLY */
-	M68K_CPU_TYPE_68040		/* Supported by disassembler ONLY */
+	M68K_CPU_TYPE_68040,		/* Supported by disassembler ONLY */
+	M68K_CPU_TYPE_68012	/* 68010 with 32bit addressing */
 };
 
 /* Registers used by m68k_get_reg() and m68k_set_reg() */

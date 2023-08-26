@@ -600,6 +600,22 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CYC_SHIFT        = 1;
 			CYC_RESET        = 130;
 			return;
+		case M68K_CPU_TYPE_68012:
+			CPU_TYPE         = CPU_TYPE_010;
+			CPU_ADDRESS_MASK = 0xffffffff;
+			CPU_SR_MASK      = 0xa71f; /* T1 -- S  -- -- I2 I1 I0 -- -- -- X  N  Z  V  C  */
+			CYC_INSTRUCTION  = m68ki_cycles[1];
+			CYC_EXCEPTION    = m68ki_exception_cycle_table[1];
+			CYC_BCC_NOTAKE_B = -4;
+			CYC_BCC_NOTAKE_W = 0;
+			CYC_DBCC_F_NOEXP = 0;
+			CYC_DBCC_F_EXP   = 6;
+			CYC_SCC_R_TRUE   = 0;
+			CYC_MOVEM_W      = 2;
+			CYC_MOVEM_L      = 3;
+			CYC_SHIFT        = 1;
+			CYC_RESET        = 130;
+			return;
 		case M68K_CPU_TYPE_68EC020:
 			CPU_TYPE         = CPU_TYPE_EC020;
 			CPU_ADDRESS_MASK = 0x00ffffff;

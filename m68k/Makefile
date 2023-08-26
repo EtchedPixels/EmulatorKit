@@ -21,7 +21,7 @@ DELETEFILES = $(MUSASHIGENCFILES) $(MUSASHIGENHFILES) $(.OFILES) $(.OFILEST) $(T
 all: lib68k.a
 
 clean:
-	rm -f $(DELETEFILES)
+	rm -f $(DELETEFILES) lib68k.a
 
 lib68k.a: $(MUSASHIGENHFILES) $(.OFILES) Makefile
 	ar rc lib68k.a $(.OFILES)

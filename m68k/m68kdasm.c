@@ -3257,6 +3257,10 @@ unsigned int m68k_disassemble(char* str_buff, unsigned int pc, unsigned int cpu_
 			g_cpu_type = TYPE_68010;
 			g_address_mask = 0x00ffffff;
 			break;
+		case M68K_CPU_TYPE_68012:
+			g_cpu_type = TYPE_68010;
+			g_address_mask = 0xffffffff;
+			break;
 		case M68K_CPU_TYPE_68EC020:
 			g_cpu_type = TYPE_68020;
 			g_address_mask = 0x00ffffff;
