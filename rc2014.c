@@ -2118,50 +2118,50 @@ static void propgfx_write(unsigned cmd, uint8_t data)
 		prop_curcmd = data;
 		switch(data) {
 		case 0x00:
-			fprintf(stderr, "V:MODE ");
+			fprintf(stderr, "\nV:MODE ");
 			prop_cmdsize = 3;
 			break;
 		case 0x01:
-			fprintf(stderr, "V:SETPIXEL");
+			fprintf(stderr, "\nV:SETPIXEL");
 			prop_cmdsize = 3;
 			break;
 		case 0x03:
-			fprintf(stderr, "V:HSCROLL ");
+			fprintf(stderr, "\nV:HSCROLL ");
 			prop_cmdsize = 2;
 			break;
 		case 0x04:
-			fprintf(stderr, "V:VSCROLL ");
+			fprintf(stderr, "\nV:VSCROLL ");
 			prop_cmdsize = 2;
 			break;
 		case 0x06:
-			fprintf(stderr, "V:SET_TILEMAP ");
+			fprintf(stderr, "\nV:SET_TILEMAP ");
 			prop_cmdsize = 2;
 			break;
 		case 0x07:
-			fprintf(stderr, "V:SET_SPRITEMAP ");
+			fprintf(stderr, "\nV:SET_SPRITEMAP ");
 			prop_cmdsize = 2;
 			break;
 		case 0x09:
-			fprintf(stderr, "V:CLR ");
+			fprintf(stderr, "\nV:CLR ");
 			break;
 		case 0x0B:
-			fprintf(stderr, "V:PALETTE ");
+			fprintf(stderr, "\nV:PALETTE ");
 			prop_cmdsize = 2;
 			break;
 		case 0x0C:
-			fprintf(stderr, "V:SRPITEDATA ");
-			prop_cmdsize = 2;
+			fprintf(stderr, "\nV:SRPITEDATA ");
+			prop_cmdsize = 3;
 			break;
 		case 0x0D:
-			fprintf(stderr, "V:TILEMAP/RBW ");
+			fprintf(stderr, "\nV:TILEMAP/RBW ");
 			prop_cmdsize = 2;
 			break;
 		case 0x0E:
-			fprintf(stderr, "V:TILEBIT ");
+			fprintf(stderr, "\nV:TILEBIT ");
 			prop_cmdsize = 2;
 			break;
 		default:
-			fprintf(stderr, "V:UNK %02X ", data);
+			fprintf(stderr, "\nV:UNK %02X ", data);
 			prop_cmdsize = 0;
 		}
 		return;
@@ -2169,7 +2169,6 @@ static void propgfx_write(unsigned cmd, uint8_t data)
 	if (prop_cmdcnt < prop_cmdsize) {
 		propdata[prop_cmdcnt] = data;
 		prop_cmdcnt++;
-		return;
 	}
 	if (prop_cmdcnt == prop_cmdsize) {
 		prop_cmdcnt++;
@@ -2215,7 +2214,7 @@ static void propgfx_write(unsigned cmd, uint8_t data)
 		}
 		return;
 	}
-	fprintf(stderr, "V%02X ", data);
+	fprintf(stderr, "D%02X ", data);
 }
 
 static uint8_t io_read_2014(uint16_t addr)
@@ -2414,6 +2413,8 @@ static void io_write_2014_x(uint16_t addr, uint8_t val, uint8_t known)
 			nic_w5100_write(wiz, addr & 3, val);
 		else if (addr == 0xC0 && rtc)
 			rtc_write(rtc, val);
+		else if (addr >= 0x40 && addr <= 0x41)
+			propgfx_write(addr & 1, val);
 		else if (addr == 0x44 && ef9345)
 			ef_latch = val;
 		else if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20)
@@ -3373,7 +3374,7 @@ int main(int argc, char *argv[])
 		sasi_disk_attach(sasi, 0, sasipath, 512);
 		sasi_bus_reset(sasi);
 		ncr = ncr5380_create(sasi);
-		ncr5380_trace(ncr, trace & TRACE_SCSI);
+		ncr5380_trace(ncr, !!(trace & TRACE_SCSI));
 	}
 
 
