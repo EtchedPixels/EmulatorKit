@@ -628,6 +628,7 @@ static int ctc_check_im2(void)
 }
 
 /* Model the chains between the CTC devices */
+/* TODO: DS1307 can provide a clock to the CTC */
 static void ctc_pulse(int i)
 {
 }
@@ -810,7 +811,7 @@ uint8_t io_read(int unused, uint16_t addr)
 		return genio_read(addr);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
-	return 0x78;	/* 78 is what my actual board floats at */
+	return 0xFF;	/* FF is what my actual board floats at */
 }
 
 void io_write(int unused, uint16_t addr, uint8_t val)
@@ -828,9 +829,9 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	}
 	else if (addr >= 0x40 && addr <= 0x43)
 		ctc_write(addr & 3, val);
-	else if (addr >= 0x64 && addr <= 0x65)
+	else if (addr >= 0x64 && addr <= 0x67)
 		genio_write(addr, val);
-	else if (addr >= 0x68 && addr <= 0x69)
+	else if (addr >= 0x68 && addr <= 0x6B)
 		spi_write(addr, val);
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
