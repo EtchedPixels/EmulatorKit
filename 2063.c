@@ -879,7 +879,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	} else if (addr == 0xFE) {
 		trace &= 0xFF;
 		trace |= val << 8;
-		printf("trace set to %d\n", trace);
+		printf("trace set to %04X\n", trace);
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
