@@ -60,7 +60,7 @@ static uint32_t texturebits[48 * CWIDTH * 16 * CHEIGHT];
 
 struct keymatrix *matrix;
 
-static uint8_t mapmem[4 * 65536];
+static uint8_t mapmem[32 * 65536];
 static uint8_t base_mem[65536];
 static uint64_t is_rom;
 static uint64_t is_base;
@@ -129,12 +129,12 @@ static uint8_t *mmu(uint16_t addr, bool write)
 			if ((addr & 0x8000) != ((map80 & 0x40) ? 0x8000: 0x0000))
 				return mapmem + addr;
 			/* Is being mapped */
-			return mapmem + (addr & 0x7FFF) + (map80 & 0x0F) * 0x8000;
+			return mapmem + (addr & 0x7FFF) + (map80 & 0x3F) * 0x8000;
 		} else {
-			return mapmem + addr + (map80 & 0x1E) * 0x8000;
+			return mapmem + addr + (map80 & 0x3E) * 0x8000;
 		}
 	}
-	/* Gemini 80 page mode. Cards are switched by port 0xFE with a simple
+	/* Gemini 80 page mode. Cards are switched by port 0xFF with a simple
 	   read enable/write enable bit for each of four card positiosn (11
 	   at boot setting card 0 R card 0 W. Multiple card writes are
 	   permitted so we handle write specially below as well */
