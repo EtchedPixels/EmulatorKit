@@ -291,7 +291,7 @@ void do_65c816_write(uint32_t addr, uint8_t val)
 	ptr = sram_mmu_translate(mmu, backpermute(addr), 1, !(iolatch & 1), 0, &abrt);
 	if (abrt)
 		CPU_abort();
-	if (ptr)
+	else if (ptr)
 		*ptr = val;
 	/* MMU provided fault diagnostics itself */
 }
