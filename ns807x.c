@@ -75,25 +75,34 @@ static void mwrite(struct ns8070 *cpu, uint16_t addr, uint8_t val)
         fprintf(stderr, "Write to ROM 0x%04X<-%02X\n", addr, val);
 }
 
+/* Only defined for 16bit unsigned divided by 15bit  */
 static void divide1616(struct ns8070 *cpu)
 {
     uint16_t val = (cpu->e << 8) | cpu->a;
+    /* T is set to a partial remainder. We need to work out how this works
+       so we can emulate it TODO */
+    uint16_t r = val % cpu->t;
     val /= cpu->t;
+    cpu->t = r;
     cpu->e = val >> 8;
     cpu->a = val;
     /* What should happen to CY/L and OV ? */
-    /* T is set to a partial remainder. We need to work out how this works
-       so we can emulate it TODO */
 }
 
+/* This isn't quite right. The operation is defined for a signed 16bit x unsigned 15bit (T)
+   but not clear what happens otherwise */
 static void mul32(struct ns8070 *cpu)
 {
     int16_t val = (cpu->e << 8) | cpu->a;
-    int32_t ret = (int16_t)cpu->t * val;
-    cpu->e = ret >> 8;
-    cpu->a = ret;
-    cpu->t = ret >> 16;
+    int32_t ret = (int16_t)(cpu->t & 0x7FFF) * (int16_t)val;
+    /* EA gets the high word T the low */
+    cpu->e = ret >> 24;
+    cpu->a = ret >> 16;
+    cpu->t = ret;
     /* What should CY/L and OV be set to */
+    if ((cpu->t * val) & 0x80000000)
+        cpu->s |= S_CL;
+    
 }
 
 static uint8_t maths8add(struct ns8070 *cpu, uint8_t a, uint8_t b, uint8_t r)

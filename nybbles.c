@@ -117,9 +117,9 @@ void flag_change(struct ns8070 *cpu, uint8_t fbits)
 {
 }
 
-static void poll_irq_event(void)
+/*static void poll_irq_event(void)
 {
-}
+} */
 
 static struct termios saved_term, term;
 
@@ -143,12 +143,12 @@ static void usage(void)
 
 int main(int argc, char *argv[])
 {
-	static struct timespec tc;
+/*	static struct timespec tc; */
 	int opt;
 	int fd;
 	int rom = 1;
 	char *rompath = "nybble.rom";
-	unsigned int cycles = 0;
+/*	unsigned int cycles = 0; */
 
 	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
 		switch (opt) {
@@ -189,8 +189,8 @@ int main(int argc, char *argv[])
 
 	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
-	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
+/*	tc.tv_sec = 0;
+	tc.tv_nsec = 5000000L; */
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
