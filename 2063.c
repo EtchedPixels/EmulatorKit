@@ -51,7 +51,8 @@ static struct uart16x50 *uart;
 int sdl_live;
 
 static uint8_t ram[16 * 32768];
-static uint8_t rom[16384];
+static uint8_t rom[65536];
+static uint16_t rom_mask = 0x3FFF;
 
 static uint16_t tstate_steps = 50;	/* 10MHz speed */
 
@@ -93,7 +94,7 @@ static uint8_t *map_addr(uint16_t addr, unsigned is_write)
 {
 	unsigned bank;
 	if (flash_in && !is_write)
-		return rom + (addr & 0x3FFF);
+		return rom + (addr & rom_mask);
 	if (addr >= 0x8000)
 		bank = 15;
 	else
@@ -946,6 +947,7 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	unsigned have_tms = 0;
 	unsigned have_16x50 = 0;
+	unsigned rsize;
 
 	while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
 		switch (opt) {
@@ -979,9 +981,12 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, rom, 16384) != 16384) {
-		fprintf(stderr, "2063: rom image should be 16K.\n");
+	rsize = read(fd, rom, sizeof(rom));
+
+	if (rsize == 0 || (rsize & (rsize - 1))) {
+		fprintf(stderr, "2063: rom image should be a power of 2.\n");
 		exit(EXIT_FAILURE);
+		rom_mask = rsize - 1;
 	}
 	close(fd);
 
