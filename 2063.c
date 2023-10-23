@@ -986,9 +986,10 @@ int main(int argc, char *argv[])
 	if (rsize == 0 || (rsize & (rsize - 1))) {
 		fprintf(stderr, "2063: rom image should be a power of 2.\n");
 		exit(EXIT_FAILURE);
-		rom_mask = rsize - 1;
 	}
 	close(fd);
+
+	rom_mask = rsize - 1;
 
 	sdcard = sd_create("sd0");
 	if (sdpath) {
