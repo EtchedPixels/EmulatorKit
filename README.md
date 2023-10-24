@@ -113,6 +113,7 @@ RC2014 and Fuzix.
 - Tiny68K
 - TinyZ80
 - Tom's SBC
+- TRCWM HD6309 (but as 6809)
 - VZ200/300
 - Z80Master
 - Z80 Membership Card
@@ -209,6 +210,12 @@ retro-comp group. This platform can use the Grant Searle ROM and CF images.
 Fuzix runs directly from ROM.
 
 https://easyeda.com/peabody1929/CPM_Z80_Board_REV_B_copy-76313012f79945d3b8b9d3047368abf7
+
+## TRCWM6309
+
+A retrocomputing project from the 2017 retro challenge
+
+https://github.com/trcwm/HD6309-Computer
 
 ## VZ300
 
