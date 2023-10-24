@@ -111,6 +111,7 @@ static uint8_t is_z512;
 static uint8_t z512_control = 0;
 static uint8_t ef_latch = 0;
 static uint16_t bs_latch;
+static unsigned rom_mapped = 1;
 
 static struct ppide *ppide;
 static struct sdcard *sdcard;
@@ -452,7 +453,7 @@ static void mem_writezrcc(uint16_t addr, uint8_t val)
 static uint8_t mem_readzrc(uint16_t addr)
 {
 	uint8_t r;
-	if (addr < 0x40 && bankreg[1] == 0x3F)
+	if (addr < 0x40 && rom_mapped)
 		r = zrcc_irom[addr];
 	else if (addr >= 0x8000)
 		r = ramrom[addr | 0x1F8000];	/* Top 32K is common */
@@ -465,12 +466,12 @@ static uint8_t mem_readzrc(uint16_t addr)
 
 static void mem_writezrc(uint16_t addr, uint8_t val)
 {
-	if (addr <= 0x40 && bankreg[1] == 0x3F) {
+	if (addr <= 0x40 && rom_mapped) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "W %04X = %02X [ROM]\n", addr, val);
 		return;
 	}
-	if (trace & TRACE_MEM)
+	if ((trace & TRACE_MEM) || addr == 0xB058)
 		fprintf(stderr, "W %04X = %02X\n", addr, val);
 	if (addr >= 0x8000)
 		ramrom[addr | 0x1F8000] = val;
@@ -2715,9 +2716,11 @@ static void io_write_pdog(uint16_t addr, uint8_t val)
 
 static void io_write_zrc(uint16_t addr, uint8_t val)
 {
-	if ((addr & 0xFF) == 0x1F)
+	if ((addr & 0xFF) == 0x1F) {
 		bankreg[1] = val & 0x3F;
-	else
+		if (val & 0x80)
+			rom_mapped = 0;
+	} else
 		io_write_2014(addr, val, 0);
 }
 
