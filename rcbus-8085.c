@@ -372,6 +372,12 @@ static void poll_irq_event(void)
 {
 	if (acia)
 		acia_check_irq(acia);
+	if (uart) {
+		if (uart16x50_irq_pending(uart))
+			int_set(IRQ_16550A);
+		else
+			int_clear(IRQ_16550A);
+	}
 	if (vdp && tms9918a_irq_pending(vdp))
 		int_set(IRQ_TMS9918A);
 	else
@@ -625,13 +631,9 @@ int main(int argc, char *argv[])
 			i8085_exec(tstate_steps);
 			if (acia)
 				acia_timer(acia);
-			if (uart_16550a) {
+			if (uart_16550a)
 				uart16x50_event(uart);
-				if (uart16x50_irq_pending(uart))
-					int_set(IRQ_16550A);
-				else
-					int_clear(IRQ_16550A);
-			}
+			poll_irq_event();
 			/* We want to run UI events regularly it seems */
 			ui_event();
 		}
