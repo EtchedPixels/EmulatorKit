@@ -398,7 +398,7 @@ static uint8_t uart_status(void)
 		reg |= 0x80;
 	if (r & 2)
 		reg |= 0x40;
-	return r;
+	return reg;
 }
 
 static uint8_t uart_data(void)
@@ -689,11 +689,11 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 //			if (val & 8)
 //				prime_nmi();
 			break;
-		case 0x02:	/* UART TX */
+		case 0x01:	/* UART TX */
 			uart_transmit(val);
 			break;
 			/* Unused */
-		case 0x01:
+		case 0x02:
 		case 0x03:
 			break;
 		case 0x04:
