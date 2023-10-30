@@ -79,6 +79,8 @@ void uart16x50_event(struct uart16x50 *uptr)
     uint8_t r = check_chario();
     uint8_t old = uptr->lsr;
     uint8_t dhigh;
+
+    uptr->lsr &= ~0x61;		/* Clear RX and TX bits */
     if ((r & 1) && uptr->input)
         uptr->lsr |= 0x01;	/* RX not empty */
     if (r & 2)
@@ -221,13 +223,6 @@ uint8_t uart16x50_read(struct uart16x50 *uptr, uint8_t addr)
         /* mcr */
         return uptr->mcr;
     case 5:
-        /* lsr */
-        r = check_chario();
-        uptr->lsr = 0;
-        if (r & 1)
-             uptr->lsr |= 0x01;	/* Data ready */
-        if (r & 2)
-             uptr->lsr |= 0x60;	/* TX empty | holding empty */
         /* Reading the LSR causes these bits to clear */
         r = uptr->lsr;
         uptr->lsr &= 0xF0;
