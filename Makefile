@@ -33,8 +33,8 @@ rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sd
 rb-mbc:	rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 	cc -g3 rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
 
-rbcv2:	rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o libz80/libz80.o
-	cc -g3 rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o libz80/libz80.o -o rbcv2
+rbcv2:	rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o
+	cc -g3 rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o -o rbcv2
 
 searle:	searle.o ide.o libz80/libz80.o
 	cc -g3 searle.o ide.o libz80/libz80.o -o searle
