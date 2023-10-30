@@ -78,6 +78,8 @@ uint8_t propio_read(struct propio *prop, uint8_t addr)
             return next_char();
         return 0xFF;
     case 2:		/* Disk status */
+        if (prop->trace)
+            fprintf(stderr, "propio: read status %02X\n", prop->st);
         return prop->st;
     case 3:		/* Data transfer */
         if (prop->rlen) {
