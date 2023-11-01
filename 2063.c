@@ -782,6 +782,8 @@ static void gpio_write(uint16_t addr, uint8_t val)
 {
 	uint8_t delta = gpio_out ^ val;
 	gpio_out = val;
+	if ((delta & 0xF0) && (trace & TRACE_BANK))
+		fprintf(stderr, "bank: %d\n", val >> 4);
 	if (delta & 4) {
 		if (gpio_out & 4)
 			sd_spi_raise_cs(sdcard);
