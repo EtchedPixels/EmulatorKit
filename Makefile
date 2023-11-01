@@ -36,8 +36,8 @@ rb-mbc:	rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 rbcv2:	rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o
 	cc -g3 rbcv2.o 16x50.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o -o rbcv2
 
-searle:	searle.o ide.o libz80/libz80.o
-	cc -g3 searle.o ide.o libz80/libz80.o -o searle
+searle:	searle.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 searle.o ide.o z80dis.o libz80/libz80.o -o searle
 
 linc80:	linc80.o ide.o sdcard.o libz80/libz80.o
 	cc -g3 linc80.o ide.o sdcard.o libz80/libz80.o -o linc80
