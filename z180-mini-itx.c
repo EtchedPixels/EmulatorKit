@@ -10,7 +10,7 @@
  *	Extmem low disables onboard high RAM
  *	ROMen high enables low 512K ROM else RAM
  *
- *	Outputs from the 82C55 start high
+ *	Outputs from the 82C55 start high as input lines
  *
  *	The 82C55 drives
  *
@@ -132,7 +132,7 @@ uint8_t z180_phys_read(int unused, uint32_t addr)
 			return 0xFF;
 	}
 	if (port_a & 0x08)
-		return rom[addr & 0x3FFFF];
+		return rom[addr & 0x7FFFF];
 	else
 		return ram[addr & 0xFFFFF];
 }
@@ -311,30 +311,33 @@ static void fdc_write(uint8_t addr, uint8_t val)
 {
 	switch(addr) {
 	case 1:	/* Data */
-		fprintf(stderr, "FDC Data: %02X\n", val);
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Data: %02X\n", val);
 		fdc_write_data(fdc, val);
 		break;
 	case 2:	/* DOR */
-		fprintf(stderr, "FDC DOR %02X [", val);
-		if (val & 0x80)
-			fprintf(stderr, "SPECIAL ");
-		else
-			fprintf(stderr, "AT/EISA ");
-		if (val & 0x20)
-			fprintf(stderr, "MOEN2 ");
-		if (val & 0x10)
-			fprintf(stderr, "MOEN1 ");
-		if (val & 0x08)
-			fprintf(stderr, "DMA ");
-		if (!(val & 0x04))
-			fprintf(stderr, "SRST ");
-		if (!(val & 0x02))
-			fprintf(stderr, "DSEN ");
-		if (val & 0x01)
-			fprintf(stderr, "DSEL1");
-		else
-			fprintf(stderr, "DSEL0");
-		fprintf(stderr, "]\n");
+		if (trace & TRACE_FDC) {
+			fprintf(stderr, "FDC DOR %02X [", val);
+			if (val & 0x80)
+				fprintf(stderr, "SPECIAL ");
+			else
+				fprintf(stderr, "AT/EISA ");
+			if (val & 0x20)
+				fprintf(stderr, "MOEN2 ");
+			if (val & 0x10)
+				fprintf(stderr, "MOEN1 ");
+			if (val & 0x08)
+				fprintf(stderr, "DMA ");
+			if (!(val & 0x04))
+				fprintf(stderr, "SRST ");
+			if (!(val & 0x02))
+				fprintf(stderr, "DSEN ");
+			if (val & 0x01)
+				fprintf(stderr, "DSEL1");
+			else
+				fprintf(stderr, "DSEL0");
+			fprintf(stderr, "]\n");
+		}
 		fdc_write_dor(fdc, val);
 #if 0		
 		if ((val & 0x21) == 0x21)
@@ -346,32 +349,36 @@ static void fdc_write(uint8_t addr, uint8_t val)
 #endif			
 		break;
 	case 3:	/* DCR */
-		fprintf(stderr, "FDC DCR %02X [", val);
-		if (!(val & 4))
-			fprintf(stderr, "WCOMP");
-		switch(val & 3) {
-		case 0:
-			fprintf(stderr, "500K MFM RPM");
-			break;
-		case 1:
-			fprintf(stderr, "250K MFM");
-			break;
-		case 2:
-			fprintf(stderr, "250K MFM RPM");
-			break;
-		case 3:
-			fprintf(stderr, "INVALID");
+		if (trace & TRACE_FDC) {
+			fprintf(stderr, "FDC DCR %02X [", val);
+			if (!(val & 4))
+				fprintf(stderr, "WCOMP");
+			switch(val & 3) {
+			case 0:
+				fprintf(stderr, "500K MFM RPM");
+				break;
+			case 1:
+				fprintf(stderr, "250K MFM");
+				break;
+			case 2:
+				fprintf(stderr, "250K MFM RPM");
+				break;
+			case 3:
+				fprintf(stderr, "INVALID");
+			}
+			fprintf(stderr, "]\n");
 		}
-		fprintf(stderr, "]\n");
 		fdc_write_drr(fdc, val & 3);	/* TODO: review */
 		break;
 	case 4:	/* TC */
 		fdc_set_terminal_count(fdc, 0);
 		fdc_set_terminal_count(fdc, 1);
-		fprintf(stderr, "FDC TC\n");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC TC\n");
 		break;
 	case 5:	/* RESET */
-		fprintf(stderr, "FDC RESET\n");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC RESET\n");
 		break;
 	default:
 		fprintf(stderr, "FDC bogus %02X->%02X\n", addr, val);
@@ -383,23 +390,29 @@ static uint8_t fdc_read(uint8_t addr)
 	uint8_t val = 0x78;
 	switch(addr) {
 	case 0:	/* Status*/
-		fprintf(stderr, "FDC Read Status: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Read Status: ");
 		val = fdc_read_ctrl(fdc);
 		break;
 	case 1:	/* Data */
-		fprintf(stderr, "FDC Read Data: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC Read Data: ");
 		val = fdc_read_data(fdc);
 		break;
 	case 4:	/* TC */
-		fprintf(stderr, "FDC TC: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC TC: ");
 		break;
 	case 5:	/* RESET */
-		fprintf(stderr, "FDC RESET: ");
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC RESET: ");
 		break;
 	default:
-		fprintf(stderr, "FDC bogus read %02X: ", addr);
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "FDC bogus read %02X: ", addr);
 	}
-	fprintf(stderr, "%02X\n", val);
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "%02X\n", val);
 	return val;
 }
 
@@ -480,7 +493,6 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 		fprintf(stderr, "ide write %d = %02X\n", addr, val);
 	ide_write8(ide0, addr, val);
 }
-
 
 uint8_t io_read(int unused, uint16_t addr)
 {
