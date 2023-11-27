@@ -918,7 +918,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "simple80: [-f] [-t] [-i path] [-r path] [-d debug]\n");
+	fprintf(stderr, "simple80: [-b] [-f] [-1] [-5] [-S] [-f] [-i path] [-r path] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -931,7 +931,7 @@ int main(int argc, char *argv[])
 	char *rompath = "simple80.rom";
 	char *idepath = "simple80.cf";
 
-	while ((opt = getopt(argc, argv, "d:i:r:ftb15S")) != -1) {
+	while ((opt = getopt(argc, argv, "d:i:r:fb15S")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
