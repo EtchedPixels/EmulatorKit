@@ -163,14 +163,14 @@ p90mb: p90mb.o ide.o p90ce201.o m68k/lib68k.a
 p90mb.o: p90mb.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c p90mb.c
 
-z80mc:	z80mc.o sdcard.o libz80/libz80.o
-	cc -g3 z80mc.o sdcard.o libz80/libz80.o -o z80mc
+z80mc:	z80mc.o sdcard.o z80dis.o libz80/libz80.o
+	cc -g3 z80mc.o sdcard.o z80dis.o libz80/libz80.o -o z80mc
 
-z180-mini-itx: z180-mini-itx.o rc2014_noui.o z180_io.o i82c55a.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 z180-mini-itx.o rc2014_noui.o z180_io.o i82c55a.o ide.o sdcard.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o z180-mini-itx
+z180-mini-itx: z180-mini-itx.o rc2014_noui.o z180_io.o i82c55a.o ide.o sdcard.o tms9918a.o tms9918a_norender.o z80dis.o  libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 z180-mini-itx.o rc2014_noui.o z180_io.o i82c55a.o ide.o sdcard.o tms9918a.o tms9918a_norender.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o z180-mini-itx
 
-z180-mini-itx_sdl2: z180-mini-itx.o rc2014_sdlui.o z180_io.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 z180-mini-itx.o rc2014_sdlui.o z180_io.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a -lSDL2  -o z180-mini-itx_sdl2
+z180-mini-itx_sdl2: z180-mini-itx.o rc2014_sdlui.o z180_io.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 z180-mini-itx.o rc2014_sdlui.o z180_io.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a -lSDL2  -o z180-mini-itx_sdl2
 
 flexbox: flexbox.o 6800.o acia.o ide.o
 	cc -g3 flexbox.o 6800.o acia.o ide.o -o flexbox

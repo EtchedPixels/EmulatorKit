@@ -69,6 +69,8 @@
 #include "sdcard.h"
 #include "z80dis.h"
 #include "zxkey.h"
+#include "tms9918a.h"
+#include "tms9918a_render.h"
 
 #include "ide.h"
 
@@ -89,11 +91,13 @@ static struct z180_io *io;
 struct ps2 *ps2;
 struct zxkey *zxkey;
 struct i82c55a *ppi;
+static struct tms9918a *vdp;
+static struct tms9918a_renderer *vdprend;
 
 static uint8_t ide = 0;
 static struct ide_controller *ide0;
 
-static uint16_t tstate_steps = 737;	/* 18.432MHz */
+static uint16_t tstate_steps = 18432000 / 50000;	/* 18.432MHz */
 
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
@@ -114,10 +118,12 @@ volatile int emulator_done;
 #define TRACE_IDE	0x000200
 #define TRACE_PS2	0x000400
 #define TRACE_PPI	0x000800
+#define TRACE_TMS9918A	0x001000
 
 static int trace = 0;
 
 static void reti_event(void);
+static void poll_irq_event(void);
 
 /*
  *	Model the physical bus interface including wrapping and
@@ -507,6 +513,13 @@ uint8_t io_read(int unused, uint16_t addr)
 		return fdc_read(addr & 7);
 	if (addr >= 0x40 && addr <= 0x47)
 		return i82c55a_read(ppi, addr & 3);
+	if ((addr == 0x98 || addr == 0x99) && vdp) {
+		/* This can change the interrupt state and if so we need
+		   to pick it up */
+		uint8_t r = tms9918a_read(vdp, addr & 1);
+		poll_irq_event();
+		return r;
+	}
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -530,7 +543,9 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		fdc_write(addr & 7, val);
 	else if (addr >= 0x40 && addr <= 0x47)
 		i82c55a_write(ppi, addr & 3, val);
-	else if (addr == 0x0D)
+	else if ((addr == 0x98 || addr == 0x99) && vdp)
+		tms9918a_write(vdp, addr & 1, val);
+	else if (addr == 0x80)
 		diag_write(val);
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
@@ -547,6 +562,13 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 static void poll_irq_event(void)
 {
 	z180_interrupt(io, 0, 0, 0);
+	/* TODO: TMS9918A int */
+#if 0	
+	if (vdp && tms9918a_irq_pending(vdp))
+		Z80INT(&cpu_z180, 0x78);
+	else
+		Z80NOINT(&cpu_z180);
+#endif
 }
 
 static void reti_event(void)
@@ -572,7 +594,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "z180-mini-itx: [-f] [-R] [-r rompath] [-w] [-i idepath] [-S sdpath] [-d debug]\n");
+	fprintf(stderr, "z180-mini-itx: [-f] [-R] [-r rompath] [-w] [-i idepath] [-S sdpath] [-T] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -584,18 +606,22 @@ int main(int argc, char *argv[])
 	char *rompath = "z180-mini-itx.rom";
 	char *sdpath = NULL, *idepath = NULL;
 	char *patha = NULL, *pathb = NULL;
+	unsigned have_tms = 0;
 
 	uint8_t *p = ram;
 	while (p < ram + sizeof(ram))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "A:B:d:fF:lr:RS:i:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:fF:lr:RS:i:T")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
 			break;
 		case 'S':
 			sdpath = optarg;
+			break;
+		case 'T':
+			have_tms = 1;
 			break;
 		case 'd':
 			trace = atoi(optarg);
@@ -710,6 +736,12 @@ int main(int argc, char *argv[])
 	ppi = i82c55a_create();
 	i82c55a_trace(ppi, trace & TRACE_PPI);
 
+	if (have_tms) {
+		vdp = tms9918a_create();
+		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
+		vdprend = tms9918a_renderer_create(vdp);
+	}
+
 	zxkey = zxkey_create(1);
 
 
@@ -752,8 +784,8 @@ int main(int argc, char *argv[])
 		   instruction otherwise we will mess up on stalling DMA */
 
 		/* Do an emulated 20ms of work (368640 clocks) */
-		for (i = 0; i < 50; i++) {
-			for (j = 0; j < 10; j++) {
+		for (i = 0; i < 500; i++) {
+			for (j = 0; j < 100; j++) {
 				while (states < tstate_steps) {
 					unsigned int used;
 					used = z180_dma(io);
@@ -763,6 +795,7 @@ int main(int argc, char *argv[])
 				}
 				z180_event(io, states);
 				states -= tstate_steps;
+				ps2_event(ps2, (tstate_steps + 5) / 10);
 			}
 			fdc_tick(fdc);
 			/* We want to run UI events regularly it seems */
@@ -772,6 +805,11 @@ int main(int argc, char *argv[])
 		/* Do 20ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+		/* 50Hz which is near enough */
+		if (vdp) {
+			tms9918a_rasterize(vdp);
+			tms9918a_render(vdprend);
+		}
 		if (int_recalc) {
 			/* If there is no pending Z180 vector IRQ but we think
 			   there now might be one we use the same logic as for
