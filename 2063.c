@@ -431,7 +431,7 @@ static uint8_t sio2_read(uint16_t addr)
 		if (chan == sio && (sio[0].intbits | sio[1].intbits))
 			chan->rr[0] |= 2;
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read reg %d = ", (addr & 2) ? 'b' : 'a', r);
+			fprintf(stderr, "sio%c read reg %d = ", (addr & 1) ? 'b' : 'a', r);
 		switch (r) {
 		case 0:
 		case 1:
@@ -461,7 +461,7 @@ static uint8_t sio2_read(uint16_t addr)
 		chan->rr[0] &= 0x3F;
 		chan->rr[1] &= 0x3F;
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read data %d\n", (addr & 2) ? 'b' : 'a', c);
+			fprintf(stderr, "sio%c read data %d\n", (addr & 1) ? 'b' : 'a', c);
 		if (chan->dptr && (chan->wr[1] & 0x10))
 			sio2_raise_int(chan, INT_RX);
 		return c;
@@ -476,7 +476,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 
 	if (addr & 2) {
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c write reg %d with %02X\n", (addr & 2) ? 'b' : 'a', chan->wr[0] & 7, val);
+			fprintf(stderr, "sio%c write reg %d with %02X\n", (addr & 1) ? 'b' : 'a', chan->wr[0] & 7, val);
 		switch (chan->wr[0] & 007) {
 		case 0:
 			chan->wr[0] = val;
@@ -526,7 +526,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 			r = chan->wr[0] & 7;
 			if (trace & TRACE_SIO)
 				fprintf(stderr, "sio%c: wrote r%d to %02X\n",
-					(addr & 2) ? 'b' : 'a', r, val);
+					(addr & 1) ? 'b' : 'a', r, val);
 			chan->wr[r] = val;
 			if (chan != sio && r == 2)
 				chan->rr[2] = val;
@@ -543,7 +543,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		/* Should check chan->wr[5] & 8 */
 		sio2_clear_int(chan, INT_TX);
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c write data %d\n", (addr & 2) ? 'b' : 'a', val);
+			fprintf(stderr, "sio%c write data %d\n", (addr & 1) ? 'b' : 'a', val);
 		if (chan == sio)
 			write(1, &val, 1);
 		else {
