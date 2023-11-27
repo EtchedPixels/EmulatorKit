@@ -33,6 +33,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include "libz80/z80.h"
+#include "z80dis.h"
 #include "sdcard.h"
 
 static uint8_t bankram[16][32768];
@@ -61,14 +62,18 @@ static struct sdcard *sdcard;
 #define TRACE_FPREG	128
 #define TRACE_SD	256
 #define TRACE_SPI	512
+#define TRACE_CPU	1024
 
 static int trace = 0;
 
-static uint8_t mem_read(int unused, uint16_t addr)
+static uint8_t do_mem_read(uint16_t addr, unsigned quiet)
 {
     uint8_t r;
 
-    if (trace & TRACE_MEM)
+    if (!(trace & TRACE_MEM))
+        quiet = 1;
+
+    if (!quiet)
         fprintf(stderr, "R %04X: ", addr);
     if (addr >= 0x8000) {
         r = ram[addr & 0x7FFF];
@@ -77,9 +82,14 @@ static uint8_t mem_read(int unused, uint16_t addr)
     else
         r = bankram[bankreg][addr];
 
-    if (trace & TRACE_MEM)
+    if (!quiet)
         fprintf(stderr, "<- %02X\n", r);
     return r;
+}
+
+static uint8_t mem_read(int unused, uint16_t addr)
+{
+    return do_mem_read(addr, 0);
 }
 
 static void mem_write(int unused, uint16_t addr, uint8_t val)
@@ -90,6 +100,47 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
         ram[addr & 0x7FFF] = val;
     else /* Writes through under the EPROM even if EPROM mapped */
         bankram[bankreg][addr] = val;
+}
+
+
+static unsigned int nbytes;
+
+uint8_t z80dis_byte(uint16_t addr)
+{
+	uint8_t r = do_mem_read(addr, 1);
+	fprintf(stderr, "%02X ", r);
+	nbytes++;
+	return r;
+}
+
+uint8_t z80dis_byte_quiet(uint16_t addr)
+{
+	return do_mem_read(addr, 1);
+}
+
+static void z80_trace(unsigned unused)
+{
+	static uint32_t lastpc = -1;
+	char buf[256];
+
+	if ((trace & TRACE_CPU) == 0)
+		return;
+	nbytes = 0;
+	/* Spot XXXR repeating instructions and squash the trace */
+	if (cpu_z80.M1PC == lastpc && z80dis_byte_quiet(lastpc) == 0xED &&
+		(z80dis_byte_quiet(lastpc + 1) & 0xF4) == 0xB0) {
+		return;
+	}
+	lastpc = cpu_z80.M1PC;
+	fprintf(stderr, "%04X: ", lastpc);
+	z80_disasm(buf, lastpc);
+	while(nbytes++ < 6)
+		fprintf(stderr, "   ");
+	fprintf(stderr, "%-16s ", buf);
+	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n",
+		cpu_z80.R1.br.A, cpu_z80.R1.br.F,
+		cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL,
+		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
 }
 
 
@@ -606,6 +657,7 @@ int main(int argc, char *argv[])
     cpu_z80.ioWrite = io_write;
     cpu_z80.memRead = mem_read;
     cpu_z80.memWrite = mem_write;
+    cpu_z80.trace = z80_trace;
 
     qreg[5] = 1;
     /* This is the wrong way to do it but it's easier for the moment. We
