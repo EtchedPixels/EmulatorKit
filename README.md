@@ -52,7 +52,8 @@ RC2014 and Fuzix.
 ## RCbus / BP80 Integrated Systems Emulated
 - SC108
 - SC114
-- SC126
+- SC126/30 and relatives
+- SC720
 
 ## Systems with RCbus connector
 - Easy Z80
