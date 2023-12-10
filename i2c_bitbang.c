@@ -241,23 +241,26 @@ static void i2c_databit(struct i2c_bus *i2c, uint8_t data) {
  * Neither, one or both lines might have changed.
  */
 void i2c_write(struct i2c_bus *i2c, uint8_t clkdata) {
-	uint8_t changed = (i2c->clkdata ^ clkdata) & (DATA_BIT | CLK_BIT);
-	if (changed==0)
+	uint8_t changed = (i2c->clkdata ^ clkdata) & (I2C_DATA | I2C_CLK);
+	uint8_t clk;
+	uint8_t data;
+
+	if (changed == 0)
 		return;
 
-	if (i2c->trace && (changed & CLK_BIT)) {
+	if (i2c->trace && (changed & I2C_CLK)) {
 		/* I2C clock state has changed */
 		fprintf(stderr, "i2c: Cycle (%3d) %s - DATA: %s\n",
 				i2c->cycles,
-				((clkdata & CLK_BIT) ? "LOW => HIGH" : "HIGH => LOW"),
-				 (clkdata & 0) ? "1" : "0");
+				((clkdata & I2C_CLK) ? "LOW => HIGH" : "HIGH => LOW"),
+				 (clkdata & I2C_DATA) ? "1" : "0");
 	}
 
 	/* Track clock changes */
-	const uint8_t clk  = (clkdata & CLK_BIT)!=0;
-	const uint8_t data = (clkdata & DATA_BIT);
+	clk  = !!(clkdata & I2C_CLK);
+	data = !!(clkdata & I2C_DATA);
 
-	if (changed & CLK_BIT) {
+	if (changed & I2C_CLK) {
 		/* Mostly interested in clock changes */
 		if (!clk) {
 			/* LOW going edge - check for data or START/END */
@@ -289,7 +292,7 @@ void i2c_write(struct i2c_bus *i2c, uint8_t clkdata) {
 			}
 		}
 	}
-	if ((changed & DATA_BIT) && clk) {
+	if ((changed & I2C_DATA) && clk) {
 		/* Special START/END condition - this won't be a valid data cycle */
 		i2c->stable = FALSE;
 	}
@@ -298,7 +301,7 @@ void i2c_write(struct i2c_bus *i2c, uint8_t clkdata) {
 
 void i2c_reset(struct i2c_bus *i2c) {
 	memset(i2c, 0, sizeof(struct i2c_bus));
-	i2c->clkdata = DATA_BIT | CLK_BIT;
+	i2c->clkdata = I2C_CLK | I2C_DATA;
 	i2c->state   = IDLE;
 	i2c->stable  = TRUE;
 }
@@ -318,5 +321,5 @@ void i2c_free(struct i2c_bus *i2c) {
 }
 
 void i2c_trace(struct i2c_bus *i2c, int onoff) {
-	i2c->trace = (onoff!=0);
+	i2c->trace = !!onoff;
 }

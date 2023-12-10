@@ -7,6 +7,9 @@ typedef enum {
 	END
 } I2C_OP;
 
+#define I2C_DATA	1
+#define I2C_CLK		2
+
 struct i2c_bus *i2c_create(void);
 void i2c_free(struct i2c_bus * i2c);
 void i2c_reset(struct i2c_bus * i2c);

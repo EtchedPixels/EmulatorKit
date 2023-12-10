@@ -98,6 +98,11 @@ uint8_t v, val;
 
 	time_t t = time(NULL);
 	rtc->tm = localtime(&t);
+
+	if (rtc->tm == NULL) {
+		fprintf(stderr, "ds1307: unable to process time.\n");
+		exit(1);
+	}
 	if (rtc->trace)
 		fprintf(stderr, "ds1307: time latched.\n");
 
@@ -127,9 +132,6 @@ uint8_t v, val;
 	v = rtc->tm->tm_year % 100;
 	rtc->ram[6] = (v % 10) + ((v / 10) << 4);
 }
-
-
-
 
 void rtc_reset(struct ds1307 *rtc) {
 	memset(rtc, 0, sizeof(struct ds1307));
