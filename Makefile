@@ -48,8 +48,8 @@ z50bus-z80: z50bus-z80.o ide.o sdcard.o z80dis.o libz80/libz80.o
 littleboard:	littleboard.o ncr5380.o sasi.o wd17xx.o z80dis.o libz80/libz80.o
 	cc -g3 littleboard.o ncr5380.o sasi.o wd17xx.o z80dis.o libz80/libz80.o -o littleboard
 
-mbc2:	mbc2.o ide.o libz80/libz80.o
-	cc -g3 mbc2.o libz80/libz80.o -o mbc2
+mbc2:	mbc2.o z80dis.o libz80/libz80.o
+	cc -g3 mbc2.o z80dis.o libz80/libz80.o -o mbc2
 
 rcbus-1802: rcbus-1802.o 1802.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o 16x50.o
 	cc -g3 rcbus-1802.o acia.o ide.o ppide.o rtc_bitbang.o 16x50.o w5100.o 1802.o -o rcbus-1802
@@ -237,8 +237,8 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 
 68hc11.o: 6800.c
 
-z80retro: z80retro.o sdcard.o z80dis.o libz80/libz80.o
-	cc -g3 z80retro.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
+z80retro: z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
+	cc -g3 z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
 2063: 2063.o 2063_noui.o sdcard.o 16x50.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
 	cc -g3 2063.o 2063_noui.o sdcard.o 16x50.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
