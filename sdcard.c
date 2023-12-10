@@ -115,13 +115,13 @@ static uint8_t sd_process_command(struct sdcard *c)
 		return 0x00;
 	case 0x40+24:		/* Write */
 		/* Will send us FE data FF FF */
-		if (c->debug)
-			fprintf(stderr, "%s: Write LBA %lx\n", c->sd_name, (long)c->sd_lba);
 		c->sd_inlen = 515;	/* Data FF FF FF */
 		c->sd_lba = c->sd_cmd[4] + 256 * c->sd_cmd[3] + 65536 * c->sd_cmd[2] +
 			16777216 * c->sd_cmd[1];
 		if (c->block)
 			c->sd_lba <<= 9;
+		if (c->debug)
+			fprintf(stderr, "%s: Write LBA %lx\n", c->sd_name, (long)c->sd_lba);
 		c->sd_inp = 0;
 		c->sd_mode = 4;	/* Send a pad then go to mode 3 */
 		return 0x00;	/* The expected OK */
