@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <sys/select.h>
 #include "libz80/z80.h"
+#include "z80dis.h"
 
 static uint8_t ram[131072];
 
@@ -52,6 +53,7 @@ static volatile int done;
 #define TRACE_UNK	8
 #define TRACE_DISK	16
 #define TRACE_BANK	32
+#define TRACE_CPU	64
 
 static int trace = 0;
 
@@ -64,21 +66,26 @@ static int trace = 0;
  *	1	2
  *	2	3
  */
-static uint8_t mem_read(int unused, uint16_t addr)
+static uint8_t do_mem_read(uint16_t addr, unsigned quiet)
 {
 	uint8_t r;
 	unsigned int va = addr;
-	if (trace & TRACE_MEM)
+	if (!quiet && (trace & TRACE_MEM))
 		fprintf(stderr, "R %04X <- ", addr);
 	if (va < 0x8000)
 		va += 0x8000 * bank;
 	/* 8000-FFFF map 1:1 */
-	if (trace & TRACE_MEM)
+	if (!quiet && (trace & TRACE_MEM))
 		fprintf(stderr, "@%05X ", va);
 	r = ram[va];	
-	if (trace & TRACE_MEM)
+	if (!quiet && (trace & TRACE_MEM))
 		fprintf(stderr, "%02X\n", r);
 	return r;
+}
+
+static uint8_t mem_read(int unused, uint16_t addr)
+{
+	return do_mem_read(addr, 0);
 }
 
 static void mem_write(int unused, uint16_t addr, uint8_t val)
@@ -91,7 +98,49 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "@%05X -> %02X\n", va, val);
 	/* 8000-FFFF map 1:1 */
+	if (0 && addr == 0x1389)
+		fprintf(stderr, "W %X B %d PC = %X\n", addr, bank, cpu_z80.M1PC);
 	ram[va] = val;
+}
+
+static unsigned int nbytes;
+
+uint8_t z80dis_byte(uint16_t addr)
+{
+	uint8_t r = do_mem_read(addr, 1);
+	fprintf(stderr, "%02X ", r);
+	nbytes++;
+	return r;
+}
+
+uint8_t z80dis_byte_quiet(uint16_t addr)
+{
+	return do_mem_read(addr, 1);
+}
+
+static void z80_trace(unsigned unused)
+{
+	static uint32_t lastpc = -1;
+	char buf[256];
+
+	if ((trace & TRACE_CPU) == 0)
+		return;
+	nbytes = 0;
+	/* Spot XXXR repeating instructions and squash the trace */
+	if (cpu_z80.M1PC == lastpc && z80dis_byte_quiet(lastpc) == 0xED &&
+		(z80dis_byte_quiet(lastpc + 1) & 0xF4) == 0xB0) {
+		return;
+	}
+	lastpc = cpu_z80.M1PC;
+	fprintf(stderr, "%04X: ", lastpc);
+	z80_disasm(buf, lastpc);
+	while(nbytes++ < 6)
+		fprintf(stderr, "   ");
+	fprintf(stderr, "%-16s ", buf);
+	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n",
+		cpu_z80.R1.br.A, cpu_z80.R1.br.F,
+		cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL,
+		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
 }
 
 static int check_chario(void)
@@ -194,6 +243,9 @@ static int ios_seek(void)
 		return -1;
 	}
 	offset = (ios_track * 32 + ios_sector) * 512;
+	if (trace & TRACE_DISK)
+		fprintf(stderr, "IOS: disk LBA %u\n",
+			(unsigned)(offset >> 9));
 	if (lseek(ios_fd, offset, SEEK_SET) == -1) {
 		ios_error =  19;
 		return -1;
@@ -479,6 +531,7 @@ int main(int argc, char *argv[])
 	cpu_z80.ioWrite = io_write;
 	cpu_z80.memRead = mem_read;
 	cpu_z80.memWrite = mem_write;
+	cpu_z80.trace = z80_trace;
 
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
