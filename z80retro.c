@@ -10,11 +10,14 @@
  *	RTC on I2C
  *	SD on bitbang SPI
  *
- *	I2C/SPI use
- *	64, 68, 69
+ *	I2C use: 0x64, 0x65 (address bit 0 is clock)
+ *	SPI use: 0x64 for chip selects
+ *		0x68, 0x69 SPI data and (addr bit 0) SPI clock
  *
- *	TODO:
- *      i2c emulation
+ *	Limitations:
+ *	+ Only the first SDCard is supported
+ *	+ Only emulates the main CPU card, not VDU or PIO cards
+ *	+ Doesn't simulate programming the Flash
  */
 
 #include <stdio.h>
@@ -30,12 +33,15 @@
 #include <errno.h>
 #include <sys/select.h>
 
+#include "i2c_bitbang.h"
+#include "i2c_ds1307.h"
 #include "sdcard.h"
 #include "system.h"
 #include "libz80/z80.h"
 #include "z80dis.h"
 
 static uint8_t ramrom[256 * 16384];
+
 static unsigned int bankreg[4];
 static uint8_t genio_data;		/* Generic I/O bits */
 
@@ -43,6 +49,9 @@ static uint8_t fast = 0;
 static uint8_t int_recalc = 0;
 
 static struct sdcard *sdcard;
+
+static struct i2c_bus *i2cbus;		/* I2C bus */
+static struct ds1307 *rtcdev;		/* DS1307 RTC */
 
 static uint16_t tstate_steps = 730;	/* 14.4MHz speed */
 
@@ -53,6 +62,9 @@ static uint8_t live_irq;
 #define IRQ_SIOB	2
 #define IRQ_CTC		3	/* 3 4 5 6 */
 /* TOOD: PIO */
+
+/* Value of the 3 configuration DIP switches */
+static uint8_t dip_switch;
 
 static Z80Context cpu_z80;
 
@@ -69,6 +81,8 @@ volatile int emulator_done;
 #define TRACE_IRQ	0x000100
 #define TRACE_SPI	0x000200
 #define TRACE_SD	0x000400
+#define TRACE_I2C	0x000800
+#define TRACE_RTC	0x001000
 
 static int trace = 0;
 
@@ -745,6 +759,7 @@ static uint8_t txbits, rxbits;
 static uint8_t genio_txbit;
 static uint8_t spi_addr;
 static uint8_t spi_data;
+static uint8_t i2c_clk;
 
 static void spi_clock_high(void)
 {
@@ -776,12 +791,23 @@ static void genio_write(uint16_t addr, uint8_t val)
 		else
 			sd_spi_raise_cs(sdcard);
 	}
+	/* I2C clock or data change. Provide new driven bits to bus */
+	if ((delta & 2) || (addr & 1) != i2c_clk) {
+		unsigned n = 0;
+		i2c_clk = addr  & 1;
+		/* The i2c bus interface and genio bits are not the same */
+		if (val & 2)
+			n |= I2C_DATA;
+		if (i2c_clk)
+			n |= I2C_CLK;
+		i2c_write(i2cbus, n);
+	}
 }
 
 static uint8_t genio_read(uint16_t addr)
 {
-	/* TODO 2nd card, dip switches i2c */
-	return genio_txbit | 0x0E;
+	unsigned n = (i2c_read(i2cbus) & I2C_DATA) ? 2 : 0;
+	return dip_switch | 0x08 | n | (genio_data & 0x04) | genio_txbit;
 }
 
 static void spi_write(uint16_t addr, uint8_t val)
@@ -891,8 +917,20 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "z80retro: [-r rompath] [-S sdcard] [-f] [-d debug]\n");
+	fprintf(stderr,
+		"z80retro: [-b cpath] [-c config] [-r rompath] [-S sdpath] [-N nvpath] [-f] [-d debug]\n"
+			"   config:  State of DIP switches (0-7)\n"
+			"   rompath: 512K binary file\n"
+			"   sdpath:  Path to file containing SDCard data\n"
+			"   debug:   Comma separated list of: MEM,IO,INFO,UNK,CPU,BANK,SIO,CTC,IRQ,SPI,SD,I2C,RTC\n"
+			"   nvpath:  file to store DS1307+ RTC non-volatile memory\n"
+			);			
 	exit(EXIT_FAILURE);
+	/*
+		"   cpath:   Path to directory holding files to serve over SIO port B\n"
+		"If -b is specified then the emulator runs a file server function allowing the\n"
+		"Z80 to download files directly from the host computer."
+	*/
 }
 
 int main(int argc, char *argv[])
@@ -901,6 +939,7 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	char *rompath = "z80retro.rom";
+	char *nvpath = "z80retrom.nvram";
 	char *sdpath = NULL;
 
 	while ((opt = getopt(argc, argv, "d:fr:S:")) != -1) {
@@ -913,6 +952,14 @@ int main(int argc, char *argv[])
 			break;
 		case 'd':
 			trace = atoi(optarg);
+			break;
+		case 'N':
+			nvpath = optarg;
+			break;
+		case 'c':
+			/* State of the 3 DIP switches used for configuration,
+			 * shifted to the right place in  */
+			dip_switch = (atoi(optarg) & 0x7) << 5;
 			break;
 		case 'f':
 			fast = 1;
@@ -946,6 +993,13 @@ int main(int argc, char *argv[])
 	}
 	if (trace & TRACE_SD)
 		sd_trace(sdcard, 1);
+
+	i2cbus = i2c_create();
+	i2c_trace(i2cbus, (trace & TRACE_I2C) != 0);
+
+	rtcdev = rtc_create(i2cbus);
+	rtc_trace(rtcdev, (trace & TRACE_RTC) != 0);
+	rtc_load(rtcdev, nvpath);
 
 	sio_reset();
 	ctc_init();
@@ -1022,5 +1076,7 @@ int main(int argc, char *argv[])
 				int_recalc = 0;
 		}
 	}
+	if (nvpath!=NULL)
+		rtc_save(rtcdev, nvpath);
 	exit(0);
 }
