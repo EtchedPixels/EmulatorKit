@@ -2400,7 +2400,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	} else if (addr == 0xFE) {
 		trace &= 0xFF;
 		trace |= val << 8;
-		printf("trace set to %d\n", trace);
+		fprintf(stderr, "trace set to %d\n", trace);
 	} else if (!known && (trace & TRACE_UNK))
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
@@ -2480,7 +2480,7 @@ static void io_write_4(uint16_t addr, uint8_t val)
 		putchar(val);
 		fflush(stdout);
 	} else if (addr == 0xFD) {
-		printf("trace set to %d\n", val);
+		fprintf(stderr, "trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
@@ -2542,7 +2542,7 @@ static void io_write_5(uint16_t addr, uint8_t val)
 		putchar(val);
 		fflush(stdout);
 	} else if (addr == 0xFD) {
-		printf("trace set to %d\n", val);
+		fprintf(stderr, "trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
@@ -2670,7 +2670,7 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 	else if (r >= 0x90 && r <= 0x97)
 		my_ide_write(r & 0x07, val);
 	else if (addr == 0xFD) {
-		printf("trace set to %d\n", val);
+		fprintf(stderr, "trace set to %d\n", val);
 		trace = val;
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
