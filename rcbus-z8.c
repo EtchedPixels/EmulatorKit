@@ -43,7 +43,7 @@ static uint8_t bankenable;
 
 static uint8_t bank512 = 0;
 static uint8_t bankhigh = 0;
-static uint8_t mmureg = 0;
+static uint8_t mmureg[2] = { 0, 0 };
 static uint8_t rtc;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
@@ -80,6 +80,47 @@ static int trace = 0;
 
 struct z8 *cpu;
 
+/*
+ *	Ports are a TODO
+ *
+ *	Allocation is as follows
+ *
+ *	P0/P1 - address/data bus
+ *
+ *	P2:
+ *	7:	MOSI
+ * 	6:	IOCS
+ *	5:	CS1
+ *	4:	CTS
+ *	3:	P23 }
+ *	2:	P22 }	Unassigned
+ *	1:	P21 }
+ *	0:	MISO
+ *
+ *	P3:
+ *	7:	Serial TX (altfunc)
+ *	6:	Used for SPI clock
+ *	5:	CS0
+ * 	4:	Data/Code (altfunc)
+ *	3:	IRQ1
+ *	2:	IRQ0	- RCbus interrupt
+ *	1:	IRQ2
+ *	0:	Serial RX (altfunc)
+ *
+ *	I/O space is activated for the upper 32K of data space if IOCS is low
+ *	otherwise it is treated as a RAM data access
+ *
+ *	MMU board at I/O FE/FF
+ *	
+ *	FE	Bank low, bank high (low 56K, high 8K) 4bits
+ *	FF	Ditto for code memory, starts 0
+ *
+ *	Physical memory is 16 x 64K banks, low half ROM rest RAM
+ *	(may change so ROM is also controlled by a P2 pin) and 1MB
+ */
+
+static uint8_t zport[4];
+
 uint8_t z8_port_read(struct z8 *z8, uint8_t port)
 {
 	return 0xFF;
@@ -87,6 +128,7 @@ uint8_t z8_port_read(struct z8 *z8, uint8_t port)
 
 void z8_port_write(struct z8 *z8, uint8_t port, uint8_t val)
 {
+	zport[port] = val;
 }
 
 void z8_tx(struct z8 *z8, uint8_t ch)
@@ -450,9 +492,13 @@ void z8_outport(uint8_t addr, uint8_t val)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	if (addr == 0xFF && bankhigh) {
-		mmureg = val;
+		mmureg[1] = val;
 		if (trace & TRACE_512)
-			fprintf(stderr, "MMUreg set to %02X\n", val);
+			fprintf(stderr, "MMUreg E set to %02X\n", val);
+	} else if (addr == 0xFE && bankhigh) {
+		mmureg[0]= val;
+		if (trace & TRACE_512)
+			fprintf(stderr, "MMUreg C set to %02X\n", val);
 	} else if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		my_ide_write(addr & 7, val);
 	else if ((addr >= 0x90 && addr <= 0x97) && ide == 1)
@@ -486,15 +532,15 @@ void z8_outport(uint8_t addr, uint8_t val)
 
 /* FIXME: emulate paging off correctly, also be nice to emulate with less
    memory fitted */
-uint8_t z8_do_read(struct z8 *cpu, uint16_t addr, int debug)
+uint8_t z8_do_read(struct z8 *cpu, unsigned space, uint16_t addr, int debug)
 {
-	if (addr >> 8 == 0xFF) {
+	if (space == 1 && (addr & 0x8000) && !(zport[2] & 0x40)) {
 		if (debug)
 			return 0xFF;
-		return z8_inport(addr & 0xFF);
+		return z8_inport(addr);
 	}
 	if (bankhigh) {
-		uint8_t reg = mmureg;
+		uint8_t reg = mmureg[space];
 		uint8_t val;
 		uint32_t higha;
 		if (addr < 0xE000)
@@ -506,7 +552,8 @@ uint8_t z8_do_read(struct z8 *cpu, uint16_t addr, int debug)
 
 		val = ramrom[(higha << 16) + addr];
 		if (!debug && (trace & TRACE_MEM)) {
-			fprintf(stderr, "R %04X[%02X] = %02X\n",
+			fprintf(stderr, "R%c %04X[%02X] = %02X\n",
+				"CE"[space],
 				(unsigned int)addr,
 				(unsigned int)higha,
 				(unsigned int)val);
@@ -526,27 +573,27 @@ uint8_t z8_do_read(struct z8 *cpu, uint16_t addr, int debug)
 
 uint8_t z8_read_data(struct z8 *cpu, uint16_t addr)
 {
-	return z8_do_read(cpu, addr, 0);
+	return z8_do_read(cpu, 1, addr, 0);
 }
 
 uint8_t z8_read_code(struct z8 *cpu, uint16_t addr)
 {
-	return z8_do_read(cpu, addr, 0);
+	return z8_do_read(cpu, 0, addr, 0);
 }
 
 uint8_t z8_read_code_debug(struct z8 *cpu, uint16_t addr)
 {
-	return z8_do_read(cpu, addr, 1);
+	return z8_do_read(cpu, 0, addr, 1);
 }
 
-void z8_write_data(struct z8 *cpu, uint16_t addr, uint8_t val)
+void z8_do_write(struct z8 *cpu, unsigned space, uint16_t addr, uint8_t val)
 {
-	if (addr >> 8 == 0xFF) {
-		z8_outport(addr & 0xFF, val);
+	if (space == 1 && (addr & 0x8000) && !(zport[2] & 0x40)) {
+		z8_outport(addr, val);
 		return;
 	}
 	if (bankhigh) {
-		uint8_t reg = mmureg;
+		uint8_t reg = mmureg[space];
 		uint8_t higha;
 		if (addr < 0xE000)
 			reg >>= 1;
@@ -590,7 +637,12 @@ void z8_write_data(struct z8 *cpu, uint16_t addr, uint8_t val)
 
 void z8_write_code(struct z8 *z8, uint16_t addr, uint8_t val)
 {
-	z8_write_data(z8, addr, val);
+	z8_do_write(z8, 0, addr, val);
+}
+
+void z8_write_data(struct z8 *z8, uint16_t addr, uint8_t val)
+{
+	z8_do_write(z8, 1, addr, val);
 }
 
 static void poll_irq_event(void)

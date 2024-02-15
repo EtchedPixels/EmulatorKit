@@ -60,7 +60,7 @@ static void z8_decode_rir(struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
 		is_ir = 1;
 
 	if (opcode == 0x31) {
-		sprintf(buf, "SRP #%02X", r);
+		sprintf(buf, "SRP #0x%02X", r);
 		return;
 	}
 
@@ -94,22 +94,22 @@ static void z8_decode_da(char *i, struct z8 *z8, uint16_t pc, char *buf)
 	sprintf(buf, "%s %04X", i, v);
 }
 
-static void z8_decode_rR(char *i, struct z8 *z8, uint16_t pc, uint8_t opcode, char *buf)
+static void z8_decode_rR(char *i, struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
 {
 	uint8_t v = z8_read_code_debug(z8, pc);
-	sprintf(buf, "%s R%d, %d", i, opcode >> 4, v);
+	sprintf(buf, "%s R%d, %X", i, opcode >> 4, v);
 }
 
 static void z8_decode_rIm(char *i, struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
 {
 	uint8_t v = z8_read_code_debug(z8, pc);
-	sprintf(buf, "%s R%d, #%d", i, opcode >> 4, v);
+	sprintf(buf, "%s R%d, #%X", i, opcode >> 4, v);
 }
 
 static void z8_decode_Rr(char *i, struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
 {
 	uint8_t v = z8_read_code_debug(z8, pc);
-	sprintf(buf, "%s %d, R%d", i, v, opcode >> 4);
+	sprintf(buf, "%s %X, R%d", i, v, opcode >> 4);
 }
 
 static void z8_decode_al(char *i, struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
@@ -127,16 +127,16 @@ static void z8_decode_al(char *i, struct z8 *z8, uint8_t opcode, uint16_t pc, ch
 				i, v >> 4, v & 0x0F);
 			return;
 		case 4:
-			sprintf(buf, "%s %d,%d", i, v2, v);
+			sprintf(buf, "%s %X,%X", i, v2, v);
 			return;
 		case 5:
-			sprintf(buf, "%s %d,#%d", i, v, v2);
+			sprintf(buf, "%s %X,@%X", i, v2, v);
 			return;
 		case 6:
-			sprintf(buf, "%s @%d,#%d", i, v, v2);
+			sprintf(buf, "%s %X,#0x%X", i, v, v2);
 			return;
 		case 7:
-			sprintf(buf, "%s %d,@%d", i, v2, v);
+			sprintf(buf, "%s @%X,#0x%X", i, v, v2);
 			return;
 		default:
 			fprintf(stderr, "Internal decoder error %02X\n", opcode);
@@ -177,31 +177,31 @@ static void z8_decode_ld(struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
 
 	switch(opcode) {
 		case 0xE4:
-			sprintf(buf, "LD %d, %d",
+			sprintf(buf, "LD %X, %X",
 				v2, v);
 			return;
 		case 0xE5:
-			sprintf(buf, "LD %d, @%d",
+			sprintf(buf, "LD %X, @%X",
 				v2, v);
 			return;
 		case 0xE6:
-			sprintf(buf, "LD %d, #%d",
+			sprintf(buf, "LD %X, #0x%X",
 				v, v2);
 			return;
 		case 0xE7:
-			sprintf(buf, "LD @%d, #%d",
+			sprintf(buf, "LD @%X, #0x%X",
 				v, v2);
 			return;
 		case 0xF5:
-			sprintf(buf, "LD @%d, %d",
+			sprintf(buf, "LD @%X, %X",
 				v2, v);
 			return;
 		case 0xC7:
-			sprintf(buf, "LD R%d, %d(R%d)",
+			sprintf(buf, "LD R%d, %X(R%d)",
 				v >> 4, v2, v & 0x0F);
 			return;
 		case 0xD7:
-			sprintf(buf, "LD %d(R%d), R%d",
+			sprintf(buf, "LD %X(R%d), R%d",
 				v2, v & 0x0F, v >> 4);
 			return;
 		case 0xE3:
@@ -260,6 +260,7 @@ void z8_disassemble(struct z8 *z8, uint16_t pc, char *buf)
 {
 	uint8_t opcode = z8_read_code_debug(z8, pc++);
 	
+/*	fprintf(stderr, "OP%X\n", opcode); */
 	/* xF : implicit instructions */
 	if ((opcode & 0x0F) == 0x0F) {
 		z8_decode_fline(z8, opcode, buf);
@@ -346,10 +347,10 @@ void z8_disassemble(struct z8 *z8, uint16_t pc, char *buf)
 		case 0x70:
 			z8_decode_al("TM", z8, opcode, pc, buf);
 			return;
-		case 0x0A:
+		case 0xA0:
 			z8_decode_al("CP", z8, opcode, pc, buf);
 			return;
-		case 0x0B:
+		case 0xB0:
 			z8_decode_al("XOR", z8, opcode, pc, buf);
 			return;
 	}
@@ -506,7 +507,7 @@ static uint8_t z8_pop8(struct z8 *z8)
 	uint16_t sp;
 	uint8_t r;
 	if (z8->reg[R_P01M] & 0x04) {
-		fprintf(stderr, "POP %02X from %d\n", getreg_internal(z8, z8->reg[R_SPL]), z8->reg[R_SPL]);
+//		fprintf(stderr, "POP %02X from %d\n", getreg_internal(z8, z8->reg[R_SPL]), z8->reg[R_SPL]);
 		return getreg_internal(z8, z8->reg[R_SPL]++);
 	}
 	sp = (z8->reg[R_SPH] << 8) | z8->reg[R_SPL];
@@ -520,7 +521,7 @@ static void z8_push8(struct z8 *z8, uint8_t val)
 {
 	uint16_t sp;
 	if (z8->reg[R_P01M] & 0x04) {
-		fprintf(stderr, "PUSH %02X to %d\n", val, z8->reg[R_SPL] - 1);
+//		fprintf(stderr, "PUSH %02X to %d\n", val, z8->reg[R_SPL] - 1);
 		setreg_internal(z8, --z8->reg[R_SPL], val);
 		return;
 	}
@@ -563,6 +564,38 @@ static uint8_t z8_maths(struct z8 *z8, uint8_t r, uint8_t d)
 		f |= F_V;
 	if (!((a | b) & 0x80) && (r & 0x80))
 		f |= F_V;
+	if (a & b & 0x80)
+		f |= F_C;
+	if (b & ~r & 0x80)
+		f |= F_C;
+	if (a & ~r & 0x80)
+		f |= F_C;
+	/* And half carry for DAA */
+	if ((a & b & 0x08) || ((b & ~r) & 0x08) || ((a & ~r) & 0x08))
+		f |= F_H;
+	if (d)			/* Remember direction for DAA */
+		f |= F_D;
+	z8->reg[R_FLAGS] |= f;
+	return r;
+}
+
+/* Subtraction */
+static uint8_t z8_maths_sub(struct z8 *z8, uint8_t r, uint8_t d)
+{
+	uint8_t f = 0;
+	uint8_t a = z8->arg0;
+	uint8_t b = z8->arg1;
+
+	z8->reg[R_FLAGS] &= ~ (F_C | F_Z | F_S | F_D | F_H | F_V);
+
+	if (r & 0x80)
+		f |= F_S;
+	if (r == 0)
+		f |= F_Z;
+	if ((a ^ b) & 0x80) {
+		if ((b & 0x80) == (r & 0x80))
+			f |= F_V;
+	}
 	if (~a & b & 0x80)
 		f |= F_C;
 	if (b & r & 0x80)
@@ -589,10 +622,10 @@ static uint8_t z8_maths_noh(struct z8 *z8, uint8_t r)
 		f |= F_S;
 	if (r == 0)
 		f |= F_Z;
-	if ((a & b & 0x80) && !(r & 0x80))
-		f |= F_V;
-	if (!((a | b) & 0x80) && (r & 0x80))
-		f |= F_V;
+	if ((a ^ b) & 0x80) {
+		if ((b & 0x80) == (r & 0x80))
+			f |= F_V;
+	}
 	if (~a & b & 0x80)
 		f |= F_C;
 	if (b & r & 0x80)
@@ -711,16 +744,18 @@ static void z8_execute_group2(struct z8 *z8, uint_fast8_t oph, uint_fast8_t opl)
 		setwreg(z8, oph, d);
 		if (d) {
 			d = z8_read_code(z8, z8->pc++);
-			z8->pc += d;
+			z8->pc += (int8_t)d;
 			z8->cycles += 12;
-		} else
+		} else {
+			z8->pc++;
 			z8->cycles += 10;
+		}
 		break;
 	case 0x0B:		/* JR */
 		d = z8_read_code(z8, z8->pc++);
 		if (z8_cc_true(z8, oph)) {
 			z8->cycles += 12;
-			z8->pc += d;
+			z8->pc += (int8_t)d;
 		} else
 			z8->cycles += 10;
 		break;
@@ -781,7 +816,6 @@ static void z8_execute_group2(struct z8 *z8, uint_fast8_t oph, uint_fast8_t opl)
 			break;
 		case 0x0A:
 			/* RET */
-			z8->reg[R_FLAGS] = z8_pop8(z8);
 			z8->pc = z8_pop16(z8);
 			z8->cycles += 14;
 			break;
@@ -821,7 +855,8 @@ static void z8_execute_group3(struct z8 *z8, uint_fast8_t oph, uint_fast8_t opl)
 	uint8_t v;
 	uint8_t w;
 	uint8_t r = z8_read_code(z8, z8->pc++);
-	if (opl == 0x01) {
+	/* SRP is weird */
+	if (opl == 0x01 && oph != 0x03) {
 		r = getreg(z8, r);
 	}
 	switch (oph) {
@@ -866,7 +901,7 @@ static void z8_execute_group3(struct z8 *z8, uint_fast8_t oph, uint_fast8_t opl)
 			z8->pc = getIrr(z8, r);
 			z8->cycles += 8;
 		} else {
-			setreg(z8, R_RP, z8_read_code(z8, z8->pc++));
+			setreg(z8, R_RP, r);
 			z8->cycles += 6;
 		}
 		break;
@@ -1085,12 +1120,12 @@ static void z8_execute_one(struct z8 *z8)
 		case 0x02:	/* SUB group */
 			rdecode0(z8);
 			setreg(z8, z8->dreg,
-			       z8_maths(z8, z8->arg0 - z8->arg1, 1));
+			       z8_maths_sub(z8, z8->arg0 - z8->arg1, 1));
 			break;
 		case 0x03:	/* SBC group */
 			rdecode0(z8);
 			setreg(z8, z8->dreg,
-			       z8_maths(z8, z8->arg0 - z8->arg1 - CARRY,
+			       z8_maths_sub(z8, z8->arg0 - z8->arg1 - CARRY,
 					1));
 			break;
 		case 0x04:	/* OR group */
@@ -1118,7 +1153,7 @@ static void z8_execute_one(struct z8 *z8)
 		case 0x0B:	/* XOR group */
 			rdecode0(z8);
 			setreg(z8, z8->dreg,
-			       z8_logic(z8, z8->arg0 & z8->arg1));
+			       z8_logic(z8, z8->arg0 ^ z8->arg1));
 			break;
 		case 0x0E:	/* LD group */
 			rdecode0l(z8);
@@ -1342,8 +1377,8 @@ void z8_execute(struct z8 *z8)
 		char buf[32];
 		char fbuf[9];
 		int i;
-		fprintf(stderr, "%04X : ", z8->pc);
-		for (i = 0xE0; i < 0xEF; i++)
+		fprintf(stderr, "%04X : [%X] ", z8->pc, getreg(z8, R_RP) >> 4);
+		for (i = 0xE0; i <= 0xEF; i++)
 			fprintf(stderr, "%02X ", getreg(z8, i));
 		z8_disassemble(z8, z8->pc, buf);
 		z8_flag_string(z8, fbuf);
