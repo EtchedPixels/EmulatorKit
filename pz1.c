@@ -3,18 +3,18 @@
  *
  *	PZ1 6502 (should be 65C02 when we sort the emulation of C02 out)
  *	I/O via modern co-processor
- *	512KiB RAM, no ROM, boot code inserted by I/O-processor
+ *	512KiB RAM, no ROM, no swap, boot code inserted by I/O-processor
  *
  *	This is a simple emulation, enough to run Fuzix.
  *	The following is roughly correct:
- *	- bank registers
+ *	- bank registers, banked memory access
+ *	- top page memory unbanked
  *	- serial 0
  *	- idle serial 1
  *	- virtual disk via I/O processor
  *	- Interrupt timer
  *
  *	HW available in real PZ1 but not used in Fuzix:
- *	- top page memory "locked"
  *	- SID-sound
  *	- 50Hz counter
  *	- 60Hz counter
@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <termios.h>
@@ -33,62 +34,78 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/select.h>
-#include "6502.h"
-#include "ide.h"
+#include <lib65816/cpu.h>
+#include <lib65816/cpuevent.h>
 
-static uint8_t ram[512 * 1024];		/* 512KiB RAM */
-static uint8_t io[256];			/* I/O shadow */
+static uint8_t ram[512 * 1024];
+#define BANK_SIZE 16384
 
-static uint8_t iopage = 0xFE;
-static uint8_t hd_fd;
-static uint8_t fast;
-static uint8_t trunning;
+static uint8_t bankreg[4];
 
-/* Who is pulling on the interrupt line */
+static uint8_t diskprm0;
+static uint8_t diskprm1;
+static uint8_t diskprm2;
+static uint8_t diskprm3;
+static uint8_t diskstatus;
 
-static uint8_t live_irq;
+static uint8_t timertarget;
+static uint8_t timercount;
+static bool trunning;
 
-#define IRQ_TIMER	1
+static int hd_fd;
 
-static volatile int done;
+static bool fast;
 
-#define TRACE_MEM	1
-#define TRACE_IO	2
-#define TRACE_IRQ	4
-#define TRACE_UNK	8
-#define TRACE_CPU	16
+#define IRQ_TIMER		1
+
+#define TRACE_MEM		1
+#define TRACE_IO		2
+#define TRACE_IRQ		4
+#define TRACE_UNK		8
+#define TRACE_CPU		16
 
 static int trace = 0;
 
+/* Run 6502 @ 2MHz, do timer update @ 900Hz */
+static uint16_t tstate_steps = 2000000 / 900;
+
+static struct timespec tc;
+
+
 /* IO-ports */
-#define PORT_BANK_0           0x00
-#define PORT_BANK_1           0x01
-#define PORT_BANK_2           0x02
-#define PORT_BANK_3           0x03
-#define PORT_SERIAL_0_FLAGS   0x10
-#define PORT_SERIAL_0_IN      0x11
-#define PORT_SERIAL_0_OUT     0x12
-#define PORT_SERIAL_1_FLAGS   0x18
-#define PORT_SERIAL_1_IN      0x19
-#define PORT_SERIAL_1_OUT     0x1A
-#define PORT_FILE_CMD         0x60
-#define PORT_FILE_PRM_0       0x61
-#define PORT_FILE_PRM_1       0x62
-#define PORT_FILE_DATA        0x63
-#define PORT_FILE_STATUS      0x64
-#define PORT_IRQ_TIMER_TARGET 0x80
-#define PORT_IRQ_TIMER_COUNT  0x81
-#define PORT_IRQ_TIMER_RESET  0x82
-#define PORT_IRQ_TIMER_TRIG   0x83
-#define PORT_IRQ_TIMER_PAUSE  0x84
-#define PORT_IRQ_TIMER_CONT   0x85
+#define IO_PAGE			0xFE00
+#define IO_BANK_0		0xFE00
+#define IO_BANK_1		0xFE01
+#define IO_BANK_2		0xFE02
+#define IO_BANK_3		0xFE03
+#define IO_SERIAL_0_FLAGS	0xFE10
+#define IO_SERIAL_0_IN		0xFE11
+#define IO_SERIAL_0_OUT		0xFE12
+#define IO_SERIAL_1_FLAGS	0xFE18
+#define IO_SERIAL_1_IN		0xFE19
+#define IO_SERIAL_1_OUT		0xFE1A
+#define IO_DISK_CMD		0xFE60
+#define IO_DISK_PRM_0		0xFE61
+#define IO_DISK_PRM_1		0xFE62
+#define IO_DISK_PRM_2		0xFE63
+#define IO_DISK_PRM_3		0xFE64
+#define IO_DISK_DATA		0xFE65
+#define IO_DISK_STATUS		0xFE66
+#define IO_TIMER_TARGET		0xFE80
+#define IO_TIMER_COUNT		0xFE81
+#define IO_TIMER_RESET		0xFE82
+#define IO_TIMER_TRIG		0xFE83
+#define IO_TIMER_PAUSE		0xFE84
+#define IO_TIMER_CONT		0xFE85
 
-#define SERIAL_FLAGS_OUT_FULL  128
-#define SERIAL_FLAGS_IN_AVAIL   64
-#define FILE_STATUS_OK           0
-#define FILE_STATUS_NOK          1
+#define SERIAL_FLAGS_OUT_FULL	128
+#define SERIAL_FLAGS_IN_AVAIL	64
+#define DISK_STATUS_OK		0
+#define DISK_STATUS_NOK		1
+#define DISK_CMD_SELECT		0
+#define DISK_CMD_SEEK		1
 
-unsigned int check_chario(void)
+static unsigned int check_chario(void)
 {
 	fd_set i, o;
 	struct timeval tv;
@@ -114,7 +131,7 @@ unsigned int check_chario(void)
 	return r;
 }
 
-unsigned int next_char(void)
+static unsigned int next_char(void)
 {
 	char c;
 	if (read(0, &c, 1) != 1) {
@@ -126,178 +143,249 @@ unsigned int next_char(void)
 	return c;
 }
 
-static void irqnotify(void)
-{
-	if (live_irq)
-		irq6502();
-}
-
-static void int_set(int src)
-{
-	live_irq |= (1 << src);
-}
-
-static void int_clear(int src)
-{
-	live_irq &= ~(1 << src);
-}
-
 static uint8_t disk_read(void)
 {
 	uint8_t c;
-	read(hd_fd, &c, 1);
-	/* Never any problem reading from file */
-	io[PORT_FILE_STATUS] = FILE_STATUS_OK;
+	if (read(hd_fd, &c, 1) != 1)
+		diskstatus = DISK_STATUS_NOK;
+	else
+		diskstatus = DISK_STATUS_OK;
 	return c;
 }
 
 static void disk_write(uint8_t c)
 {
-	io[PORT_FILE_STATUS] = FILE_STATUS_OK;
 	if (write(hd_fd, &c, 1) != 1)
-		io[PORT_FILE_STATUS] = FILE_STATUS_NOK;
+		diskstatus = DISK_STATUS_NOK;
+	else
+		diskstatus = DISK_STATUS_OK;
 }
 
+/* seek to disk position using 24-bit LBA */
 static void disk_seek(void)
 {
-	/* Seeks to sector (PORT_FILE_PRM_0 + (PORT_FILE_PRM_1 << 8))
-	   using 512 byte sectors */
-	off_t pos = (io[PORT_FILE_PRM_0] + (io[PORT_FILE_PRM_1] << 8)) << 9;
+	off_t pos = 512 * (diskprm0 + (diskprm1 << 8) + (diskprm2 << 16));
 	if (lseek(hd_fd, pos, SEEK_SET) < 0)
-		io[PORT_FILE_STATUS] = FILE_STATUS_NOK;
+		diskstatus = DISK_STATUS_NOK;
 	else
-		io[PORT_FILE_STATUS] = FILE_STATUS_OK;
+		diskstatus = DISK_STATUS_OK;
 }
 
-/* All I/O-writes are mirrored in unbanked RAM. Some I/O-reads are returned
-   from devices, most are returned from the mirror RAM.
-   A very simple way to implement bank register read-back when implemented
-   in real hardware. */
-uint8_t mmio_read_6502(uint8_t addr)
+static uint8_t io_read(uint16_t addr, uint8_t debug)
 {
-	if (trace & TRACE_IO)
-		fprintf(stderr, "read %02x\n", addr);
+	uint8_t result;
 
 	switch(addr) {
-	case PORT_SERIAL_0_FLAGS:
-		io[addr] = (check_chario() ^ 2) << 6;
+	case IO_SERIAL_0_FLAGS:
+		result = (check_chario() ^ 2) << 6;
 		break;
-	case PORT_SERIAL_0_IN:
-		if (check_chario() & 1)
-			io[addr] = next_char();
+	case IO_SERIAL_0_IN:
+		if (debug)
+			result = 0xFF;
 		else
-			io[addr] = 0;
+			if (check_chario() & 1)
+				result = next_char();
+			else
+				result = 0;
 		break;
-	case PORT_SERIAL_1_FLAGS:
-		io[addr] = 0;
+	case IO_SERIAL_1_FLAGS:
+		result = 0;
 		break;
-	case PORT_FILE_DATA:
-		io[addr] = disk_read();
+	case IO_SERIAL_1_IN:
+		if (debug)
+			result = 0xFF;
+		else
+			result = 0;
 		break;
+	case IO_DISK_DATA:
+		if (debug)
+			result = 0xFF;
+		else
+			result = disk_read();
+		break;
+	case IO_DISK_STATUS:
+		result = diskstatus;
+		break;
+	default:
+		result = 0xFF;
 	}
-	/* Counters/timers are updated on the fly as they tick */
-	return io[addr];
+
+	if (trace & TRACE_IO)
+		fprintf(stderr, "IOR %04X = %02X\n", addr, result);
+
+	return(result);
 }
 
-void mmio_write_6502(uint8_t addr, uint8_t val)
+static void io_write(uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO)
-		fprintf(stderr, "write %02x <- %02x\n", addr, val);
+		fprintf(stderr, "IOW %04X = %02X\n", addr, val);
 
 	switch(addr) {
-	case PORT_SERIAL_0_OUT:
+	case IO_BANK_0:
+		bankreg[0] = val;
+		break;
+	case IO_BANK_1:
+		bankreg[1] = val;
+		break;
+	case IO_BANK_2:
+		bankreg[2] = val;
+		break;
+	case IO_BANK_3:
+		bankreg[3] = val;
+		break;
+	case IO_SERIAL_0_OUT:
 		write(1, &val, 1);
 		break;
-	case PORT_FILE_CMD:
+	case IO_DISK_CMD:
 		if (val == 0) /* SELECT */
-			io[PORT_FILE_STATUS] = FILE_STATUS_OK;
+			diskstatus = DISK_STATUS_OK;
 		if (val == 1) /* SEEK */
 			disk_seek();
-		break;			
-	case PORT_FILE_DATA:
+		break;
+	case IO_DISK_PRM_0:
+		diskprm0 = val;
+		break;
+	case IO_DISK_PRM_1:
+		diskprm1 = val;
+		break;
+	case IO_DISK_PRM_2:
+		diskprm2 = val;
+		break;
+	case IO_DISK_PRM_3:
+		diskprm3 = val;
+		break;
+	case IO_DISK_DATA:
 		disk_write(val);
 		break;
-	case PORT_IRQ_TIMER_TARGET:
-		int_clear(IRQ_TIMER);
-		io[PORT_IRQ_TIMER_COUNT] = 0;
-		trunning = 1;
+	case IO_TIMER_TARGET:
+		CPU_clearIRQ(IRQ_TIMER);
+		timercount = 0;
+		trunning = true;
 		break;
-	case PORT_IRQ_TIMER_COUNT:
-		/* This is strictly read only! */
-		return;
-	case PORT_IRQ_TIMER_RESET:
-		int_clear(IRQ_TIMER);
-		io[PORT_IRQ_TIMER_COUNT] = 0;
-		trunning = 1;
+	case IO_TIMER_RESET:
+		CPU_clearIRQ(IRQ_TIMER);
+		timercount = 0;
+		trunning = true;
 		break;
-	case PORT_IRQ_TIMER_TRIG:
-		int_set(IRQ_TIMER);
+	case IO_TIMER_TRIG:
+		CPU_addIRQ(IRQ_TIMER);
 		break;
-	case PORT_IRQ_TIMER_PAUSE:
-		trunning = 0;
+	case IO_TIMER_PAUSE:
+		trunning = false;
 		break;
-	case PORT_IRQ_TIMER_CONT:
-		trunning = 1;
-		int_clear(IRQ_TIMER);
+	case IO_TIMER_CONT:
+		trunning = true;
+		CPU_clearIRQ(IRQ_TIMER);
 		break;
 	case 0xFF:
 		printf("trace set to %d\n", val);
 		trace = val;
 		if (trace & TRACE_CPU)
-			log_6502 = 1;
+			CPU_setTrace(1);
 		else
-			log_6502 = 0;
+			CPU_setTrace(0);
+		break;
 	default:
 		if (trace & TRACE_UNK)
-			fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+			fprintf(stderr, "Unknown IOW %04X = %02X\n", addr, val);
 	}
-	io[addr] = val;
 }
 
-uint8_t do_6502_read(uint16_t addr)
+uint8_t read65c816(uint32_t addr, uint8_t debug)
 {
-	unsigned int bank = (addr & 0xC000) >> 14;
-	if (trace & TRACE_MEM)
-		fprintf(stderr, "R %04X[%02X] = %02X\n", addr, (unsigned int) io[bank], (unsigned int) ram[(io[bank] << 14) + (addr & 0x3FFF)]);
-	addr &= 0x3FFF;
-	return ram[(io[bank] << 14) + addr];
-}
+	uint8_t val;
 
-uint8_t read6502(uint16_t addr)
-{
-	if (addr >> 8 == iopage)
-		return mmio_read_6502(addr);
-
-	return do_6502_read(addr);
-}
-
-uint8_t read6502_debug(uint16_t addr)
-{
-	/* Avoid side effects for debug */
-	if (addr >> 8 == iopage)
-		return 0xFF;
-
-	return do_6502_read(addr);
-}
-
-
-void write6502(uint16_t addr, uint8_t val)
-{
-	unsigned int bank = (addr & 0xC000) >> 14;
-
-	if (addr >> 8 == iopage) {
-		mmio_write_6502(addr, val);
-		return;
+	addr &= 0xFFFF;		/* 16 bit input */
+	if (addr < IO_PAGE) {
+		/* 0x0000-0xFDFF, banked ram read */
+		uint8_t bank = addr >> 14;
+		uint8_t block = bankreg[bank];
+		if (block < (sizeof(ram) / BANK_SIZE)) {
+			val = ram[(block << 14) + (addr & (BANK_SIZE - 1))];
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "R %04X[%02X] = %02X\n",
+					(uint16_t) addr,
+					(uint8_t) block,
+					(uint8_t) val);
+		}
+		/* high reads are faulty */
+		else if (trace & TRACE_MEM) {
+			val = 0xFF;
+			fprintf(stderr, "Discarded: R above 512KiB %04X[%02X] = %02X\n",
+					(uint16_t) addr,
+					(uint8_t) block,
+					(uint8_t) val);
+		}
+	} else if ((addr & 0xFF00) == IO_PAGE) {
+		/* 0xFE00-0xFEFF, IO read */
+		val = io_read(addr, debug);
+	} else {
+		/* 0xFF00-0xFFFF, top page read */
+		val = ram[addr];
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "R %04X = %02X\n",
+				(uint16_t) addr,
+				(uint8_t) val);
 	}
-	if (trace & TRACE_MEM)
-		fprintf(stderr, "W %04X[%02X] = %02X\n", (unsigned int) addr, (unsigned int) io[bank], (unsigned int) val);
-	if (io[bank] <= 31) {
-		addr &= 0x3FFF;
-		ram[(io[bank] << 14) + addr] = val;
+	return val;
+}
+
+void write65c816(uint32_t addr, uint8_t val)
+{
+	addr &= 0xFFFF;		/* 16 bit input */
+	if (addr < IO_PAGE) {
+		/* 0x0000-0xFDFF, banked ram write */
+		uint8_t bank = addr >> 14;
+		uint8_t block = bankreg[bank];
+		if (block < (sizeof(ram) / BANK_SIZE)) {
+			ram[(block << 14) + (addr & (BANK_SIZE - 1))] = val;
+			if (trace & TRACE_MEM)
+				fprintf(stderr, "W %04X[%02X] = %02X\n",
+					(uint16_t) addr,
+					(uint8_t) block,
+					(uint8_t) val);
+		}
+		/* high writes go nowhere */
+		else if (trace & TRACE_MEM)
+			fprintf(stderr, "Discarded: W above 512KiB %04X[%02X]\n",
+					(uint16_t) addr,
+					(uint8_t) block);
+	} else if ((addr & 0xFF00) == IO_PAGE) {
+		/* 0xFE00-0xFEFF, IO write */
+		io_write(addr, val);
+	} else {
+		/* 0xFF00-0xFFFF, top page write */
+		ram[addr] = val;
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "W %04X = %02X\n",
+				(uint16_t) addr,
+				(uint8_t) val);
 	}
-	/* high writes go nowhere */
-	else if (trace & TRACE_MEM)
-		fprintf(stderr, "[Discarded: W above 512KiB]\n");
+}
+
+void system_process(void)
+{
+	/*
+	 * This is the wrong way to do timing but it's easier for the moment.
+	 * We should track how much real time has occurred and try to keep cycle
+	 * matched with that. The scheme here works fine except when the host
+	 * is loaded though
+	 */
+	if (fast == false)
+		nanosleep(&tc, NULL);
+	/* Configurable interrupt timer */
+	if (trunning == true) {
+		timercount++;
+		if (timercount == timertarget) {
+			CPU_addIRQ(IRQ_TIMER);
+			trunning = false;
+		}
+	}
+}
+
+void wdm(void)
+{
 }
 
 static struct termios saved_term, term;
@@ -305,7 +393,6 @@ static struct termios saved_term, term;
 static void cleanup(int sig)
 {
 	tcsetattr(0, TCSADRAIN, &saved_term);
-	done = 1;
 }
 
 static void exit_cleanup(void)
@@ -321,11 +408,12 @@ static void usage(void)
 
 int main(int argc, char *argv[])
 {
-	static struct timespec tc;
 	int opt;
 	char *rompath = "pz1.rom";
-	char *diskpath = "pz1.hd";
+	char *diskpath = "filesys.img";
 	int fd;
+
+	fast = false;
 
 	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
 		switch (opt) {
@@ -339,7 +427,7 @@ int main(int argc, char *argv[])
 			trace = atoi(optarg);
 			break;
 		case 'f':
-			fast = 1;
+			fast = true;
 			break;
 		default:
 			usage();
@@ -354,17 +442,17 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, ram + 1024, 64512) != 64512) {
-		fprintf(stderr, "pz1: OS image should be 64512 bytes.\n");
+	if (read(fd, ram, 65536) != 65536) {
+		fprintf(stderr, "pz1: OS image should be 65536 bytes.\n");
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
 
 	/* Init the bank registers */
-	io[0] = 0;
-	io[1] = 1;
-	io[2] = 2;
-	io[3] = 3;
+	bankreg[0] = 0;
+	bankreg[1] = 1;
+	bankreg[2] = 2;
+	bankreg[3] = 3;
 
 	hd_fd = open(diskpath, O_RDWR);
 	if (hd_fd == -1) {
@@ -392,34 +480,11 @@ int main(int argc, char *argv[])
 	}
 
 	if (trace & TRACE_CPU)
-		log_6502 = 1;
+		CPU_setTrace(1);
 
-	init6502();
-	reset6502();
-	hookexternal(irqnotify);
-
-	/* This is the wrong way to do it but it's easier for the moment. We
-	   should track how much real time has occurred and try to keep cycle
-	   matched with that. The scheme here works fine except when the host
-	   is loaded though */
-
-	/* Everything internally on the real system is built around a 900Hz
-	   timer so we work the same way. */
-
-	while (!done) {
-		/* run 6502 @ 2MHz, do timer update @ 900Hz
-		 2000000 / 900 = 2222 cycles */
-		exec6502(2222);
-		if (!fast)
-			nanosleep(&tc, NULL);
-		/* Configurable interrupt timer */
-		if (trunning) {
-			io[PORT_IRQ_TIMER_COUNT]++;
-			if (io[PORT_IRQ_TIMER_TARGET] == io[PORT_IRQ_TIMER_COUNT]) {
-				int_set(IRQ_TIMER);
-				trunning = 0;
-			}
-		}
-	}
+	CPUEvent_initialize();
+	CPU_setUpdatePeriod(tstate_steps);
+	CPU_reset();
+	CPU_run();
 	exit(0);
 }
