@@ -226,8 +226,11 @@ vz300: vz300.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o
 rhyophyre:rhyophyre.o z180_io.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o
 	cc -g3 rhyophyre.o z180_io.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o -o rhyophyre
 
-pz1: pz1.o 6502.o 6502dis.o
-	cc -g3 pz1.o 6502.o 6502dis.o -o pz1
+pz1: pz1.o lib65c816/src/lib65816.a
+	cc -g3 pz1.o lib65c816/src/lib65816.a -o pz1
+
+pz1.o: pz1.c lib65816/config.h
+	$(CC) $(CFLAGS) -Ilib65c816 -c pz1.c
 
 nabupc: nabupc.o nabupc_noui.o ide.o tms9918a.o tms9918a_norender.o z80dis.o libz80/libz80.o
 	cc -g3 nabupc.o nabupc_noui.o z80dis.o ide.o tms9918a.o tms9918a_norender.o libz80/libz80.o -o nabupc
