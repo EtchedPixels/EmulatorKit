@@ -26,6 +26,7 @@ static int trace = 0;
 
 #define TRACE_MEM	1
 #define TRACE_CPU	2
+#define TRACE_CF	4
 
 uint8_t fc;
 
@@ -81,29 +82,9 @@ unsigned int next_char(void)
 	return c;
 }
 
-static unsigned int irq_pending;
-
-void recalc_interrupts(void)
-{
-	int i;
-
-	/* TODO: internal interrupts */
-	if (irq_pending) {
-		for (i = 7; i >= 0; i--) {
-			if (irq_pending & (1 << i)) {
-				m68k_set_irq(i);
-				return;
-			}
-		}
-	} else
-		m68k_set_irq(0);
-}
-
 int cpu_irq_ack(int level)
 {
-	if (!(irq_pending & (1 << level)))
-		return M68K_INT_ACK_SPURIOUS;
-	return M68K_INT_ACK_SPURIOUS;
+	return p90_autovector(level);
 }
 
 uint32_t addrmask;
@@ -140,8 +121,12 @@ static uint32_t pal_modify(uint32_t address)
 
 static unsigned int do_io_readb(unsigned int address)
 {
-	if (address >= 0x1200000 && address <= 0x12FFFFF)
-		return ide_read8(ide, address & 15);
+	if (address >= 0x1200000 && address <= 0x12FFFFF) {
+		uint8_t r = ide_read8(ide, address & 15);
+		if (trace & TRACE_CF)
+			printf("cf read: %x -> %x\n", address & 15, r);
+		return r;
+	}
 	if (address & 0x80000000)
 		return p90_read(address);
 	return 0xFF;
@@ -149,10 +134,17 @@ static unsigned int do_io_readb(unsigned int address)
 
 static void do_io_writeb(unsigned int address, unsigned int value)
 {
-	if (address >= 0x1200000 && address <= 0x12FFFFF)
+	if (address >= 0x1200000 && address <= 0x12FFFFF) {
+		if (trace & TRACE_CF)
+			printf("cf write: %x <- %x\n", address & 15, value);
 		ide_write8(ide, address & 15, value);
-	else if (address & 0x80000000)
+	} 
+	else if (address & 0x80000000) {
 		p90_write(address, value);
+		/* Ensure the interrupt status is correct. We have no other
+		   IRQ sources */
+		m68k_set_irq(p90_interrupts());
+	}
 }
 
 /* Read data from RAM, ROM, or a device */
@@ -169,6 +161,7 @@ unsigned int do_cpu_read_byte(unsigned int address)
 unsigned int cpu_read_byte(unsigned int address)
 {
 	unsigned int v = do_cpu_read_byte(address);
+	m68k_modify_timeslice(2);
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "RB %08X -> %02X\n", address, v);
 	return v;
@@ -207,6 +200,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 {
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "WB %08X <- %02X\n", address, value);
+	m68k_modify_timeslice(2);
 	address = pal_modify(address);
 	if (address >= 0x1200000)
 		do_io_writeb(address, value);
@@ -248,7 +242,6 @@ void cpu_instr_callback(void)
 
 static void device_init(void)
 {
-	irq_pending = 0;
 	ide_reset_begin(ide);
 }
 
@@ -270,7 +263,8 @@ static void take_a_nap(void)
 {
 	struct timespec t;
 	t.tv_sec = 0;
-	t.tv_nsec = 100000;
+	/* 1ms */
+	t.tv_nsec = 1000000;
 	if (nanosleep(&t, NULL))
 		perror("nanosleep");
 }
@@ -370,13 +364,16 @@ int main(int argc, char *argv[])
 	/* Init devices */
 	device_init();
 
+	/* We run at 22Mhz but our performance is nearer that of an 8MHz
+	   68000 part so we fudge it by running less cpu cycles than
+	   we should to get armwavingly believable performance */
 	while (1) {
-		/* A 10MHz 68000 should do 1000 cycles per 1/10000th of a
-		   second. We do a blind 0.01 second sleep so we are actually
-		   emulating a bit under 10Mhz - which will do fine for
-		   testing this stuff */
-		m68k_execute(1000);
-		/* IRQ serial etc and timer stuff to follow */
+		/* Per ms we do about 8000 68000 equivalent cycles */
+		m68k_execute(8000);
+		/* IRQ serial etc and timer stuff - true clock */
+		p90_cycles(22000);
+		m68k_set_irq(p90_interrupts());
+		/* 1ms sleep */
 		if (!fast)
 			take_a_nap();
 	}

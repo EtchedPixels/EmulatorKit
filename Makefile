@@ -163,6 +163,9 @@ p90mb: p90mb.o ide.o p90ce201.o m68k/lib68k.a
 p90mb.o: p90mb.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c p90mb.c
 
+p90ce201.o: p90ce201.c m68k/lib68k.a
+	$(CC) $(CFLAGS) -Im68k -c p90ce201.c
+
 z80mc:	z80mc.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z80mc.o sdcard.o z80dis.o libz80/libz80.o -o z80mc
 
