@@ -129,6 +129,8 @@ static uint32_t pal_modify(uint32_t address)
 	/* This isn't what the PAL actually uses in logic - FIXME later */
 	if (address < 0x01200000 && (na & (1 << 23)))
 		na ^= 0x01800000;
+	else
+		na = address;
 	/* Fixing it means shorting the order we do stuff as A23 internal
 	   is not GPIO modified */
 	if (trace & TRACE_MEM)
