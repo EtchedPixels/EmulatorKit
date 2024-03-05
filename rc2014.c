@@ -85,7 +85,7 @@ static uint8_t extreme;
 #define CPUBOARD_MICRO80W	11		/* 22MHz SBC with 16K banking */
 #define CPUBOARD_ZRC		12		/* Similar to ZRCC but not quite the same */
 #define CPUBOARD_SC720		13		/* Low 32K bankswitched, high 32K fixed */
-#define CPUBOARD_SC707		14		/* SC114 stype memry board but with ROM bankable using 0x20/0x28 */
+#define CPUBOARD_SC707		14		/* SC114 type memory board but with ROM bankable using 0x20/0x28 */
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -2755,14 +2755,14 @@ static void io_write_sc707(uint16_t addr, uint8_t val)
 		known = 1;
 		break;
 	/* 10/18 not wired */
-	case 0x20:	/* ROM A16 */
-		bankreg[0] &= 1;
-		bankreg[0] |= (val & 1) << 1;
-		known = 1;
-		break;
-	case 0x28:	/* ROM A15 */
+	case 0x20:	/* ROM A15 */
 		bankreg[0] &= 2;
 		bankreg[0] |= val & 1;
+		known = 1;
+		break;
+	case 0x28:	/* ROM A16 */
+		bankreg[0] &= 1;
+		bankreg[0] |= (val & 1) << 1;
 		known = 1;
 		break;
 	case 0x30:	/* RAM A16 */
@@ -3077,6 +3077,11 @@ int main(int argc, char *argv[])
 				switchrom = 0;
 				bank512 = 0;
 				cpuboard = CPUBOARD_SC114;
+			} else if (strcmp(optarg, "sc516") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				/* Same as the 114 but on z50bus */
+				cpuboard = CPUBOARD_SC114;
 			} else if (strcmp(optarg, "z80sbc64") == 0) {
 				switchrom = 0;
 				bank512 = 0;
@@ -3179,6 +3184,11 @@ int main(int argc, char *argv[])
 				indev = INDEV_SIO;
 				have_acia = 0;
 			} else if (strcmp(optarg, "sc707") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				cpuboard = CPUBOARD_SC707;
+			} else if (strcmp(optarg, "sc519") == 0) {
+				/* Same as 707 on Z50bus */
 				switchrom = 0;
 				bank512 = 0;
 				cpuboard = CPUBOARD_SC707;
