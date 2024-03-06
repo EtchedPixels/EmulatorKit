@@ -6,16 +6,15 @@
  *	6402 UART (emulated for serial I/O but not yet tape) 0x01/0x02
  *	Z80 PIO (not emulated) at 0x04
  *	Nascom floppy disk controller 0xE0
- *	Gemini GM106 RTC at 0x20
+ *	Gemini RTC at 0x20
  *
  *	Various memory configurations
  *
  *	TODO:
  *	NMI circuit
- *	Fix the keyboard shift and lower case handling
  *	Add the NASCOM2 control, shift and lf/ch etc
  *	Native keymap mode
- *	Fix disk write
+ *	Debug floppy emulation further
  *
  *	There were a bunch of related systems including the
  *	Gemini GM811 which used the same bus but were different
@@ -121,17 +120,21 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	/* Banked memory options */
 	if (has_map80) {
 		/* Port 0xFE works as follows
-			7: reset - use Nascom mapping, set use map80 32K
-			6: clear - page lower 32K, set page upper 32K
-			5: unused
+			7: 0: 64K 1: 32K
+			6: 0: fix lower 32K, 1: fix upper 32K
+			5: unused (not that many cards!)
 			4-0: select 64K page, and bank */
 		if (map80 & 0x80) {
-			if ((addr & 0x8000) != ((map80 & 0x40) ? 0x8000: 0x0000))
+			/* 32K mode */
+			if (map80 & 0x40) {
+				if (addr >= 0x8000)
+					return mapmem + addr;
+			} else if (addr < 0x8000)
 				return mapmem + addr;
 			/* Is being mapped */
-			return mapmem + (addr & 0x7FFF) + (map80 & 0x3F) * 0x8000;
+			return mapmem + (addr & 0x7FFF) + (map80 & 0x1F) * 0x8000;
 		} else {
-			return mapmem + addr + (map80 & 0x3E) * 0x8000;
+			return mapmem + addr + (map80 & 0x1E) * 0x8000;
 		}
 	}
 	/* Gemini 80 page mode. Cards are switched by port 0xFF with a simple
@@ -514,9 +517,9 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 		wd17xx_write_data(fdc, val);
 		break;
 	case 0x04:
+		fdc_latch = val;
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "fdc: latch set to %x\n", fdc_latch);
-		fdc_latch = val;
 		/* For our purposes the 849A is the same */
 		if (fdc_gemini == 849) {
 			/* WD2793 */
@@ -711,6 +714,8 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		lucas_fdc_write(addr & 0x07, val);
 	else if (has_gm833 && port >= 0xFB && port <= 0xFD)
 		gm833_write(port, val);
+	else if (has_map80 && port == 0xFE)
+		map80 = val;
 	/* Page mode */
 	else if (port == 0xFF)
 		map_gm802 = val;
@@ -871,13 +876,15 @@ struct diskgeom {
 	unsigned int tracks;
 	unsigned int spt;
 	unsigned int secsize;
+	unsigned int sidehack;
 };
 
 struct diskgeom disktypes[] = {
-	{ "CP/M 77 track DSDD", 788480, 2, 77, 10, 512 },
-	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512 },
-	{ "NAS-DOS DSDD", 655360, 2, 80, 16, 256 },
-	{ "NAS-DOS SSDD", 327680, 1, 80, 16, 256 },
+	{ "CP/M 77 track DSDD", 788480, 2, 77, 10, 512 , 1},
+	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512 , 0},
+	{ "NAS-DOS DSDD", 655360, 2, 80, 16, 256, 0 },
+	{ "NAS-DOS SSDD", 327680, 1, 80, 16, 256, 0 },
+	{ "DOS DSSD", 368640, 2, 40, 9, 512, 0 }, 
 	{NULL,}
 };
 
@@ -979,7 +986,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int base, unsigned i
 
 static void usage(void)
 {
-	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-b basic] [-c] [-e eprom] [-i idepath] [-g] [-r rom] [-m] [-R] [-d debug]\n");
+	fprintf(stderr, "nascom: [-f] [-1] [-2] [-3] [-8] [-A|B|C|D disk] [-b basic] [-c] [-e eprom] [-i idepath] [-g] [-r rom] [-m] [-R] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1130,6 +1137,9 @@ int main(int argc, char *argv[])
 	/* GM802 banked memory wherever there is no existing base memory */
 	if (has_gm802)
 		is_present |= 0xFFFFFFFFFFFFFFFFULL;
+	/* Map80 likewise */
+	if (has_map80)
+		is_present |= 0xFFFFFFFFFFFFFFFFULL;
 	/* Maxmem option - all memory all base */
 	if (maxmem) {
 		is_present |= 0xFFFFFFFFFFFFULL << 8;
@@ -1143,16 +1153,16 @@ int main(int argc, char *argv[])
 			if (fdc_path[i]) {
 				struct diskgeom *d = guess_format(fdc_path[i]);
 				printf("[Drive %c, %s.]\n", 'A' + i, d->name);
+				if (d->sidehack)
+					wd17xx_set_side1(fdc, i, 77);
 				wd17xx_attach(fdc, i, fdc_path[i], d->sides, d->tracks, d->spt, d->secsize);
-			}
+			} else {
+				if (cpmmap)
+					wd17xx_set_side1(fdc, i, 77);
+			} 
+			wd17xx_set_sector0(fdc, i, 1);
 		}
 		wd17xx_trace(fdc, trace & TRACE_FDC);
-		wd17xx_set_sector0(fdc, 1);
-		/* Weird track numbering for second side */
-		if (cpmmap)
-			wd17xx_set_side1(fdc, 77);
-		/* When we do gemini we need to deal with gemini having
-		   sector 0 */
 	}
 	/* GM816 RTC emulation */
 	if (hasrtc) {
@@ -1248,7 +1258,7 @@ int main(int argc, char *argv[])
 	while (!emulator_done) {
 		int i;
 		/* Each cycle we do 20000 or 40000 T states */
-		for (i = 0; i < 100; i++) {
+		for (i = 0; i < /*1*/500; i++) {
 			Z80ExecuteTStates(&cpu_z80, tstates);
 		}
 

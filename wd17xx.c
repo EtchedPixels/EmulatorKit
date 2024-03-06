@@ -17,6 +17,10 @@ struct wd17xx {
 	unsigned int spt[4];
 	unsigned int secsize[4];
 	unsigned int sides[4];
+	unsigned int sector0[4];/* Sector base - usually 1, now and then 0
+				   and on the Ampro sometimes 17 */
+	unsigned int side1[4];	/* Base track number for second side. Usually 0
+				   but some systems do strange stuff */
 	unsigned int drive;
 	uint8_t buf[2048];
 	unsigned int pos;
@@ -29,10 +33,7 @@ struct wd17xx {
 	uint8_t side;
 	uint8_t lastcmd;
 	unsigned int intrq;
-	unsigned int sector0;	/* Sector base - usually 1, now and then 0
-				   and on the Ampro sometimes 17 */
-	unsigned int side1;	/* Base track number for second side. Usually 0
-				   but some systems do strange stuff */
+	int stepdir;
 	unsigned int motor;
 	unsigned int spinup;
 	unsigned int trace;
@@ -63,10 +64,10 @@ static void wd17xx_diskseek(struct wd17xx *fdc)
 
 	/* Devices with different numbering for side 1 */
 	if (fdc->side)
-		track -= fdc->side1;
+		track -= fdc->side1[fdc->drive];
 
 	pos = track * fdc->spt[fdc->drive] * fdc->sides[fdc->drive];
-	pos += fdc->sector - fdc->sector0;
+	pos += fdc->sector - fdc->sector0[fdc->drive];
 	if (fdc->sides[fdc->drive] == 2 && fdc->side)
 		pos += fdc->spt[fdc->drive];
 	pos *= fdc->secsize[fdc->drive];
@@ -216,7 +217,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 
 	track = fdc->track;
 	if (fdc->side)
-		track -= fdc->side1;
+		track -= fdc->side1[fdc->drive];
 
 	if (fdc->trace)
 		fprintf(stderr, "fdc%d: command %x.\n", fdc->drive, v);
@@ -252,13 +253,18 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->track = 0;
 		fdc->status = TRACK0 | INDEX;
 		fdc->intrq = 1;
+		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
 		break;
 	case 0x10:	/* seek */
 		fdc->intrq = 1;
+		if (fdc->track < fdc->buf[0])
+			fdc->stepdir = 1;
+		if (fdc->track > fdc->buf[0])
+			fdc->stepdir = -1;
 		fdc->track = fdc->buf[0];
 		fdc->status = INDEX;
-		if (track >= fdc->tracks[fdc->drive]) {
+		if (fdc->track >= fdc->tracks[fdc->drive]) {
 			fdc->status |= SEEKERR;
 			if (v & 0x08)
 				fdc->status |= HEADLOAD;
@@ -272,10 +278,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		break;
 	case 0x20:	/* step */
 	case 0x30:
-		if (fdc->track < fdc->buf[0])
-			fdc->track++;
-		else if (fdc->track < fdc->buf[0])
+		if (fdc->track && fdc->stepdir == -1)
 			fdc->track--;
+		if (fdc->track < 128 && fdc->stepdir == 1)
+			fdc->track++;
 		fdc->status = INDEX;
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
@@ -293,6 +299,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (v & 0x08)
 			fdc->status |= HEADLOAD;
 		fdc->intrq = 1;
+		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
 		break;
 	case 0x60:	/* step out */
@@ -305,11 +312,13 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (v & 0x08)
 			fdc->status |= HEADLOAD;
 		fdc->intrq = 1;
+		fdc->stepdir = -1;
 		wd17xx_motor(fdc, motor);
 		break;
 	case 0x80:	/* Read sector */
 		if (track >= fdc->tracks[fdc->drive] ||
-			fdc->sector - fdc->sector0 >= fdc->spt[fdc->drive]) {
+			fdc->sector - fdc->sector0[fdc->drive]
+				 >= fdc->spt[fdc->drive]) {
 			fdc->status = INDEX | RECNFERR;
 			return;
 		}
@@ -318,7 +327,8 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (read(fdc->fd[fdc->drive], fdc->buf, size) != size) {
 			perror("wd17xx: read: ");
 			fprintf(stderr, "wd17xx: I/O error.\n");
-			fdc->status = INDEX | RECNFERR;
+			fdc->status = RECNFERR;
+			fdc->intrq = 1;
 			return;
 		}
 		fdc->rdsize = size;
@@ -327,8 +337,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		break;
 	case 0xA0:	/* Write sector */
 		if (track >= fdc->tracks[fdc->drive] ||
-			fdc->sector - fdc->sector0 >= fdc->spt[fdc->drive]) {
-			fdc->status = INDEX | RECNFERR;
+			fdc->sector - fdc->sector0[fdc->drive]
+				>= fdc->spt[fdc->drive]) {
+			fdc->status = RECNFERR;
+			fdc->intrq = 1;
 			return;
 		}
 		fdc->status |= BUSY | DRQ;
@@ -347,7 +359,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->buf[0] = fdc->tracks[fdc->drive] - 1;
 		}
 		fdc->buf[1] = fdc->side;
-		fdc->buf[2] = fdc->sector0;
+		fdc->buf[2] = fdc->sector0[fdc->drive];
 		switch(fdc->secsize[fdc->drive]) {
 		case 128:
 			fdc->buf[3] = 0x00;
@@ -419,7 +431,10 @@ struct wd17xx *wd17xx_create(unsigned type)
 	fdc->fd[1] = -1;
 	fdc->fd[2] = -1;
 	fdc->fd[3] = -1;
-	fdc->sector0 = 1;
+	fdc->sector0[0] = 1;
+	fdc->sector0[1] = 1;
+	fdc->sector0[2] = 1;
+	fdc->sector0[3] = 1;
 	fdc->type = type;
 	return fdc;
 }
@@ -479,14 +494,14 @@ void wd17xx_trace(struct wd17xx *fdc, unsigned int onoff)
 	fdc->trace = onoff;
 }
 
-void wd17xx_set_sector0(struct wd17xx *fdc, unsigned offset)
+void wd17xx_set_sector0(struct wd17xx *fdc, unsigned drive, unsigned offset)
 {
-	fdc->sector0 = offset;
+	fdc->sector0[drive] = offset;
 }
 
-void wd17xx_set_side1(struct wd17xx *fdc, unsigned offset)
+void wd17xx_set_side1(struct wd17xx *fdc, unsigned drive, unsigned offset)
 {
-	fdc->side1 = offset;
+	fdc->side1[drive] = offset;
 }
 
 uint8_t wd17xx_intrq(struct wd17xx *fdc)
