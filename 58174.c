@@ -39,6 +39,7 @@ uint8_t mm58174_read(struct mm58174 *rtc, uint8_t reg)
 {
 	time_t t;
 	struct tm *tm;
+	static unsigned fake_tenths;
 
 	t = time(NULL);
 	tm = gmtime(&t);
@@ -49,7 +50,10 @@ uint8_t mm58174_read(struct mm58174 *rtc, uint8_t reg)
 	case 0:
 		return 0xFF;	/* Test port */
 	case 1:
-		return 0;	/* Actually 10ths */
+		/* Some stuff probes by watching this so fake a tick */
+		if (fake_tenths == 10)
+			fake_tenths = 0;
+		return fake_tenths++;
 	case 2:
 		return tm->tm_sec % 10;
 	case 3:
