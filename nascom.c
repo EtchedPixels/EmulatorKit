@@ -76,7 +76,7 @@ static uint8_t sasi_en;
 static struct ide_controller *ide;
 
 static unsigned int nascom_ver = 1;
-static unsigned int fdc_gemini;
+static unsigned int fdc_type;
 static unsigned int has_gm802;
 static unsigned int has_map80;
 static unsigned int has_gm833;
@@ -85,9 +85,10 @@ static uint8_t map80 = 0x00;
 static uint8_t map_gm802 = 0x11;
 
 #define NASFDC		1
-#define GM829		2
-#define GM849		3
-#define GM849A		4
+#define GM809		2
+#define GM829		3
+#define GM849		4
+#define GM849A		5
 
 static Z80Context cpu_z80;
 static uint8_t fast;
@@ -421,7 +422,7 @@ static void uart_transmit(uint8_t val)
 
 static void gemini_scsi_write(uint8_t addr, uint8_t val)
 {
-	if (!fdc_gemini)
+	if (fdc_type >= GM829)
 		return;
 	if (!sasi)
 		return;
@@ -437,11 +438,11 @@ static void gemini_scsi_write(uint8_t addr, uint8_t val)
 		sasi_en = !!(val & 0x08); /* 0 for output 1 for other master */
 		/* The 849 pulses SEL on write of 1, then 849A latches it */
 		sasi_bus_control(sasi, r);
-		if (fdc_gemini != GM849A)
+		if (fdc_type != GM849A)
 			sasi_bus_control(sasi, 0);
 	} else {
 		/* This auto acks a pending req so no magic needed */
-		if (fdc_gemini == GM829 || sasi_en)
+		if (fdc_type == GM829 || sasi_en)
 			sasi_write_data(sasi, val);
 	}
 }
@@ -450,13 +451,13 @@ static uint8_t gemini_scsi_read(uint8_t addr)
 {
 	uint8_t r = 0;
 	uint8_t st;
-	if (!fdc_gemini)
+	if (fdc_type < GM829)
 		return 0xFF;
 
 	switch(addr) {
 	case 0x05:
 		/* Top bit is 1 for an 849, 0 for an 829 */
-		if (fdc_gemini == GM829)
+		if (fdc_type == GM829)
 			r = 0xE0;
 		if (sasi) {
 			st = sasi_bus_state(sasi);
@@ -475,7 +476,7 @@ static uint8_t gemini_scsi_read(uint8_t addr)
 		   4 busy, 3 /msg, 2 c/d, 1 i/o 0 /req */
 		return r;
 	case 0x06:
-		if (fdc_gemini == GM829 || sasi_en)
+		if (fdc_type == GM829 || sasi_en)
 			return sasi_read_data(sasi);
 		return 0xFF;		/* SCSI data r/w, generartes auto ACK */
 	default:
@@ -521,7 +522,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 		if (trace & TRACE_FDC)
 			fprintf(stderr, "fdc: latch set to %x\n", fdc_latch);
 		/* For our purposes the 849A is the same */
-		if (fdc_gemini == 849) {
+		if (fdc_type == GM849) {
 			/* WD2793 */
 			/* Fudge a bit - the 849 can handle 8 drives */
 			if (val & 4)
@@ -534,7 +535,7 @@ static void lucas_fdc_write(uint16_t addr, uint8_t val)
 			        8" DD is 5"/3.5" HD
 			   0x40 is unused
 			   0x80 is the speed control for 5.25 HD 1.2MB */
-		} else if (fdc_gemini == GM829) {
+		} else if (fdc_type == GM829) {
 			if (fdc_latch & 1)
 				wd17xx_set_drive(fdc, 0);
 			else if (fdc_latch & 2)
@@ -591,7 +592,7 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 	case 0x03:
 		return wd17xx_read_data(fdc);
 	case 0x04:
-		if (fdc_gemini) {
+		if (fdc_type > NASFDC) {
 			/* Gemini doesn't support the latch readback but puts
 			   a status byte here much like E5 on the Lucas board */
 			if (!fdc_motor)
@@ -609,7 +610,7 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 		break;
 	case 0x05:
 		/* This differs on the Gemini controllers */
-		if (fdc_gemini)
+		if (fdc_type >= GM829)
 			return gemini_scsi_read(addr);
 		/* This input comes from IC8 and IC8. IC7 provides 00YX where
 		   X is INTRQ from the 1793 and Y is a 10s timer, which we don't
@@ -1148,7 +1149,21 @@ int main(int argc, char *argv[])
 
 	if (need_fdc) {
 		unsigned i;
-		fdc = wd17xx_create(1791);
+		/* For the moment */
+		fdc_type = NASFDC;
+		switch(fdc_type) {
+		case NASFDC:
+			fdc = wd17xx_create(1791);
+			break;
+		case GM809:
+		case GM829:
+			fdc = wd17xx_create(1797);
+			break;
+		case GM849:
+		case GM849A:
+			fdc = wd17xx_create(2793);
+			break;
+		}
 		for (i = 0; i < 4; i++) {
 			if (fdc_path[i]) {
 				struct diskgeom *d = guess_format(fdc_path[i]);
