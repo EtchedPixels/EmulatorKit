@@ -64,7 +64,6 @@ static uint8_t base_mem[65536];
 static uint64_t is_rom;
 static uint64_t is_base;
 static uint64_t is_present;
-//static uint8_t rpage = 0, wpage = 0;
 static unsigned int cpmmap;
 static uint16_t vidbase = 0x0800;
 
@@ -159,7 +158,7 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	}
 	return NULL;
 }
-	
+
 uint8_t mem_read(int unused, uint16_t addr)
 {
 	uint8_t *p = mmu(addr, false);
@@ -802,7 +801,7 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 		pixp += 47 * CWIDTH;
 	}
 }
-		
+
 static void nascom_rasterize(void)
 {
 	unsigned int lptr = 0x03CA;
@@ -821,7 +820,7 @@ static void nascom_rasterize(void)
 static void nascom_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = 48 * CWIDTH;
 	rect.h = 16 * CHEIGHT;
@@ -843,7 +842,7 @@ static void keytranslate(SDL_Event *ev)
 	}
 	ev->key.keysym.sym = c;
 }
-	
+
 static void ui_event(void)
 {
 	SDL_Event ev;
@@ -889,8 +888,11 @@ struct diskgeom disktypes[] = {
 	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512 , 0},
 	{ "NAS-DOS DSDD", 655360, 2, 80, 16, 256, 0 },
 	{ "NAS-DOS SSDD", 327680, 1, 80, 16, 256, 0 },
-	{ "DOS DSSD", 368640, 2, 40, 9, 512, 0 }, 
-	{NULL,}
+	{ "DOS DSDD40", 368640, 2, 40, 9, 512, 0 },
+	{ "DOS DSDD80", 737280, 2, 80, 9, 512, 0 },
+	{ "DOS-DSHD1.2", 1228800, 2, 80, 15, 512, 0 },
+	{ "DOS-DSHD1.44", 1474560, 2, 80, 18, 512, 0 },
+	{ NULL,}
 };
 
 static struct diskgeom *guess_format(const char *path)
@@ -930,7 +932,7 @@ static uint8_t spacehex(const char *p, const char *buf, const char *path)
 		nasform(buf, path);
 	return r;
 }
-	
+
 /*
  *	Load a file in .NAS (NASCOM tape) format.
  */
@@ -1004,13 +1006,14 @@ int main(int argc, char *argv[])
 	char *basic_path = NULL;
 	char *eprom_path = NULL;
 	char *ide_path = NULL;
+	char *sasi_path = NULL;
 	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
 	int romsize;
 	unsigned int hasrtc = 0;
 	unsigned int maxmem = 0;
 	static unsigned int need_fdc = 0;
 
-	while ((opt = getopt(argc, argv, "1238b:cd:e:fgi:mr:A:B:C:D:RM")) != -1) {
+	while ((opt = getopt(argc, argv, "1238b:cd:e:fgi:mr:A:B:C:D:RMS:")) != -1) {
 		switch (opt) {
 		case '1':
 			nascom_ver = 1;
@@ -1072,6 +1075,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'M':
 			has_gm833 = 1;
+			break;
+		case 'S':
+			sasi_path = optarg;
 			break;
 		default:
 			usage();
@@ -1178,7 +1184,7 @@ int main(int argc, char *argv[])
 			} else {
 				if (cpmmap)
 					wd17xx_set_side1(fdc, i, 77);
-			} 
+			}
 			wd17xx_set_sector0(fdc, i, 1);
 		}
 		wd17xx_trace(fdc, trace & TRACE_FDC);
@@ -1198,6 +1204,14 @@ int main(int argc, char *argv[])
 		}
 		ide_attach(ide, 0, ide_fd);
 		ide_reset_begin(ide);
+	}
+	if (sasi_path) {
+		/* For now - needs to be properly settable */
+		if(fdc_type < GM829)
+			fdc_type = GM849A;
+		sasi = sasi_bus_create();
+		sasi_disk_attach(sasi, 0, sasi_path, 512);
+		sasi_bus_reset(sasi);
 	}
 	matrix = keymatrix_create(9, 7, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
@@ -1268,7 +1282,7 @@ int main(int argc, char *argv[])
 	/* Emulate the jump logic */
 	if (cpmmap)
 		cpu_z80.PC = 0xF000;
-	
+
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host
@@ -1277,7 +1291,7 @@ int main(int argc, char *argv[])
 	while (!emulator_done) {
 		int i;
 		/* Each cycle we do 20000 or 40000 T states */
-		for (i = 0; i < /*1*/500; i++) {
+		for (i = 0; i < 100; i++) {
 			Z80ExecuteTStates(&cpu_z80, tstates);
 		}
 
