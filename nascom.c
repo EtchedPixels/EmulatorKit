@@ -422,7 +422,7 @@ static void uart_transmit(uint8_t val)
 
 static void gemini_scsi_write(uint8_t addr, uint8_t val)
 {
-	if (fdc_type >= GM829)
+	if (fdc_type < GM829)
 		return;
 	if (!sasi)
 		return;
@@ -610,8 +610,12 @@ static uint8_t lucas_fdc_read(uint16_t addr)
 		break;
 	case 0x05:
 		/* This differs on the Gemini controllers */
-		if (fdc_type >= GM829)
+		if (fdc_type >= GM809) {
+			/* No SASI on the 809 */
+			if (fdc_type == GM809)
+				return 0xFF;
 			return gemini_scsi_read(addr);
+		}
 		/* This input comes from IC8 and IC8. IC7 provides 00YX where
 		   X is INTRQ from the 1793 and Y is a 10s timer, which we don't
 		   emulate right now and inverted feeds the 1793 ready
