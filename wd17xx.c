@@ -165,6 +165,15 @@ void wd17xx_write_track(struct wd17xx *fdc, uint8_t v)
 	fdc->track = v;
 }
 
+/* Some of the controllers support setting the side by command bits */
+void wd17xx_side_control(struct wd17xx *fdc, unsigned v)
+{
+	if (fdc->type == 2795 || fdc->type == 1795 ||
+		fdc->type == 2797 || fdc->type == 1797) {
+		fdc->side = (v & 2) ? 1 : 0;
+	}
+}
+
 void wd17xx_motor(struct wd17xx *fdc, unsigned on)
 {
 	if (on && fdc->motor == 0) {
@@ -322,6 +331,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->status = INDEX | RECNFERR;
 			return;
 		}
+		wd17xx_side_control(fdc, v);
 		wd17xx_diskseek(fdc);
 		fdc->rd = 1;
 		if (read(fdc->fd[fdc->drive], fdc->buf, size) != size) {
@@ -346,12 +356,15 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->status |= BUSY | DRQ;
 		fdc->wr = 1;
 		wd17xx_motor(fdc, motor);
+		wd17xx_side_control(fdc, v);
 		break;
 	case 0xC0:	/* read address */
 		fdc->status |= BUSY | DRQ;
 		fdc->rd = 1;
 		fdc->rdsize = 6;
 		fdc->buf[0] = track;
+
+		wd17xx_side_control(fdc, v);
 
 		/* If we tried to seek off the end of the disk then
 		   we'll stop at the end track and see the data there */
