@@ -786,7 +786,7 @@ static void wd1772_update_bcr(uint8_t bcr)
 				d, sector_base[d - 1]);
 		d--;
 		wd17xx_set_drive(wd, d);
-		wd17xx_set_sector0(wd, sector_base[d]);
+		wd17xx_set_sector0(wd, d, sector_base[d]);
 	}
 	if (delta & 0x10)
 		wd17xx_set_side(wd, (bcr & 0x10) ? 1 : 0);
