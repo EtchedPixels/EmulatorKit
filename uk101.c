@@ -51,8 +51,6 @@ static int trace = 0;
 
 static uint8_t keylatch;
 
-/* We handle page memory specially as writes are multi-bank and read
-   collisions need detecting */
 uint8_t do_read_6502(uint16_t addr, unsigned debug)
 {
 	if (addr >= 0xDF00  && addr < 0xDFFF && !debug) {
