@@ -382,6 +382,8 @@ static uint8_t getreg_internal(struct z8 *z8, uint8_t reg)
 	case 2:
 	case 3:
 		return z8_port_read(z8, reg);
+	case 15:
+		return z8->reg[reg];
 	case R_PRE0:
 	case R_PRE1:
 	case R_P01M:
@@ -396,7 +398,7 @@ static uint8_t getreg_internal(struct z8 *z8, uint8_t reg)
 		return z8->t1;
 	case R_SIO:
 		z8->reg[R_IRR] &= ~0x08;
-		return z8->reg[R_IRR];
+		return z8->reg[reg];
 	default:
 		return z8->reg[reg];
 	}
@@ -426,17 +428,22 @@ static void setreg_internal(struct z8 *z8, uint8_t reg, uint8_t val)
 		z8->reg[reg] = val;
 		z8_port_write(z8, 2, val);
 		break;
+	case 15:
+		z8->reg[reg] = val;
+		break;
 	case R_IRR:
 		/* IRR is unwritable until an EI !! */
 		if (z8->done_ei == 0)
 			break;
+		z8->reg[reg] = val;
+		break;
 	case R_SIO:
 		if (z8->reg[R_P3M] & 0x40) {
 			z8_tx(z8, val);
 			z8->reg[R_IRR] &= ~0x10;
 		}
 	default:
-	z8->reg[reg] = val;
+		z8->reg[reg] = val;
 	}
 }
 
@@ -457,7 +464,6 @@ void setireg(struct z8 *z8, uint8_t reg, uint8_t val)
 {
 	setreg_internal(z8, getreg(z8, reg), val);
 }
-
 
 uint8_t getwreg(struct z8 *z8, uint8_t reg)
 {
@@ -1406,6 +1412,8 @@ struct z8 *z8_create(void)
 	memset(z8, 0, sizeof(*z8));
 	z8->regmax = 240;
 	z8_reset(z8);
+	/* Serial starts idle so tx int */
+	z8_raise_irq(z8, 4);
 	return z8;
 }
 
