@@ -48,8 +48,6 @@ static uint8_t rtc;
 static uint8_t fast = 0;
 static uint8_t wiznet = 0;
 
-static int int_tx;
-
 struct ppide *ppide;
 struct rtc *rtcdev;
 
@@ -134,7 +132,6 @@ void z8_port_write(struct z8 *z8, uint8_t port, uint8_t val)
 void z8_tx(struct z8 *z8, uint8_t ch)
 {
 	write(1, &ch, 1);
-	int_tx = 1;
 }
 
 int check_chario(void)
@@ -180,10 +177,8 @@ static void int_event(void)
 	int c = check_chario();
 	if (c & 1)
 		z8_rx_char(cpu, next_char());
-	if (int_tx && (c & 2)) {
-		int_tx = 0;
+	if (c & 2)
 		z8_tx_done(cpu);
-	}
 }
 	
 void recalc_interrupts(void)
