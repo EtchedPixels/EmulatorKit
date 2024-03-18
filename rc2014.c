@@ -37,6 +37,7 @@
 
 #include "system.h"
 #include "libz80/z80.h"
+#include "libz180/z180.h"
 #include "lib765/include/765.h"
 
 #include "16x50.h"
@@ -54,7 +55,7 @@
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 #include "w5100.h"
-#include "z80copro.h"
+#include "z180copro.h"
 #include "z80dma.h"
 #include "zxkey.h"
 #include "z80dis.h"
@@ -115,7 +116,7 @@ static unsigned rom_mapped = 1;
 
 static struct ppide *ppide;
 static struct sdcard *sdcard;
-static struct z80copro *copro;
+static struct z180copro *copro;
 static FDC_PTR fdc;
 static FDRV_PTR drive_a, drive_b;
 static struct tms9918a *vdp;
@@ -2222,8 +2223,9 @@ static uint8_t io_read_2014(uint16_t addr)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
-	if (copro && (addr & 0xFC) == 0xBC)
-		return z80copro_ioread(copro, addr);
+	/* Sort out an address TODO */
+	if (copro && (addr & 0xFC) == 0x8)
+		return z180copro_ioread(copro, addr);
 	if ((addr & 0xFF) == 0xBA) {
 		return 0xCC;
 	}
@@ -2322,8 +2324,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 
-	if (copro && (addr & 0xFC) == 0xBC) {
-		z80copro_iowrite(copro, addr, val);
+	if (copro && (addr & 0xFC) == 0x8) {
+		z180copro_iowrite(copro, addr, val);
 		return;
 	}
 	if ((addr & 0xFF) == 0xBA) {
@@ -2981,7 +2983,6 @@ int main(int argc, char *argv[])
 	char *rompath = "rc2014.rom";
 	char *sdpath = NULL;
 	char *idepath = NULL;
-	char *copro_rom;
 	int save = 0;
 	int have_acia = 0;
 	int indev;
@@ -2997,7 +2998,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:nN:pPr:sRS:Tuw8C:Zz:X")) != -1) {
+	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:nN:pPr:sRS:Tuw8CZz:X")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -3218,7 +3219,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'C':
 			have_copro = 1;
-			copro_rom = optarg;
 			break;
 		case 'F':
 			if (pathb) {
@@ -3493,21 +3493,8 @@ int main(int argc, char *argv[])
 	fdc_setdrive(fdc, 1, drive_b);
 
 	if (have_copro) {
-		int eprom_fd;
-		copro = z80copro_create();
-		eprom_fd = open(copro_rom, O_RDONLY);
-		if (eprom_fd == -1) {
-			perror(copro_rom);
-			exit(1);
-		}
-		if (read(eprom_fd, z80copro_eprom(copro), 32768) != 32768) {
-			fprintf(stderr, "%s: should be 32K.\n", copro_rom);
-			exit(1);
-		}
-		close(eprom_fd);
-		/* Assume same speed as main processor */
-		copro->tstates = tstate_steps;
-		z80copro_trace(copro, (trace >> 17) & 3);
+		copro = z180copro_create();
+		z180copro_trace(copro, (trace >> 17) & 3);
 	}
 
 	switch(indev) {
@@ -3579,7 +3566,7 @@ int main(int argc, char *argv[])
 				if (ef9345)
 					ef9345_cycles(ef9345, 200);
 				if (copro)
-					z80copro_run(copro);
+					z180copro_run(copro);
 				if (ps2)
 					ps2_event(ps2, (tstate_steps + 5) / 10);
 				if (acia)
