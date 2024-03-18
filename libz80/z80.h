@@ -60,6 +60,9 @@ typedef union
 } Z80Regs;
 
 
+#ifndef Z80FLAGS_ENUM
+#define Z80FLAGS_ENUM
+
 /** The Z80 flags */
 typedef enum
 {
@@ -72,7 +75,7 @@ typedef enum
 	F_Z  =  64, /**< Zero */
 	F_S  = 128  /**< Sign */
 } Z80Flags;
-
+#endif
 
 /** A Z80 execution context. */
 typedef struct

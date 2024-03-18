@@ -457,7 +457,7 @@ static void doBIT_indexed(Z80Context* ctx, int b, ushort address)
 }
 
 
-byte doSetRes (Z80Context* ctx, int bit, int pos, byte val)
+static byte doSetRes (Z80Context* ctx, int bit, int pos, byte val)
 {
     if (bit)
 		val |= (1 << pos);

@@ -59,6 +59,8 @@ typedef union
 	} br;
 } Z180Regs;
 
+#ifndef Z80FLAGS_ENUM
+#define Z80FLAGS_ENUM
 
 /** The Z180 flags */
 typedef enum
@@ -72,6 +74,7 @@ typedef enum
 	F_Z  =  64, /**< Zero */
 	F_S  = 128  /**< Sign */
 } Z180Flags;
+#endif
 
 
 /** A Z180 execution context. */
