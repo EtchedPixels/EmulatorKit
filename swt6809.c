@@ -28,18 +28,22 @@
 #include "ide.h"
 #include "wd17xx.h"
 
+struct slot {
+	const char *name;
+	 uint8_t(*read) (void *, unsigned);
+	void (*write)(void *, unsigned, uint8_t);
+	void *private;
+};
+
 static uint8_t rom[4096];
 static uint8_t ram[1024 * 1024];
 static uint8_t dat[16];
+static struct slot *slot[16];
 
 static unsigned fast;
 
-static struct acia *acia;
-static struct ide_controller *ide;
-static struct wd17xx *fdc;
-
 /* 1MHz */
-static uint16_t clockrate =  100;
+static uint16_t clockrate = 100;
 
 static uint8_t live_irq;
 
@@ -109,7 +113,7 @@ static void int_set(unsigned int irq)
 
 void recalc_interrupts(void)
 {
-	if (acia_irq_pending(acia))
+	if (acia_irq_pending(slot[0]->private))
 		int_set(IRQ_ACIA);
 	else
 		int_clear(IRQ_ACIA);
@@ -121,32 +125,145 @@ static uint8_t *dat_xlate(unsigned addr)
 	return ram + dat[addr >> 12] + (addr & 0xFFF);
 }
 
+static uint8_t empty_read(void *info, unsigned addr)
+{
+	return 0xFF;
+}
+
+static void empty_write(void *info, unsigned addr, uint8_t val)
+{
+}
+
+static struct slot empty_slot = { "empty", empty_read, empty_write };
+
+static uint8_t mps_read(void *info, unsigned addr)
+{
+	struct acia *a = info;
+	return acia_read(a, addr & 1);
+}
+
+static void mps_write(void *info, unsigned addr, uint8_t val)
+{
+	struct acia *a = info;
+	acia_write(a, addr & 1, val);
+}
+
+static struct slot mps_slot = { "MPS", mps_read, mps_write };
+
+static uint8_t dcs34_read(void *info, unsigned addr)
+{
+	struct wd17xx *fdc = info;
+	switch (addr) {
+	case 0x08:
+		return wd17xx_status(fdc);
+	case 0x09:
+		return wd17xx_read_track(fdc);
+	case 0x0A:
+		return wd17xx_read_sector(fdc);
+	case 0x0B:
+		return wd17xx_read_data(fdc);
+	case 0x04:
+		/* TODO verify which pin gets intrq */
+		return wd17xx_intrq(fdc) | (wd17xx_status_noclear(fdc) & 0x80);
+	default:
+		return 0xFF;	/* TODO: check schematic and decodes */
+	}
+}
+
+#if 0
+static uint8_t dcs2_read(void *info, unsigned addr)
+{
+	struct wd17xx *fdc = info;
+	switch (addr) {
+	case 0x08:
+		return wd17xx_status(fdc);
+	case 0x09:
+		return wd17xx_read_track(fdc);
+	case 0x0A:
+		return wd17xx_read_sector(fdc);
+	case 0x0B:
+		return wd17xx_read_data(fdc);
+	default:
+		return 0xFF;	/* TODO: check schematic and decodes */
+	}
+}
+#endif
+
+static void dcs34_write(void *info, unsigned addr, uint8_t val)
+{
+	struct wd17xx *fdc = info;
+	switch (addr) {
+	case 0x08:
+		wd17xx_command(fdc, val);
+		break;
+	case 0x09:
+		wd17xx_write_track(fdc, val);
+		break;
+	case 0x0A:
+		wd17xx_write_sector(fdc, val);
+		break;
+	case 0x0B:
+		wd17xx_write_data(fdc, val);
+		break;
+	case 0x04:		/* TODO sort all the bits out */
+		wd17xx_set_drive(fdc, val & 1);
+		break;
+	}
+}
+
+//static struct slot dcs2_slot = { "DCS2", dcs2_read, dcs34_write };
+static struct slot dcs34_slot = { "DCS3/4", dcs34_read, dcs34_write };
+
+static uint8_t pt_ss30_read(void *info, unsigned addr)
+{
+	struct ide_controller *i = info;
+	return ide_read8(i, addr & 7);
+}
+
+static void pt_ss30_write(void *info, unsigned addr, uint8_t val)
+{
+	struct ide_controller *i = info;
+	ide_write8(i, addr & 7, val);
+}
+
+static struct slot pt_ss30_slot = { "PT_SS30", pt_ss30_read, pt_ss30_write };
+
+static struct slot *slot[16] = {
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot,
+	&empty_slot
+};
+
+static unsigned is_slot(unsigned addr)
+{
+	/* Hack for now */
+	if (addr >= 0xE000 && addr <= 0xF800)
+		return 1;
+	return 0;
+}
+
 unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 {
-        unsigned char r = 0xFF;
-        /* Stop the debugger causing side effects in the I/O window */
-        if (debug && addr >= 0xE000 && addr < 0xF800)
-        	return r;
-
-	/* TODO: set the I/O window up properly, mask and decode
-	   to slot implementations of cards */
-	if ((addr & 0xEFFE) == 0xE004)
-		r = acia_read(acia, addr & 1);
-	else if (ide && addr >= 0xE058 && addr <= 0xE05F)
-		r = ide_read8(ide, addr & 7);
-	else if (fdc && addr == 0xE018)
-		r = wd17xx_status(fdc);
-	else if (fdc && addr == 0xE019)
-		r = wd17xx_read_track(fdc);
-	else if (fdc && addr == 0xE01A)
-		r = wd17xx_read_sector(fdc);
-	else if (fdc && addr == 0xE01B)
-		r = wd17xx_read_data(fdc);
-	else if (fdc && addr == 0xE014) {
-		/* DCS3 and later have DRQ/IRQ status here */
-		/* TODO: verify which bit is intrq */
-		r = wd17xx_intrq(fdc);
-		r |= wd17xx_status_noclear(fdc) & 0x80;
+	unsigned char r = 0xFF;
+	/* Stop the debugger causing side effects in the I/O window */
+	if (debug && is_slot(addr))
+		return 0xA5;
+	if (is_slot(addr)) {
+		struct slot *s = slot[(addr & 0xF0) >> 4];
+		r = s->read(s->private, addr & 0x0F);
 	} else if (addr >= 0xF800)
 		r = rom[addr & 0x7FF];
 	else if (addr < 0xE000)
@@ -170,24 +287,11 @@ void e6809_write8(unsigned addr, unsigned char val)
 {
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X = %02X\n", addr, val);
-	if ((addr & 0xEFFE) == 0xE004)
-		acia_write(acia, addr & 1, val);
-	else if (addr >= 0xFFF0)
+	if (is_slot(addr)) {
+		struct slot *s = slot[(addr & 0xF0) >> 4];
+		s->write(s->private, addr & 0x0F, val);
+	} else if (addr >= 0xFFF0)
 		dat[addr & 0x0F] = ~val;
-	else if (ide && addr >= 0xE058 && addr <= 0xE05F)
-		ide_write8(ide, addr & 7, val);
-	else if (addr == 0xE018 && fdc)
-		wd17xx_command(fdc, val);
-	else if (addr == 0xE019 && fdc)
-		wd17xx_write_track(fdc, val);
-	else if (addr == 0xE01A && fdc)
-		wd17xx_write_sector(fdc, val);
-	else if (addr == 0xE01B && fdc)
-		wd17xx_write_data(fdc, val);
-	else if (addr == 0xE014 && fdc) {
-		/* Drive register.. unclear what all bits are */
-		wd17xx_set_drive(fdc, val & 1);
-	}
 	else if (addr >= 0xF800)
 		fprintf(stderr, "***ROM WRITE %04X = %02X\n", addr, val);
 	else if (addr < 0xE000)
@@ -200,7 +304,7 @@ static const char *make_flags(uint8_t cc)
 	char *p = "EFHINZVC";
 	char *d = buf;
 
-	while(*p) {
+	while (*p) {
 		if (cc & 0x80)
 			*d++ = *p;
 		else
@@ -220,9 +324,7 @@ void e6809_instruction(unsigned pc)
 	if (trace & TRACE_CPU) {
 		d6809_disassemble(buf, pc);
 		fprintf(stderr, "%04X: %-16.16s | ", pc, buf);
-		fprintf(stderr, "%s %02X:%02X %04X %04X %04X %04X\n",
-			make_flags(r->cc),
-			r->a, r->b, r->x, r->y, r->u, r->s);
+		fprintf(stderr, "%s %02X:%02X %04X %04X %04X %04X\n", make_flags(r->cc), r->a, r->b, r->x, r->y, r->u, r->s);
 	}
 }
 
@@ -255,9 +357,9 @@ struct diskgeom {
 };
 
 struct diskgeom disktypes[] = {
-	{ "CP/M 77 track DSDD", 788480, 2, 77, 10, 512},
-	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512},
-	{ NULL,}
+	{ "CP/M 77 track DSDD", 788480, 2, 77, 10, 512 },
+	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512 },
+	{ NULL, }
 };
 
 static struct diskgeom *guess_format(const char *path)
@@ -270,12 +372,12 @@ static struct diskgeom *guess_format(const char *path)
 		exit(1);
 	}
 	size = s.st_size;
-	while(d->name) {
+	while (d->name) {
 		if (d->size == size)
 			return d;
 		d++;
 	}
-	fprintf(stderr, "nascom: unknown disk format size %ld.\n", (long)size);
+	fprintf(stderr, "nascom: unknown disk format size %ld.\n", (long) size);
 	exit(1);
 }
 
@@ -331,13 +433,18 @@ int main(int argc, char *argv[])
 		close(fd);
 	}
 
-	if (idepath ) {
-		ide = ide_allocate("cf");
+	/* Our slot array is effectively 'off by one' as the real slots
+	   are numbered 1 for 0x 2 for 1x etc */
+	if (idepath) {
+		struct ide_controller *ide = ide_allocate("cf");
+
+		slot[5] = &pt_ss30_slot;
+		slot[5]->private = ide;
 		if (ide) {
 			int ide_fd = open(idepath, O_RDWR);
 			if (ide_fd == -1) {
 				perror(idepath);
-				ide = NULL;
+				slot[5] = &empty_slot;
 			} else if (ide_attach(ide, 0, ide_fd) == 0) {
 				ide_reset_begin(ide);
 			}
@@ -345,8 +452,12 @@ int main(int argc, char *argv[])
 	}
 
 	if (need_fdc) {
-		fdc = wd17xx_create(1797);
-		for (i = 0; i <2 ; i++) {
+		/* We don't copy the defs as we only have one of each for now. 
+		   Will fix that later */
+		struct wd17xx *fdc = wd17xx_create(1797);
+		slot[1] = &dcs34_slot;
+		slot[1]->private = fdc;
+		for (i = 0; i < 2; i++) {
 			if (fdc_path[i]) {
 				struct diskgeom *d = guess_format(fdc_path[i]);
 				printf("[Drive %c, %s.]\n", 'A' + i, d->name);
@@ -356,9 +467,13 @@ int main(int argc, char *argv[])
 		wd17xx_trace(fdc, trace & TRACE_FDC);
 	}
 
-	acia = acia_create();
-	acia_set_input(acia, 1);
-	acia_trace(acia, trace & TRACE_ACIA);
+	{
+		struct acia *acia = acia_create();
+		slot[0] = &mps_slot;
+		slot[0]->private = acia;
+		acia_set_input(acia, 1);
+		acia_trace(acia, trace & TRACE_ACIA);
+	}
 
 	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
@@ -390,13 +505,15 @@ int main(int argc, char *argv[])
 	while (!done) {
 		unsigned int i;
 		for (i = 0; i < 100; i++) {
-			while(cycles < clockrate)
+			while (cycles < clockrate)
 				cycles += e6809_sstep(live_irq, 0);
 			cycles -= clockrate;
 			recalc_interrupts();
 		}
 		/* Drive the serial */
-		acia_timer(acia);
+		/* TODO; we will need to ask slots for stuff each
+		   pass */
+		acia_timer(mps_slot.private);
 		/* Do 5ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
