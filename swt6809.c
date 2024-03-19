@@ -1,5 +1,12 @@
 /*
  *	SWTPC 6809
+ *	MP-09 CPU card
+ *	20bit DAT addressing
+ *	ACIA at F004 (mirrored at E004 for other monitors)
+ *	PT SS30-IDE
+ *
+ *	TODO: sort out Exxx v Fxxx for different monitor/board setups
+ *	(Fxxx is more normal)
  */
 
 #include <stdio.h>
@@ -12,10 +19,14 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/types.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include "d6809.h"
 #include "e6809.h"
 #include "acia.h"
+#include "ide.h"
+#include "wd17xx.h"
 
 static uint8_t rom[4096];
 static uint8_t ram[1024 * 1024];
@@ -23,7 +34,9 @@ static uint8_t dat[16];
 
 static unsigned fast;
 
-struct acia *acia;
+static struct acia *acia;
+static struct ide_controller *ide;
+static struct wd17xx *fdc;
 
 /* 1MHz */
 static uint16_t clockrate =  100;
@@ -42,6 +55,7 @@ static volatile int done;
 #define TRACE_CPU	16
 #define TRACE_IRQ	32
 #define TRACE_ACIA	64
+#define TRACE_FDC	128
 
 static int trace = 0;
 
@@ -111,9 +125,29 @@ unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 {
         unsigned char r = 0xFF;
         /* Stop the debugger causing side effects in the I/O window */
-	if ((addr & 0xFFFE) == 0xE004)
+        if (debug && addr >= 0xE000 && addr < 0xF800)
+        	return r;
+
+	/* TODO: set the I/O window up properly, mask and decode
+	   to slot implementations of cards */
+	if ((addr & 0xEFFE) == 0xE004)
 		r = acia_read(acia, addr & 1);
-	else if (addr >= 0xF800)
+	else if (ide && addr >= 0xE058 && addr <= 0xE05F)
+		r = ide_read8(ide, addr & 7);
+	else if (fdc && addr == 0xE018)
+		r = wd17xx_status(fdc);
+	else if (fdc && addr == 0xE019)
+		r = wd17xx_read_track(fdc);
+	else if (fdc && addr == 0xE01A)
+		r = wd17xx_read_sector(fdc);
+	else if (fdc && addr == 0xE01B)
+		r = wd17xx_read_data(fdc);
+	else if (fdc && addr == 0xE014) {
+		/* DCS3 and later have DRQ/IRQ status here */
+		/* TODO: verify which bit is intrq */
+		r = wd17xx_intrq(fdc);
+		r |= wd17xx_status_noclear(fdc) & 0x80;
+	} else if (addr >= 0xF800)
 		r = rom[addr & 0x7FF];
 	else if (addr < 0xE000)
 		r = *dat_xlate(addr);
@@ -136,10 +170,24 @@ void e6809_write8(unsigned addr, unsigned char val)
 {
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X = %02X\n", addr, val);
-	if ((addr & 0xFFFE) == 0xE004)
+	if ((addr & 0xEFFE) == 0xE004)
 		acia_write(acia, addr & 1, val);
 	else if (addr >= 0xFFF0)
 		dat[addr & 0x0F] = ~val;
+	else if (ide && addr >= 0xE058 && addr <= 0xE05F)
+		ide_write8(ide, addr & 7, val);
+	else if (addr == 0xE018 && fdc)
+		wd17xx_command(fdc, val);
+	else if (addr == 0xE019 && fdc)
+		wd17xx_write_track(fdc, val);
+	else if (addr == 0xE01A && fdc)
+		wd17xx_write_sector(fdc, val);
+	else if (addr == 0xE01B && fdc)
+		wd17xx_write_data(fdc, val);
+	else if (addr == 0xE014 && fdc) {
+		/* Drive register.. unclear what all bits are */
+		wd17xx_set_drive(fdc, val & 1);
+	}
 	else if (addr >= 0xF800)
 		fprintf(stderr, "***ROM WRITE %04X = %02X\n", addr, val);
 	else if (addr < 0xE000)
@@ -193,8 +241,42 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "swt6809: [-f] [-r rompath] [-d debug]\n");
+	fprintf(stderr, "swt6809: [-f] [-i idepath] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
+}
+
+struct diskgeom {
+	const char *name;
+	unsigned int size;
+	unsigned int sides;
+	unsigned int tracks;
+	unsigned int spt;
+	unsigned int secsize;
+};
+
+struct diskgeom disktypes[] = {
+	{ "CP/M 77 track DSDD", 788480, 2, 77, 10, 512},
+	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512},
+	{ NULL,}
+};
+
+static struct diskgeom *guess_format(const char *path)
+{
+	struct diskgeom *d = disktypes;
+	struct stat s;
+	off_t size;
+	if (stat(path, &s) == -1) {
+		perror(path);
+		exit(1);
+	}
+	size = s.st_size;
+	while(d->name) {
+		if (d->size == size)
+			return d;
+		d++;
+	}
+	fprintf(stderr, "nascom: unknown disk format size %ld.\n", (long)size);
+	exit(1);
 }
 
 int main(int argc, char *argv[])
@@ -203,18 +285,33 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	char *rompath = "swt6809.rom";
+	char *idepath = NULL;
+	char *fdc_path[2] = { NULL, NULL };
 	unsigned int cycles = 0;
+	unsigned need_fdc = 0;
+	unsigned i;
 
-	while ((opt = getopt(argc, argv, "d:fr:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:fi:r:")) != -1) {
 		switch (opt) {
-		case 'r':
-			rompath = optarg;
+		case 'A':
+			fdc_path[0] = optarg;
+			need_fdc = 1;
+			break;
+		case 'B':
+			fdc_path[1] = optarg;
+			need_fdc = 1;
 			break;
 		case 'd':
 			trace = atoi(optarg);
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'i':
+			idepath = optarg;
+			break;
+		case 'r':
+			rompath = optarg;
 			break;
 		default:
 			usage();
@@ -232,6 +329,31 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "swt6809: short rom '%s'.\n", rompath);
 		exit(EXIT_FAILURE);
 		close(fd);
+	}
+
+	if (idepath ) {
+		ide = ide_allocate("cf");
+		if (ide) {
+			int ide_fd = open(idepath, O_RDWR);
+			if (ide_fd == -1) {
+				perror(idepath);
+				ide = NULL;
+			} else if (ide_attach(ide, 0, ide_fd) == 0) {
+				ide_reset_begin(ide);
+			}
+		}
+	}
+
+	if (need_fdc) {
+		fdc = wd17xx_create(1797);
+		for (i = 0; i <2 ; i++) {
+			if (fdc_path[i]) {
+				struct diskgeom *d = guess_format(fdc_path[i]);
+				printf("[Drive %c, %s.]\n", 'A' + i, d->name);
+				wd17xx_attach(fdc, i, fdc_path[i], d->sides, d->tracks, d->spt, d->secsize);
+			}
+		}
+		wd17xx_trace(fdc, trace & TRACE_FDC);
 	}
 
 	acia = acia_create();

@@ -1117,7 +1117,9 @@ void e6809_reset (int trace)
 
 	reg_dp = 0;
 
-	reg_cc = FLAG_I | FLAG_F;
+	/* Only the fact I and F are set is documented, but E appears to
+	   also start set and SWTBUG relies on it */
+	reg_cc = FLAG_I | FLAG_F | FLAG_E;
 	irq_status = IRQ_NORMAL;
 
 	reg_pc = read16 (0xfffe);
