@@ -1117,9 +1117,11 @@ void e6809_reset (int trace)
 
 	reg_dp = 0;
 
-	/* Only the fact I and F are set is documented, but E appears to
-	   also start set and SWTBUG relies on it */
-	reg_cc = FLAG_I | FLAG_F | FLAG_E;
+	/* The processor starts with DP = 0 and CC I and F set. On the 6309
+	   some other bits may be set, on the 6809 generally not.
+	   (checked by Ciaran @ xroar) */
+
+	reg_cc = FLAG_I | FLAG_F;
 	irq_status = IRQ_NORMAL;
 
 	reg_pc = read16 (0xfffe);
@@ -2313,12 +2315,13 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		break;
 	/* rti */
 	case 0x3b:
+		reg_cc = pull8(&reg_s);
+		cycles += 1;
 		if (get_cc (FLAG_E)) {
-			inst_pul (0xff, &reg_s, &reg_u, &cycles);
+			inst_pul (0xfe, &reg_s, &reg_u, &cycles);
 		} else {
-			inst_pul (0x81, &reg_s, &reg_u, &cycles);
+			inst_pul (0x80, &reg_s, &reg_u, &cycles);
 		}
-
 		cycles += 3;
 		break;
 	/* swi */
@@ -2327,8 +2330,8 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		inst_psh (0xff, &reg_s, reg_u, &cycles);
 		set_cc (FLAG_I, 1);
 		set_cc (FLAG_F, 1);
-        reg_pc = read16 (0xfffa);
-        cycles += 7;
+	        reg_pc = read16 (0xfffa);
+	        cycles += 7;
 		break;
 	/* sync */
 	case 0x13:
