@@ -2,11 +2,16 @@
  *	SWTPC 6809
  *	MP-09 CPU card
  *	20bit DAT addressing
- *	ACIA at F004 (mirrored at E004 for other monitors)
- *	PT SS30-IDE
+ *	ACIA at slot 1
+ *	DCS4ish at slot 2
+ *	PT SS30-IDE slot 6
  *
- *	TODO: sort out Exxx v Fxxx for different monitor/board setups
- *	(Fxxx is more normal)
+ *	TODO: sort out slot arrangement properly
+ *	How to handle stuff like DS68 Vidoe (E7FE/E7FF 6845, E800-EFFF
+ *	RAM)
+ *
+ *	Need to do MP-T timer board, MP-L parallel (plus PIA IDE),
+ *	maybe DMAF tuff and FD2 ?
  */
 
 #include <stdio.h>
@@ -30,9 +35,15 @@
 
 struct slot {
 	const char *name;
-	 uint8_t(*read) (void *, unsigned);
+	uint8_t(*read) (void *, unsigned);
 	void (*write)(void *, unsigned, uint8_t);
 	void *private;
+};
+
+struct mps2 {
+	struct acia *low;
+	struct acia *high;
+	uint8_t cli;
 };
 
 static uint8_t rom[4096];
@@ -149,6 +160,43 @@ static void mps_write(void *info, unsigned addr, uint8_t val)
 }
 
 static struct slot mps_slot = { "MPS", mps_read, mps_write };
+
+#if 0
+static uint8_t mps2_read(void *info, unsigned addr)
+{
+	struct mps2 *m = info;
+	switch(addr & 0x0E) {
+	case 0x0:
+		return acia_read(m->low, addr & 1);
+	case 0x4:
+		return acia_read(m->high, addr & 1);
+	case 0xE:
+		return m->cli;	/* Not really emulated */
+	default:
+		return 0xFF;
+	}
+}
+
+static void mps2_write(void *info, unsigned addr, uint8_t val)
+{
+	struct mps2 *m = info;
+	switch(addr & 0x0E) {
+	case 0x0:
+		acia_write(m->low, addr & 1, val);
+		break;
+	case 0x4:
+		acia_write(m->high, addr & 1, val);
+		break;
+	case 0xE:
+	default:
+		break;
+	}
+}
+
+static struct slot mps2_slot = { "MPS2", mps2_read, mps2_write };
+#endif
+
+/* TODO: PL-L2 - 6821  0/1 A data/control 2/3 b data/control E/F latch */
 
 static uint8_t dcs34_read(void *info, unsigned addr)
 {
