@@ -212,7 +212,7 @@ unsigned char do_e6809_read8(unsigned addr, unsigned debug)
             r = ram[addr];	/* Page 1 */
         else
             r = ram[(addr & 0x7FFF) | (page << 15)];
-	if (trace & TRACE_MEM)
+	if ((trace & TRACE_MEM) && !debug)
 		fprintf(stderr, "R %04X = %02X\n", addr, r);
 	return r;
 }
