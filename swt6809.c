@@ -32,11 +32,15 @@
 #include "acia.h"
 #include "ide.h"
 #include "wd17xx.h"
+#include "6840.h"
+#include "6821.h"
 
 struct slot {
 	const char *name;
 	uint8_t(*read) (void *, unsigned);
 	void (*write)(void *, unsigned, uint8_t);
+	unsigned (*irq)(void *);
+	void (*tick)(void *);
 	void *private;
 };
 
@@ -46,10 +50,15 @@ struct mps2 {
 	uint8_t cli;
 };
 
+struct mpid {
+	struct m6840 *timer;
+	struct m6821 *pia;
+};
+
 static uint8_t rom[4096];
 static uint8_t ram[1024 * 1024];
 static uint8_t dat[16];
-static struct slot *slot[16];
+static struct slot slot[16];
 
 static unsigned fast;
 
@@ -57,9 +66,6 @@ static unsigned fast;
 static uint16_t clockrate = 100;
 
 static uint8_t live_irq;
-
-#define IRQ_ACIA	1
-
 
 static volatile int done;
 
@@ -112,24 +118,6 @@ unsigned int next_char(void)
 	return c;
 }
 
-static void int_clear(unsigned int irq)
-{
-	live_irq &= ~(1 << irq);
-}
-
-static void int_set(unsigned int irq)
-{
-	live_irq |= 1 << irq;
-}
-
-void recalc_interrupts(void)
-{
-	if (acia_irq_pending(slot[0]->private))
-		int_set(IRQ_ACIA);
-	else
-		int_clear(IRQ_ACIA);
-}
-
 /* For now assume RAM only */
 static uint8_t *dat_xlate(unsigned addr)
 {
@@ -145,7 +133,16 @@ static void empty_write(void *info, unsigned addr, uint8_t val)
 {
 }
 
-static struct slot empty_slot = { "empty", empty_read, empty_write };
+static unsigned no_slot_int(void *info)
+{
+	return 0;
+}
+
+static void no_slot_tick(void *info)
+{
+}
+
+static struct slot empty_slot = { "empty", empty_read, empty_write, no_slot_int, no_slot_tick };
 
 static uint8_t mps_read(void *info, unsigned addr)
 {
@@ -159,7 +156,19 @@ static void mps_write(void *info, unsigned addr, uint8_t val)
 	acia_write(a, addr & 1, val);
 }
 
-static struct slot mps_slot = { "MPS", mps_read, mps_write };
+static unsigned mps_int(void *info)
+{
+	struct acia *a = info;
+	return acia_irq_pending(a);
+}
+
+static void mps_tick(void *info)
+{
+	struct acia *a = info;
+	acia_timer(a);
+}
+	
+static struct slot mps_slot = { "MPS", mps_read, mps_write, mps_int, mps_tick };
 
 #if 0
 static uint8_t mps2_read(void *info, unsigned addr)
@@ -192,6 +201,20 @@ static void mps2_write(void *info, unsigned addr, uint8_t val)
 		break;
 	}
 }
+
+static void mps2_int(void *info)
+{
+	struct mps2 *m = info;
+	return acia_irq_pending(m->low) | acia_irq_pending(m->high);
+}
+
+static void mps2_tick(void *info)
+{
+	struct mps2 *m = info;
+	acia_timer(m->low);
+	acia_timer(m->high);
+}
+	
 
 static struct slot mps2_slot = { "MPS2", mps2_read, mps2_write };
 #endif
@@ -259,8 +282,9 @@ static void dcs34_write(void *info, unsigned addr, uint8_t val)
 	}
 }
 
-//static struct slot dcs2_slot = { "DCS2", dcs2_read, dcs34_write };
-static struct slot dcs34_slot = { "DCS3/4", dcs34_read, dcs34_write };
+//static struct slot dcs2_slot = { "DCS2", dcs2_read, dcs34_write, no_slot_int, no_slot_tick };
+/* TODO: review IRQ */
+static struct slot dcs34_slot = { "DCS3/4", dcs34_read, dcs34_write, no_slot_int, no_slot_tick };
 
 static uint8_t pt_ss30_read(void *info, unsigned addr)
 {
@@ -274,26 +298,120 @@ static void pt_ss30_write(void *info, unsigned addr, uint8_t val)
 	ide_write8(i, addr & 7, val);
 }
 
-static struct slot pt_ss30_slot = { "PT_SS30", pt_ss30_read, pt_ss30_write };
+static struct slot pt_ss30_slot = { "PT_SS30", pt_ss30_read, pt_ss30_write, no_slot_int, no_slot_tick };
 
-static struct slot *slot[16] = {
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot,
-	&empty_slot
-};
+/*
+ *	Internal MPID glue
+ */
+
+/* Two x4 counters chained top bit unused with the input bit as bit 0 */
+static uint8_t mpid_counter;
+static struct mpid mpid;
+
+static void mpid_clock_counters(unsigned n)
+{
+	/* input edge */
+	if (!(mpid_counter & 1) && n == 1)
+		mpid_counter += 2;
+	else {
+		/* Keep in sync */
+		mpid_counter &= 0xFE;
+		mpid_counter |= n;
+	}
+	m6821_set_control(mpid.pia, M6821_CA1, mpid_counter & 0x80);
+}
+
+void m6840_output_change(struct m6840 *ptm, uint8_t output)
+{
+	/* Output 0 drives the counter, 2 drives input 1 */
+	if (output & 1)
+		mpid_clock_counters(output & 1);
+	if (output & 4)
+		m6840_external_clock(ptm, 2);
+}
+
+void m6821_ctrl_change(struct m6821 *pia, uint8_t ctrl)
+{
+	/* See strobe */
+}
+
+uint8_t m6821_input(struct m6821 *pin, int port)
+{
+	if (port == 0)
+		return mpid_counter;
+	/* Printer */
+	return 0xFF;
+}
+
+void m6821_output(struct m6821 *pia, int port, uint8_t data)
+{
+	if (port == 0)
+		return;	/* Error */
+	/* Printer data */
+}
+
+void m6821_strobe(struct m6821 *pia, int pin)
+{
+	/* CB2 is the output strobe CA2 is the speaker */
+}
+	
+static uint8_t mpid_pia_read(void *info, unsigned addr)
+{
+	struct mpid *mpid = info;
+	return m6821_read(mpid->pia, addr & 3);
+}
+
+static void mpid_pia_write(void *info, unsigned addr, uint8_t val)
+{
+	struct mpid *mpid = info;
+	m6821_write(mpid->pia, addr & 3, val);
+}
+
+static uint8_t mpid_timer_read(void *info, unsigned addr)
+{
+	struct mpid *mpid = info;
+	return m6840_read(mpid->timer, addr & 7);
+}
+
+static void mpid_timer_write(void *info, unsigned addr, uint8_t val)
+{
+	struct mpid *mpid = info;
+	m6840_write(mpid->timer, addr & 7, val);
+}
+
+static unsigned mpid_pia_irq(void *info)
+{
+	struct mpid *mpid = info;
+	return m6821_irq_pending(mpid->pia);
+}
+
+static unsigned mpid_timer_irq(void *info)
+{
+	struct mpid *mpid = info;
+	return m6840_irq_pending(mpid->timer);
+}
+
+static void mpid_timer_tick(void *info)
+{
+	struct mpid *mpid = info;
+	m6840_tick(mpid->timer, clockrate * 100);
+	m6840_external_clock(mpid->timer, 1);
+}
+
+static struct slot mpid_pia_slot = { "MPID", mpid_pia_read, mpid_pia_write, mpid_pia_irq, no_slot_tick };
+static struct slot mpid_timer_slot = { "MPID", mpid_timer_read, mpid_timer_write, mpid_timer_irq, mpid_timer_tick };
+
+static void mpid_create(void)
+{
+	mpid.pia = m6821_create();
+	mpid.timer = m6840_create();
+}
+
+static void slot_attach(unsigned snum, struct slot *s, void *private)
+{
+	memcpy(slot + snum, s, sizeof(struct slot));
+	slot[snum].private = private;
+}
 
 static unsigned is_slot(unsigned addr)
 {
@@ -303,6 +421,20 @@ static unsigned is_slot(unsigned addr)
 	return 0;
 }
 
+void recalc_interrupts(void)
+{
+	static unsigned prev;
+	unsigned irq = 0;
+	unsigned i;
+	for (i = 0; i < 16; i++)
+		irq |= (slot[i].irq(slot[i].private) << i);
+	if (irq != prev) {
+		fprintf(stderr, "INT: %x\n", live_irq);
+		prev = irq;
+	}
+	live_irq = !!irq;
+}
+
 unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 {
 	unsigned char r = 0xFF;
@@ -310,7 +442,7 @@ unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 	if (debug && is_slot(addr))
 		return 0xA5;
 	if (is_slot(addr)) {
-		struct slot *s = slot[(addr & 0xF0) >> 4];
+		struct slot *s = &slot[(addr & 0xF0) >> 4];
 		r = s->read(s->private, addr & 0x0F);
 	} else if (addr >= 0xF800)
 		r = rom[addr & 0x7FF];
@@ -336,7 +468,7 @@ void e6809_write8(unsigned addr, unsigned char val)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X = %02X\n", addr, val);
 	if (is_slot(addr)) {
-		struct slot *s = slot[(addr & 0xF0) >> 4];
+		struct slot *s = &slot[(addr & 0xF0) >> 4];
 		s->write(s->private, addr & 0x0F, val);
 	} else if (addr >= 0xFFF0)
 		dat[addr & 0x0F] = ~val;
@@ -481,21 +613,21 @@ int main(int argc, char *argv[])
 		close(fd);
 	}
 
+	for (i = 0; i < 16; i++)
+		slot_attach(i, &empty_slot, NULL);
+
 	/* Our slot array is effectively 'off by one' as the real slots
 	   are numbered 1 for 0x 2 for 1x etc */
 	if (idepath) {
 		struct ide_controller *ide = ide_allocate("cf");
-
-		slot[5] = &pt_ss30_slot;
-		slot[5]->private = ide;
 		if (ide) {
 			int ide_fd = open(idepath, O_RDWR);
 			if (ide_fd == -1) {
 				perror(idepath);
-				slot[5] = &empty_slot;
 			} else if (ide_attach(ide, 0, ide_fd) == 0) {
 				ide_reset_begin(ide);
 			}
+			slot_attach(5, &pt_ss30_slot, ide);
 		}
 	}
 
@@ -503,8 +635,7 @@ int main(int argc, char *argv[])
 		/* We don't copy the defs as we only have one of each for now. 
 		   Will fix that later */
 		struct wd17xx *fdc = wd17xx_create(1797);
-		slot[1] = &dcs34_slot;
-		slot[1]->private = fdc;
+		slot_attach(1, &dcs34_slot, fdc);
 		for (i = 0; i < 2; i++) {
 			if (fdc_path[i]) {
 				struct diskgeom *d = guess_format(fdc_path[i]);
@@ -517,16 +648,20 @@ int main(int argc, char *argv[])
 
 	{
 		struct acia *acia = acia_create();
-		slot[0] = &mps_slot;
-		slot[0]->private = acia;
+		slot_attach(0, &mps_slot, acia);
 		acia_set_input(acia, 1);
 		acia_trace(acia, trace & TRACE_ACIA);
 	}
 
+	mpid_create();
+	slot_attach(8, &mpid_pia_slot, &mpid);
+	slot_attach(9, &mpid_timer_slot, &mpid);
+
 	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
+	tc.tv_nsec = 10000000L;
+	/* 20ms a cycle, so we get 100Hz for the MP-ID */
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -558,11 +693,9 @@ int main(int argc, char *argv[])
 			cycles -= clockrate;
 			recalc_interrupts();
 		}
-		/* Drive the serial */
-		/* TODO; we will need to ask slots for stuff each
-		   pass */
-		acia_timer(mps_slot.private);
-		/* Do 5ms of I/O and delays */
+		for (i = 0; i < 16; i++)
+			slot[i].tick(slot[i].private);
+		/* Do 10ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
 	}
