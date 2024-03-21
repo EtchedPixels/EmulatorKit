@@ -56,6 +56,8 @@ struct mpid {
 };
 
 static uint8_t rom[4096];
+static uint16_t rombase = 0xFC00;
+static uint16_t rommask = 0x03FF;
 static uint8_t ram[1024 * 1024];
 static uint8_t dat[16];
 static struct slot slot[16];
@@ -77,6 +79,7 @@ static volatile int done;
 #define TRACE_IRQ	32
 #define TRACE_ACIA	64
 #define TRACE_FDC	128
+#define TRACE_DAT	256
 
 static int trace = 0;
 
@@ -118,10 +121,34 @@ unsigned int next_char(void)
 	return c;
 }
 
-/* For now assume RAM only */
-static uint8_t *dat_xlate(unsigned addr)
+/*
+ *	The DAT doe a 4->8 expansion where the upper 4 bits are
+ *	a bank code and the lower 4 are an inverted A15-A12 output
+ *
+ *	FFxx is hardwired to physical FFFxxx (bank reg F0)
+ *	FFFxxx is the ROM space.
+ */
+static uint8_t *dat_xlate(unsigned addr, unsigned w)
 {
-	return ram + dat[addr >> 12] + (addr & 0xFFF);
+	unsigned d = dat[addr >> 12];
+	/* Upper bits are non inverted bank lower are inverted
+	   top physical address nybble */
+	/* Hardware hardwires 0xFFxx to be bank F address 0XXX which
+	   is the ROM */
+	if (addr >= 0xFF00 || d == 0xF0) {
+		if (w)
+			return NULL;
+		return rom + (addr & rommask);
+	}
+	d ^= 0x0F;
+	if (d >= 0x80)
+		return NULL;
+	return ram + (d << 12) + (addr & 0xFFF);
+}
+
+static uint8_t dat_page(unsigned addr)
+{
+	return dat[addr >> 12];
 }
 
 static uint8_t empty_read(void *info, unsigned addr)
@@ -167,7 +194,7 @@ static void mps_tick(void *info)
 	struct acia *a = info;
 	acia_timer(a);
 }
-	
+
 static struct slot mps_slot = { "MPS", mps_read, mps_write, mps_int, mps_tick };
 
 #if 0
@@ -214,7 +241,6 @@ static void mps2_tick(void *info)
 	acia_timer(m->low);
 	acia_timer(m->high);
 }
-	
 
 static struct slot mps2_slot = { "MPS2", mps2_read, mps2_write };
 #endif
@@ -354,7 +380,7 @@ void m6821_strobe(struct m6821 *pia, int pin)
 {
 	/* CB2 is the output strobe CA2 is the speaker */
 }
-	
+
 static uint8_t mpid_pia_read(void *info, unsigned addr)
 {
 	struct mpid *mpid = info;
@@ -423,33 +449,37 @@ static unsigned is_slot(unsigned addr)
 
 void recalc_interrupts(void)
 {
-	static unsigned prev;
+/*	static unsigned prev; */
 	unsigned irq = 0;
 	unsigned i;
 	for (i = 0; i < 16; i++)
 		irq |= (slot[i].irq(slot[i].private) << i);
+#if 0
 	if (irq != prev) {
 		fprintf(stderr, "INT: %x\n", live_irq);
 		prev = irq;
 	}
+#endif
 	live_irq = !!irq;
 }
 
 unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 {
 	unsigned char r = 0xFF;
+	uint8_t *ap;
 	/* Stop the debugger causing side effects in the I/O window */
 	if (debug && is_slot(addr))
 		return 0xA5;
 	if (is_slot(addr)) {
 		struct slot *s = &slot[(addr & 0xF0) >> 4];
 		r = s->read(s->private, addr & 0x0F);
-	} else if (addr >= 0xF800)
-		r = rom[addr & 0x7FF];
-	else if (addr < 0xE000)
-		r = *dat_xlate(addr);
+	} else {
+		ap = dat_xlate(addr, 0);
+		if (ap)
+			r = *ap;
+	}
 	if (!debug && (trace & TRACE_MEM))
-		fprintf(stderr, "R %04X = %02X\n", addr, r);
+		fprintf(stderr, "R [%02X]%04X = %02X\n", dat_page(addr), addr, r);
 	return r;
 }
 
@@ -463,19 +493,24 @@ unsigned char e6809_read8_debug(unsigned addr)
 	return do_e6809_read8(addr, 1);
 }
 
+/* FIXME: the actual hardware DAT maps everything but forces FFxx to
+the top 1K of ROM (0xF0) */
 void e6809_write8(unsigned addr, unsigned char val)
 {
 	if (trace & TRACE_MEM)
-		fprintf(stderr, "W %04X = %02X\n", addr, val);
+		fprintf(stderr, "W [%02X]%04X = %02X\n", dat_page(addr), addr, val);
 	if (is_slot(addr)) {
 		struct slot *s = &slot[(addr & 0xF0) >> 4];
 		s->write(s->private, addr & 0x0F, val);
-	} else if (addr >= 0xFFF0)
-		dat[addr & 0x0F] = ~val;
-	else if (addr >= 0xF800)
-		fprintf(stderr, "***ROM WRITE %04X = %02X\n", addr, val);
-	else if (addr < 0xE000)
-		*dat_xlate(addr) = val;
+	} else if (addr >= 0xFFF0) {
+		if (trace & TRACE_DAT)
+			fprintf(stderr, "DAT %1X: %2X\n", addr & 0x0F, val);
+		dat[addr & 0x0F] = val;
+	} else {
+		uint8_t *ap = dat_xlate(addr, 1);
+		if (ap)
+			*ap = val;
+	}
 }
 
 static const char *make_flags(uint8_t cc)
@@ -537,8 +572,12 @@ struct diskgeom {
 };
 
 struct diskgeom disktypes[] = {
+	{ "35 Track SS", 89600, 1, 35, 10, 256 },
+	{ "40 Track SS", 102400, 1, 40, 10, 256 },
+	{ "40 Track DS", 204800, 2, 40, 10, 256 },
 	{ "CP/M 77 track DSDD", 788480, 2, 77, 10, 512 },
 	{ "CP/M 77 track SSDD", 394240, 1, 77, 10, 512 },
+	{ "3.5\" HD DD", 1474560, 80, 18, 10, 512 },
 	{ NULL, }
 };
 
@@ -557,7 +596,7 @@ static struct diskgeom *guess_format(const char *path)
 			return d;
 		d++;
 	}
-	fprintf(stderr, "nascom: unknown disk format size %ld.\n", (long) size);
+	fprintf(stderr, "swt6809: unknown disk format size %ld.\n", (long) size);
 	exit(1);
 }
 
@@ -607,11 +646,18 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, rom, 2048) != 2048) {
-		fprintf(stderr, "swt6809: short rom '%s'.\n", rompath);
+	i = read(fd, rom, sizeof(rom));
+	if (i == 4096) {
+		rombase = 0xF000;
+		rommask = 0x0FFF;
+	} else if (i == 2048) {
+		rombase = 0xF800;
+		rommask = 0x07FF;
+	} else {
+		fprintf(stderr, "swt6809: unknown rom size '%d'.\n", i);
 		exit(EXIT_FAILURE);
-		close(fd);
 	}
+	close(fd);
 
 	for (i = 0; i < 16; i++)
 		slot_attach(i, &empty_slot, NULL);
@@ -632,8 +678,6 @@ int main(int argc, char *argv[])
 	}
 
 	if (need_fdc) {
-		/* We don't copy the defs as we only have one of each for now. 
-		   Will fix that later */
 		struct wd17xx *fdc = wd17xx_create(1797);
 		slot_attach(1, &dcs34_slot, fdc);
 		for (i = 0; i < 2; i++) {
