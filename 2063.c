@@ -841,7 +841,8 @@ uint8_t io_read(int unused, uint16_t addr)
 	}
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
-	return 0x78;	/* 78 usual CMOS Z80 float */
+	/* 2063 has pullups on the data bus */
+	return 0xFF;
 }
 
 void io_write(int unused, uint16_t addr, uint8_t val)
