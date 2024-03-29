@@ -121,6 +121,7 @@ static uint8_t maths8add(struct ns8070 *cpu, uint8_t a, uint8_t b, uint8_t r)
         cpu->s |= S_CL;
     if (b & ~r & 0x80)
         cpu->s |= S_CL;
+    return r;
 }
 
 static uint8_t maths8sub(struct ns8070 *cpu, uint8_t a, uint8_t b, uint8_t r)
@@ -139,6 +140,8 @@ static uint8_t maths8sub(struct ns8070 *cpu, uint8_t a, uint8_t b, uint8_t r)
         cpu->s |= S_CL;
     if (~a & r & 0x80)
         cpu->s |= S_CL;
+    cpu->s ^= S_CL;
+    return r;
 }
 
 static void maths16ea(struct ns8070 *cpu, uint16_t val, int dir)
@@ -154,6 +157,7 @@ static void maths16ea(struct ns8070 *cpu, uint16_t val, int dir)
             cpu->s |= S_OV;
         if (r & 0x10000)
             cpu->s |= S_CL;
+        cpu->s ^= S_CL;
     } else { 
         r = ea + val;
         if (((r ^ ea) & 0x8000)  && ((r ^ val) & 0x8000))
@@ -171,13 +175,13 @@ static unsigned int do_ssm(struct ns8070 *cpu, uint16_t *ptr)
     unsigned int clocks = 0;
 
     while(n++ < 256) {
-        if (mread(cpu, *ptr++) == cpu->a) {
+        if (mread(cpu, (*ptr)++) == cpu->a) {
             cpu->pc += 2;
             return clocks + 7;
         }
         clocks += 4;
     }
-    *ptr--;		/* Gets 255 increments */
+    (*ptr)--;		/* Gets 255 increments */
     return clocks + 5;
 }    
 
@@ -492,6 +496,8 @@ static uint16_t make_address(struct ns8070 *cpu, uint8_t mode, int8_t offset)
             return addr;
         }
     }
+    fprintf(stderr, "Invalid addressing mode\n");
+    exit(1);
 }
 
 static uint8_t pop8(struct ns8070 *cpu)
@@ -687,6 +693,8 @@ static unsigned int execute_high(struct ns8070 *cpu)
         cpu->a -= val;
         return 7 + cost;
     }
+    fprintf(stderr, "Uknonw instruction %x\n", op);
+    exit(1);
 }
 
 /* There does not seem to be a very convenient logic about what operations
@@ -802,13 +810,14 @@ static unsigned int execute_op(struct ns8070 *cpu)
     case 0x2D:	/* BND */
         /* Seriously weird - branch if not ascii 0-9, otherwise subtract "0" */
         offs = get_off8(cpu);
+        tmp8 = cpu->a;
         if (cpu->a >= 48 && cpu->a <= 57) {
             cpu->a -= 48;
         } else {
             cpu->pc += offs;
         }        
         /* The low test occurs first and is 2 clocks shorter */
-        return cpu->a < 48 ? 7 : 9;
+        return tmp8 < 48 ? 7 : 9;
     case 0x2E:	/* SSM P2 */
         return do_ssm(cpu, &cpu->p2);
     case 0x2F:	/* SSM P3 */
@@ -816,19 +825,19 @@ static unsigned int execute_op(struct ns8070 *cpu)
     case 0x30:	/* LD EA,PC */
         cpu->e = cpu->pc >> 8;
         cpu->a = cpu->pc;
-        break;
+        return 4;
     case 0x31:	/* LD EA,SP */
         cpu->e = cpu->sp >> 8;
         cpu->a = cpu->sp;
-        break;
+        return 4;
     case 0x32:	/* LD EA,P2 */
         cpu->e = cpu->p2 >> 8;
         cpu->a = cpu->p2;
-        break;
+        return 4;
     case 0x33:	/* LD EA,P3 */
         cpu->e = cpu->p3 >> 8;
         cpu->a = cpu->p3;
-        break;
+        return 4;
     case 0x38:	/* POP A */
         cpu->a = pop8(cpu);
         return 6;
@@ -1035,6 +1044,7 @@ struct ns8070 *ns8070_create(uint8_t *rom)
     cpu->rom = rom;
     cpu->trace = 0;
     ns8070_reset(cpu);
+    return cpu;
 }
 
 void ns8070_trace(struct ns8070 *cpu, unsigned int onoff)

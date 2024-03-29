@@ -20,6 +20,7 @@ static uint8_t fast;
 static volatile unsigned done;
 static unsigned trace;
 struct ns8070 *cpu;
+static uint8_t pendc;			/* Pending char */
 
 /* Our little I/O ROM so we don't have decode bitbanging */
 static const uint8_t iorom[] = {
@@ -78,12 +79,13 @@ unsigned int next_char(void)
 uint8_t ns8070_read_op(struct ns8070 *cpu, uint16_t addr, int debug)
 {
 	if (addr == 0xFCFF) {
-		if (check_chario() & 1) {
-			uint8_t r = next_char();
+		uint8_t r = pendc;
+		if (r) {
+			pendc = 0;
+			ns8070_set_a(cpu, 1);
 			write(1, &r, 1);
-			return r;
 		}
-		return 0;
+		return r;
 	}
 	if (addr >= 0xFD00 && addr < 0xFD00 + sizeof(iorom))
 		return iorom[addr - 0xFD00];
@@ -104,8 +106,10 @@ uint8_t mem_read(struct ns8070 *cpu, uint16_t addr)
 
 void mem_write(struct ns8070 *cpu, uint16_t addr, uint8_t val)
 {
-    if (addr == 0xFCFF)
+    if (addr == 0xFCFF) {
+    	val &= 0x7F;
     	write(1, &val, 1);
+    }
     /* BASIC and spare ROM */
     if (addr < 0x1000)
         return;
@@ -186,6 +190,8 @@ int main(int argc, char *argv[])
 	cpu = ns8070_create(ramrom);
 	ns8070_reset(cpu);
 	ns8070_trace(cpu, trace & TRACE_CPU);
+	ns8070_set_a(cpu, 1);
+	ns8070_set_b(cpu, 1);
 
 	/* 5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
@@ -215,7 +221,15 @@ int main(int argc, char *argv[])
 	while (!done) {
 	        /* TODO: timing, ints etc */
                 ns8070_execute_one(cpu);
-		check_chario();
+		if (check_chario() & 1) {
+			pendc  = next_char();
+			/* The TinyBASIC expects break type conditions
+			   that persist for a while - this is a fudge */
+			if (pendc == 3)
+				ns8070_set_a(cpu, 0);
+			else
+				ns8070_set_a(cpu, 1);
+		}
 	}
 	exit(0);
 }

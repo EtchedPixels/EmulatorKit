@@ -7,7 +7,7 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80 \
-	trcwm6809 swt6809
+	trcwm6809 swt6809 nybbles
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2
@@ -276,6 +276,9 @@ trcwm6809: trcwm6809.o sdcard.o 16x50.o d6809.o e6809.o
 
 swt6809: swt6809.o d6809.o e6809.o acia.o 6821.o 6840.o ide.o wd17xx.o
 	cc -g3 swt6809.o acia.o d6809.o e6809.o 6821.o 6840.o ide.o wd17xx.o -o swt6809
+
+nybbles: nybbles.o ns807x.o
+	cc -g3 nybbles.o ns807x.o -o nybbles
 
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o

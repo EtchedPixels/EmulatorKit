@@ -8,8 +8,8 @@ extern struct ns8070 *ns8070_create(uint8_t *rom);
 extern void ns8070_reset(struct ns8070 *cpu);
 extern void ns8070_trace(struct ns8070 *cpu, unsigned int onoff);
 extern unsigned int ns8070_execute_one(struct ns8070 *cpu);
-extern void ns8070_seta(struct ns8070 *cpu, unsigned int a);
-extern void ns8070_setb(struct ns8070 *cpu, unsigned int b);
+extern void ns8070_set_a(struct ns8070 *cpu, unsigned int a);
+extern void ns8070_set_b(struct ns8070 *cpu, unsigned int b);
 
 /*
  *	Helpers required by the implementor
