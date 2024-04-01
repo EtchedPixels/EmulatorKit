@@ -50,7 +50,7 @@ static uint32_t texturebits[ROWS * COLS * CWIDTH * CHEIGHT];
 static uint8_t mlatch;
 static uint8_t vlatch;
 static uint8_t sysstat;
-static uint8_t dipswitches = 2;
+static uint8_t dipswitches = 1;
 static uint8_t bauda;
 static uint8_t baudb;
 
@@ -181,6 +181,8 @@ static void maxfdc_write(uint8_t addr, uint8_t val)
 
 static void maxfdc_mlatch(uint8_t latch)
 {
+	/* The CPM code claims 0x80 is an NMI enable but it's never used so who
+	   knows. It's not in the technical manual */
 	/* Low 4 bits drive sel lines */
 	switch(latch & 0x0F) {
 		case 0:
@@ -201,7 +203,7 @@ static void maxfdc_mlatch(uint8_t latch)
 		default:
 			fprintf(stderr, "fdc: invalid drive select %x\n", latch & 0x0F);
 	}
-	/* set_density(fdc, !!(val & 0x40)); */
+	wd17xx_set_density(fdc, (latch & 0x40) ? DEN_DD : DEN_SD);
 	wd17xx_set_side(fdc, !!(latch & 0x10));
 	
 	/* 0x20 is 8" v 5" but also starts motor for 3 secs */
@@ -1431,6 +1433,8 @@ int main(int argc, char *argv[])
 			printf("[Drive %c, %s.]\n", 'A' + i, d->name);
 			wd17xx_attach(fdc, i, fdc_path[i], d->sides, d->tracks, d->spt, d->secsize);
 			wd17xx_set_sector0(fdc, i, d->sector0);
+			/* Double density; required for now TODO */
+			wd17xx_set_media_density(fdc, i, DEN_DD);
 		}
 	}
 	wd17xx_trace(fdc, trace & TRACE_FDC);

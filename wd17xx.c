@@ -21,6 +21,7 @@ struct wd17xx {
 				   and on the Ampro sometimes 17 */
 	unsigned int side1[4];	/* Base track number for second side. Usually 0
 				   but some systems do strange stuff */
+	unsigned int diskden[4];
 	unsigned int drive;
 	uint8_t buf[2048];
 	unsigned int pos;
@@ -33,6 +34,7 @@ struct wd17xx {
 	uint8_t side;
 	uint8_t lastcmd;
 	unsigned int intrq;
+	unsigned int density;
 	int stepdir;
 	unsigned int motor;
 	unsigned int spinup;
@@ -218,6 +220,17 @@ void wd17xx_tick(struct wd17xx *fdc, unsigned ms)
 	}
 }
 
+static void wd17xx_check_density(struct wd17xx *fdc)
+{
+	if (fdc->density == DEN_ANY || fdc->diskden[fdc->drive] == DEN_ANY)
+		return;
+	if (fdc->density == fdc->diskden[fdc->drive])
+		return;
+	fdc->status &= TRACK0 | HEADLOAD;
+	/* SEEKER on type 1 RECNFERR on others so this works fine for both */
+	fdc->status |= SEEKERR;
+}
+
 void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 {
 	unsigned int size = fdc->secsize[fdc->drive];
@@ -277,6 +290,8 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->intrq = 1;
 		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
+		if (v & 0x08)
+			wd17xx_check_density(fdc);
 		break;
 	case 0x10:	/* seek */
 		fdc->intrq = 1;
@@ -294,8 +309,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		}
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
-		if (v & 0x08)
+		if (v & 0x08) {
 			fdc->status |= HEADLOAD;
+			wd17xx_check_density(fdc);
+		}
 		wd17xx_motor(fdc, 1/*DEBUGME motor*/);
 		break;
 	case 0x20:	/* step */
@@ -307,8 +324,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->status = INDEX;
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
-		if (v & 0x08)
+		if (v & 0x08) {
 			fdc->status |= HEADLOAD;
+			wd17xx_check_density(fdc);
+		}
 		fdc->intrq = 1;
 		break;
 	case 0x40:	/* step in */
@@ -318,8 +337,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (track < 128)
 			fdc->track++;
 		fdc->status = INDEX;
-		if (v & 0x08)
+		if (v & 0x08) {
 			fdc->status |= HEADLOAD;
+			wd17xx_check_density(fdc);
+		}
 		fdc->intrq = 1;
 		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
@@ -331,8 +352,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->status = INDEX;
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
-		if (v & 0x08)
+		if (v & 0x08) {
 			fdc->status |= HEADLOAD;
+			wd17xx_check_density(fdc);
+		}
 		fdc->intrq = 1;
 		fdc->stepdir = -1;
 		wd17xx_motor(fdc, motor);
@@ -356,6 +379,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		}
 		fdc->rdsize = size;
 		fdc->status |= BUSY | DRQ;
+		wd17xx_check_density(fdc);
 		wd17xx_motor(fdc, motor);
 		break;
 	case 0xA0:	/* Write sector */
@@ -370,38 +394,46 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->wr = 1;
 		wd17xx_motor(fdc, motor);
 		wd17xx_side_control(fdc, v);
+		wd17xx_check_density(fdc);
 		break;
 	case 0xC0:	/* read address */
+		wd17xx_side_control(fdc, v);
+		/* TODO: check this on headloaded seeks/restore read/write */
+		if (fdc->side >= fdc->sides[fdc->drive]) {
+			fdc->status = RECNFERR;
+			fdc->intrq = 1;
+			return;
+		}
 		fdc->status |= BUSY | DRQ;
 		fdc->rd = 1;
-		fdc->rdsize = 6;
-		fdc->buf[0] = track;
-
-		wd17xx_side_control(fdc, v);
+		fdc->rdsize = 7;
 
 		/* If we tried to seek off the end of the disk then
 		   we'll stop at the end track and see the data there */
+		fdc->buf[0] = 0x00;	/* Junk byte ? FIXME what goes here */
+
+		fdc->buf[1] = track;
 		if (fdc->track >= fdc->tracks[fdc->drive]) {
-			fdc->buf[0] = fdc->tracks[fdc->drive] - 1;
+			fdc->buf[1] = fdc->tracks[fdc->drive] - 1;
 		}
-		fdc->buf[1] = fdc->side;
-		fdc->buf[2] = fdc->sector0[fdc->drive];
+		fdc->buf[2] = fdc->side;
+		fdc->buf[3] = fdc->sector0[fdc->drive];
 		switch(fdc->secsize[fdc->drive]) {
 		case 128:
-			fdc->buf[3] = 0x00;
+			fdc->buf[4] = 0x00;
 			break;
 		case 256:
-			fdc->buf[3] = 0x01;
+			fdc->buf[4] = 0x01;
 			break;
 		case 512:
-			fdc->buf[3] = 0x02;
+			fdc->buf[4] = 0x02;
 			break;
 		case 1024:
-			fdc->buf[3] = 0x03;
+			fdc->buf[4] = 0x03;
 			break;
 		}
-		fdc->buf[4] = 0xFA;
-		fdc->buf[5] = 0xAF;
+		fdc->buf[5] = 0xFA;
+		fdc->buf[6] = 0xAF;
 		/* Hardware weirdness */
 		fdc->sector = fdc->track;
 		fdc->intrq = 1;
@@ -409,6 +441,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 //		fdc->status &= ~BUSY;	/* ?? need to know what real chip does */
 		wd17xx_motor(fdc, 1);
 		fdc->busyhack = 64;
+		wd17xx_check_density(fdc);
 		break;
 	case 0xD0:	/* Force interrupt : handled above */
 		break;
@@ -534,4 +567,14 @@ void wd17xx_set_side1(struct wd17xx *fdc, unsigned drive, unsigned offset)
 uint8_t wd17xx_intrq(struct wd17xx *fdc)
 {
 	return fdc->intrq;
+}
+
+void wd17xx_set_density(struct wd17xx *fdc, unsigned den)
+{
+	fdc->density = den;
+}
+
+void wd17xx_set_media_density(struct wd17xx *fdc, unsigned drive, unsigned den)
+{
+	fdc->diskden[drive] = den;
 }

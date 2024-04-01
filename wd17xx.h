@@ -24,3 +24,10 @@ extern void wd17xx_motor(struct wd17xx *fdc, unsigned on);
 extern void wd17xx_tick(struct wd17xx *fdc, unsigned ms);
 extern void wd17xx_set_motor_time(struct wd17xx *fdc, unsigned ms);
 extern unsigned wd17xx_get_motor(struct wd17xx *fdc);
+extern void wd17xx_set_density(struct wd17xx *fdc, unsigned den);
+extern void wd17xx_set_media_density(struct wd17xx *fdc, unsigned drive, unsigned den);
+
+#define DEN_ANY 0
+#define DEN_SD	1
+#define DEN_DD	2
+#define DEN_HD	3
