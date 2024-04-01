@@ -1187,7 +1187,7 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 	pixp = texturebits + x * CWIDTH + COLS * CWIDTH * y * CHEIGHT;
 
 	if (c & 0x80)
-		fp = tallchar + (c & 0x3F) * 16;
+		fp = tallchar + (c & 0x3F) * 8;
 	else
 		fp = shortchar + c * 8;
 
@@ -1197,6 +1197,8 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 			bits = 0;
 			fp--;
 		}
+		if (rows == 7 && (c & 0x80))
+			fp = tallchar + (c & 0x3F)  * 8 + 0x200;
 		for (pixels = 0; pixels < CWIDTH; pixels++) {
 			if (bits & 0x80)
 				*pixp++ = 0xFFD0D0D0;
