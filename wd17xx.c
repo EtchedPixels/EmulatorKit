@@ -39,6 +39,7 @@ struct wd17xx {
 	unsigned int trace;
 
 	unsigned int type;	/* Type - 1791, 1772 for now */
+	unsigned motor_timeout;	/* Timeout in ms */
 
 	unsigned int busyhack;
 };
@@ -181,9 +182,19 @@ void wd17xx_motor(struct wd17xx *fdc, unsigned on)
 			fprintf(stderr, "fdc%d: motor starts.\n",
 				fdc->drive);
 		/* Whatever spin up we need to do */
-		fdc->motor = 10000;	/* 10,000 ms */
+		fdc->motor = fdc->motor_timeout;	/* 10,000 ms */
 		fdc->spinup = 1000;
 	}
+}
+
+void wd17xx_set_motor_time(struct wd17xx *fdc, unsigned n)
+{
+	fdc->motor_timeout = n;
+}
+
+unsigned wd17xx_get_motor(struct wd17xx *fdc)
+{
+	return !!fdc->motor;
 }
 
 /* We only use this for very crude motor stuff at the moment */
@@ -243,7 +254,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			if (fdc->track == 0)
 				fdc->status |= TRACK0;
 		}
-		if (v & 0x01)
+		if (v & 0x0B)	/* not ready->ready, index, immediate */
 			fdc->intrq = 1;
 		wd17xx_motor(fdc, 1);
 		return;
@@ -261,6 +272,8 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	case 0x00:
 		fdc->track = 0;
 		fdc->status = TRACK0 | INDEX;
+		if (v & 8)
+			fdc->status |= HEADLOAD;
 		fdc->intrq = 1;
 		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
@@ -449,6 +462,7 @@ struct wd17xx *wd17xx_create(unsigned type)
 	fdc->sector0[2] = 1;
 	fdc->sector0[3] = 1;
 	fdc->type = type;
+	fdc->motor_timeout = 10000;	/* 10 seconds */
 	return fdc;
 }
 

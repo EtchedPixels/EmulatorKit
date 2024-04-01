@@ -280,6 +280,9 @@ swt6809: swt6809.o d6809.o e6809.o acia.o 6821.o 6840.o ide.o wd17xx.o
 nybbles: nybbles.o ns807x.o
 	cc -g3 nybbles.o ns807x.o -o nybbles
 
+max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
+	cc -g3 max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
+
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
 

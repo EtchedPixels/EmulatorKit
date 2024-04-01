@@ -22,3 +22,5 @@ extern void wd17xx_set_sector0(struct wd17xx *fdc, unsigned drive, unsigned offs
 extern void wd17xx_set_side1(struct wd17xx *fdc, unsigned drive, unsigned offset);
 extern void wd17xx_motor(struct wd17xx *fdc, unsigned on);
 extern void wd17xx_tick(struct wd17xx *fdc, unsigned ms);
+extern void wd17xx_set_motor_time(struct wd17xx *fdc, unsigned ms);
+extern unsigned wd17xx_get_motor(struct wd17xx *fdc);
