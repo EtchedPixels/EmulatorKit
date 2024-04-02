@@ -1526,7 +1526,7 @@ int main(int argc, char *argv[])
 			COLS * CWIDTH, ROWS * CHEIGHT,
 			SDL_WINDOW_RESIZABLE);
 	if (window == NULL) {
-		fprintf(stderr, "max801: unable to open window: %s\n",
+		fprintf(stderr, "max80: unable to open window: %s\n",
 			SDL_GetError());
 		exit(1);
 	}
