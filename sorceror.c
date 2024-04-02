@@ -727,7 +727,7 @@ int main(int argc, char *argv[])
 
 	/* TODO */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 20000L;	/* 20ms */
+	tc.tv_nsec = 2000000L;	/* 2ms */
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
