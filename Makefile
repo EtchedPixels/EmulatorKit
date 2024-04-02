@@ -10,7 +10,8 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	trcwm6809 swt6809 nybbles
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
-	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2
+	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
+	sorceror
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -27,8 +28,8 @@ am9511/libam9511.a:
 rc2014:	rc2014.o rc2014_noui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o zxkey_none.o z180_io.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
 	cc -g3 rc2014.o rc2014_noui.o zxkey_none.o 16x50.o acia.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o z80dis.o z180_io.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
 
-rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a
-	cc -g3 rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z80copro.o zxkey_sdl2.o keymatrix.o z80dis.o libz80/libz80.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
+rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o rc2014_sdlui.o acia.o 16x50.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
 
 rb-mbc:	rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 	cc -g3 rb-mbc.o 16x50.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
@@ -282,6 +283,9 @@ nybbles: nybbles.o ns807x.o
 
 max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 	cc -g3 max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
+
+sorceror: sorceror.o keymatrix.o wd17xx.o z80dis.o libz80/libz80.o
+	cc -g3 sorceror.o keymatrix.o wd17xx.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
 
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
