@@ -640,8 +640,8 @@ static uint8_t rtc_read(void)
 		return tm->tm_hour % 12 % 10;
 	case 5:
 		/* AM/PM mode */
-		return (tm->tm_hour % 12) / 10 + 
-			tm->tm_hour >= 12 ? 4: 0; 
+		return (tm->tm_hour % 12) / 10 +
+			tm->tm_hour >= 12 ? 4: 0;
 	case 6:
 		return tm->tm_wday;
 	case 7:
@@ -691,7 +691,7 @@ static const char *bank_name(unsigned b)
 
 void pio_data_write(struct z80_pio *pio, uint8_t port, uint8_t val)
 {
-	if (port == 0) { 
+	if (port == 0) {
 		if (pio_a != val && (trace & TRACE_BANK))
 			fprintf(stderr, "Bank set : Low 32K: %s High 32K %s\n",
 				bank_name(val >> 4), bank_name(val >> 6));
@@ -847,12 +847,12 @@ static uint8_t read_banka(uint16_t addr)
         else
             r = ram_addr((pio_a >> 4) & 1)[addr & 0x7FFF];
         return r;
-#endif            
+#endif
 }
 
 /* Read from the movable block. debug is 1 if debug trace is reading
    so we don't cause side effects */
-  
+
 
 static uint8_t mb_read(uint16_t addr, unsigned debug)
 {
@@ -918,7 +918,7 @@ static uint8_t mb_read(uint16_t addr, unsigned debug)
     case 0x07E4:	/* SIO (DA CA DB CB) */
         return sio2_read(addr & 3);	/* Check ordering .. */
     case 0x07E8:	/* PSTAT/PDATA */
-        return 0x10;	/* For now just say "printer ready" */        
+        return 0x10;	/* For now just say "printer ready" */
     case 0x07EC:	/* FDC (inverted) */
         return ~maxfdc_read(addr & 3);
     case 0x07F0:	/* SASI/UVC DATA */
@@ -1048,13 +1048,6 @@ static uint8_t do_max_read(uint16_t addr, unsigned debug)
     }
     if (trace & TRACE_MEM)
         fprintf(stderr, "R %04X -> %02X\n", addr, r);
-    if (cpu_z80.M1PC == 0x0100 && addr == 0x0100 && debug == 0 && r == 0) {
-    	fprintf(stderr, "FREEZE\n");
-    	while(!emulator_done) {
-    		ui_event();
-    	}
-    	exit(1);
-   }
     return r;
 }
 
@@ -1193,7 +1186,7 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 
 	for (rows = 0; rows < CHEIGHT; rows++) {
 		uint8_t bits = *fp++;
-		if (rows > 7 && !(c & 0x80)) { 
+		if (rows > 7 && !(c & 0x80)) {
 			bits = 0;
 			fp--;
 		}
@@ -1242,6 +1235,76 @@ static void max80_rasterize(void)
 		}
 	}
 }
+
+static void raster_char_wide(unsigned int y, unsigned int x, uint8_t c)
+{
+	uint8_t *fp;
+	uint32_t *pixp;
+	unsigned int rows, pixels;
+
+	pixp = texturebits + x * CWIDTH + COLS * CWIDTH * y * CHEIGHT;
+
+	if (c & 0x80)
+		fp = tallchar + (c & 0x3F) * 8;
+	else
+		fp = shortchar + c * 8;
+
+	for (rows = 0; rows < CHEIGHT; rows++) {
+		uint8_t bits = *fp++;
+		if (rows > 7 && !(c & 0x80)) {
+			bits = 0;
+			fp--;
+		}
+		if (rows == 7 && (c & 0x80))
+			fp = tallchar + (c & 0x3F)  * 8 + 0x200;
+		for (pixels = 0; pixels < CWIDTH; pixels++) {
+			if (bits & 0x80) {
+				*pixp++ = 0xFFD0D0D0;
+				*pixp++ = 0xFFD0D0D0;
+			} else {
+				*pixp++ = 0xFF000000;
+				*pixp++ = 0xFF000000;
+			}
+			bits <<= 1;
+		}
+		/* We moved on one char, move on the other 79 */
+		pixp += 79 * CWIDTH;
+	}
+}
+
+/* We should look at and do a complicated emulation of the 46505 but we don't really need to
+   for geeral use cases. We do care about
+   - width displayed
+   - height displayed
+   - start address
+ */
+static void max80_rasterize_40(void)
+{
+	unsigned int lptr = crt_reg[12] << 8 | crt_reg[13];
+	unsigned int lines, cols;
+	unsigned int ptr;
+	for (lines = 0; lines < crt_reg[6]; lines ++) {
+		/* TODO: fix this for the correct funky mapping */
+		ptr = lptr;
+		for (cols = 0; cols < crt_reg[1]; cols += 2) {
+			raster_char_wide(lines, cols, video[ptr & 0x07FF]);
+			ptr += 2;
+		}
+		for ( ; cols < COLS; cols += 2) {
+			raster_char_wide(lines, cols, ' ');
+			ptr++;
+		}
+		lptr += crt_reg[1];
+	}
+	for (; lines < ROWS; lines ++) {
+		for (cols = 0; cols < COLS; cols += 2) {
+			raster_char_wide(lines, cols, ' ');
+			ptr++;
+		}
+	}
+}
+
+
 
 static void max80_render(void)
 {
@@ -1490,10 +1553,8 @@ int main(int argc, char *argv[])
 	matrix = keymatrix_create(8, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
 
-	/* 5ms - it's a balance between nice behaviour and simulation
-	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
+	tc.tv_nsec = 1639344L;	/*  about right */
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -1522,17 +1583,20 @@ int main(int argc, char *argv[])
 	   matched with that. The scheme here works fine except when the host
 	   is loaded though */
 
+	/* 5.06MHz CPU with a periodic 61.04 Hz interrupt. This is roughly
+	   correct */
+
 	while (!emulator_done) {
 		int l;
 		for (l = 0; l < 10; l++) {
 			int i;
-			/* 36400 T states */
-			for (i = 0; i < 100; i++) {
-				Z80ExecuteTStates(&cpu_z80, 364);
+			for (i = 0; i < 50; i++) {
+				Z80ExecuteTStates(&cpu_z80, 166);
 				sio2_timer();
 			}
+			/* ~8295 T states */
 			ui_event();
-			/* Do 5ms of I/O and delays */
+			/* Do a small block of I/O and delays */
 			if (!fast)
 				nanosleep(&tc, NULL);
 			if (int_recalc) {
@@ -1547,8 +1611,13 @@ int main(int argc, char *argv[])
 					int_recalc = 0;
 			}
 		}
-		wd17xx_tick(fdc, 100);
-		max80_rasterize();
+		/* ~82950 T states */
+		wd17xx_tick(fdc, 16);
+		/* Render at about 60Hz */
+		if (vlatch & 0x08)
+			max80_rasterize_40();
+		else
+			max80_rasterize();
 		max80_render();
 		sysstat |= 0x80;
 		poll_irq_event();
