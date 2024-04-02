@@ -280,7 +280,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	fdc->rd = 0;
 	fdc->wr = 0;
 	fdc->pos = 0;
-	
+
 	switch (v & 0xF0 ) {
 	case 0x00:
 		fdc->track = 0;
@@ -290,8 +290,14 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->intrq = 1;
 		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
-		if (v & 0x08)
+		if (v & 0x08) {
+			if (fdc->side >= fdc->sides[fdc->drive]) {
+				fdc->status = RECNFERR;
+				fdc->intrq = 1;
+				return;
+			}
 			wd17xx_check_density(fdc);
+		}
 		break;
 	case 0x10:	/* seek */
 		fdc->intrq = 1;
@@ -310,6 +316,11 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
 		if (v & 0x08) {
+			if (fdc->side >= fdc->sides[fdc->drive]) {
+				fdc->status = SEEKERR;
+				fdc->intrq = 1;
+				return;
+			}
 			fdc->status |= HEADLOAD;
 			wd17xx_check_density(fdc);
 		}
@@ -325,6 +336,11 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
 		if (v & 0x08) {
+			if (fdc->side >= fdc->sides[fdc->drive]) {
+				fdc->status = SEEKERR;
+				fdc->intrq = 1;
+				return;
+			}
 			fdc->status |= HEADLOAD;
 			wd17xx_check_density(fdc);
 		}
@@ -338,6 +354,11 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->track++;
 		fdc->status = INDEX;
 		if (v & 0x08) {
+			if (fdc->side >= fdc->sides[fdc->drive]) {
+				fdc->status = RECNFERR;
+				fdc->intrq = 1;
+				return;
+			}
 			fdc->status |= HEADLOAD;
 			wd17xx_check_density(fdc);
 		}
@@ -353,6 +374,11 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
 		if (v & 0x08) {
+			if (fdc->side >= fdc->sides[fdc->drive]) {
+				fdc->status = SEEKERR;
+				fdc->intrq = 1;
+				return;
+			}
 			fdc->status |= HEADLOAD;
 			wd17xx_check_density(fdc);
 		}
@@ -365,6 +391,12 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->sector - fdc->sector0[fdc->drive]
 				 >= fdc->spt[fdc->drive]) {
 			fdc->status = INDEX | RECNFERR;
+			fdc->intrq = 1;
+			return;
+		}
+		if (fdc->side >= fdc->sides[fdc->drive]) {
+			fdc->status = INDEX | RECNFERR;
+			fdc->intrq = 1;
 			return;
 		}
 		wd17xx_side_control(fdc, v);
@@ -379,6 +411,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		}
 		fdc->rdsize = size;
 		fdc->status |= BUSY | DRQ;
+#if 0
+		if (track == 20)
+			fdc->status |= 0x20;	/* HACK for DDAM */
+#endif
 		wd17xx_check_density(fdc);
 		wd17xx_motor(fdc, motor);
 		break;
@@ -386,6 +422,11 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (track >= fdc->tracks[fdc->drive] ||
 			fdc->sector - fdc->sector0[fdc->drive]
 				>= fdc->spt[fdc->drive]) {
+			fdc->status = RECNFERR;
+			fdc->intrq = 1;
+			return;
+		}
+		if (fdc->side >= fdc->sides[fdc->drive]) {
 			fdc->status = RECNFERR;
 			fdc->intrq = 1;
 			return;
@@ -398,7 +439,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		break;
 	case 0xC0:	/* read address */
 		wd17xx_side_control(fdc, v);
-		/* TODO: check this on headloaded seeks/restore read/write */
 		if (fdc->side >= fdc->sides[fdc->drive]) {
 			fdc->status = RECNFERR;
 			fdc->intrq = 1;
