@@ -2,29 +2,51 @@
  *	Exidy Sorceror
  *	DP1000-1	- Sorceror	8K as shipped, 32K max on board
  *	DP1000-2	- Sorceror II	16K as shipped, 48K max
+ *	DP1000-3	- Sorceror II	32K as shipped, 48K max
+ *	DP1000-4	- Sorceror II	48K as shipped, 48K max
  *	DP1000-4	- Dynasty 'smart-ALEC' (rebrand)
  *
  *
- *	2MHz Z80		Should be 2.106 ? TODO
+ *	2.106MHz Z80
  *	8-56K RAM		Beyond C000 is special expansions only
  *	Keyboard
  *	Video
  *	Monitor ROM
  *	Optional 2/4/8K ROMPAC
- *	(WIP) tape load
- *	
- *	TODO:
- *	S100 expansion (and banked RAM etc)
- *	Floppy disk interface
- *	Centronics and other devices on the 8bit I/O port
- *	Hard disks
+ *	tape load
  *	ESGG  EXRAM		port 0x7F, 0-15 banks (0 - base)
  *				switches between 16 x 48K banks max (may be less, and may
  *				be 0, 4, 8, 12 if using 64K chips)
+ *	
+ *	TODO:
+ *	S100 expansion (and banked RAM etc)
+ *		S100 hard disk (PPIDE @0x30-0x33), (Z100lifeline ?)
+ *		S100 style banked RAM ?
+ *		S100 timer tick (Mountain clock card ?)
+ *	Floppy disk interface (Dreamdisk style is simplest)
+ *	Centronics and other devices on the 8bit I/O port
+ *	80CC (6545 at 0xEC/0xED giving 80x24 or 64x30 col support)
  *
  *	Might want to emulate video available a bit better - but does anything care ?
- *	Sparklies ?
+ *	Sparklies (will need GETIY timing)
  *	Wait states ?
+ *	Disk systems
+ *	- Dreamdisk
+ *		Australian unit very close to MicroBee one. WD controller CPU driven plus a
+ *		latch. Replacement monitor ROM (SCUAMON)
+ *		Supports some kind of NMI if halted mode. NMI on intrq if in halt
+ *		Latch is R/W
+ *
+ *	- DigiTrio
+ *		D800-DFFF ROM
+ *		Can work with RAM in ROMPAC C000-D7FF
+ *		WD1793 + Z80DMA supports 8" to DSDD and 5.25" to DSDD
+ *		I/O 30-33: WD1793, 34: flags/control 38: Z80DMA
+ *	- DPS6300
+ *		Seems to be an SD hard sectored low capacity floppy using 28 2A 2C
+ *		Uses BC00-BFFF
+ *	- DPS6400/6500 5.25 / 8" 1.2MB forms
+ *
  */
 
 #include <stdio.h>
@@ -43,6 +65,10 @@
 #include "libz80/z80.h"
 #include "z80dis.h"
 #include "wd17xx.h"
+#include "drivewire.h"
+#include "ide.h"
+#include "ppide.h"
+
 
 #include <SDL2/SDL.h>
 #include "keymatrix.h"
@@ -66,9 +92,11 @@ static struct keymatrix *matrix;
 static uint8_t misc_out;
 static unsigned romlatch;
 static struct wd17xx *fdc;
+static struct ppide *ppide;	/* Modern PPIDE card on S100 bus @ 0x30 */
 static Z80Context cpu_z80;
 static unsigned exram;		/* EXRAM present ? */
 static uint8_t exram_latch;
+static uint8_t fdc_latch;
 
 static int tape = -1;		/* Tape file handle */
 static unsigned rompac;		/* True of a ROMPAC is inserted */
@@ -188,10 +216,46 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	return r;
 }
 
+/* Parallel emulation. This could be used for many things including sound and joysticks */
+static uint8_t par_rd;
+static uint8_t par_wr;
+
+/* Platform provided callback when there is data ready for the client */
+void drivewire_byte_pending(void)
+{
+	par_rd = 1;
+}
+
+void drivewire_byte_read(void)
+{
+	par_wr = 0;
+}
+
+
+static void parallel_out(uint8_t c)
+{
+	/* For centronics D0-D6 are the bits, D7 is the strobe. The handshake is not used */
+	/* Can also be one bit sound or a covox */
+	/* For now we've hardcoded drivewire */
+	drivewire_rx(c);
+}
+
+static uint8_t parallel_in(void)
+{
+	return drivewire_tx();
+}
+
 static uint8_t io_read(int unused, uint16_t addr)
 {
 	uint8_t r = 0xFF;
 	switch (addr & 0xFF) {
+	case 0x30:
+	case 0x31:
+	case 0x32:
+	case 0x33:
+		if (ppide)
+			r = ppide_read(ppide, addr & 3);
+		break;
 	case 0x44:	/* Dreamdisk */
 		if (fdc)
 			r = wd17xx_status(fdc);
@@ -212,15 +276,14 @@ static uint8_t io_read(int unused, uint16_t addr)
 	case 0x49:
 	case 0x4A:
 	case 0x4B:
-		/* TODO */
+		if (fdc)
+			r = fdc_latch;
 		break;
 	case 0xFC:		/* Serial I/O */
 		if (!(misc_out & 0x80)) {	/* Tapes */
 			if (tape != -1) {
-				if (read(tape, &r, 1) == 1) {
-					printf("T%02X", r);
+				if (read(tape, &r, 1) == 1)
 					break;
-				}
 			}
 			r = 0x00;
 			break;
@@ -236,10 +299,15 @@ static uint8_t io_read(int unused, uint16_t addr)
 	case 0xFE:		/* Misc */
 		r = ~keymatrix_input(matrix, 1 << (misc_out & 0x0F));
 		r &= 0x1F;
-		r |= 0xA0;	/* Screen ready, output ready, no input */
+		r |= 0x20;	/* Screen ready */
+		if (par_rd)	/* Parallel byte waiting */
+			r |= 0x40;
+		if (par_wr == 0) /* No parallel byte queued for output */
+			r |= 0x80;
 		break;
 	case 0xFF:		/* Parallel I/O (not centronics as such) */
-		r = 0xFF;	/* Nothing attached yet */
+		r = parallel_in();
+		par_rd = 0;
 		break;
 	default:
 		fprintf(stderr, "unknown I/O read %02X\n", addr & 0xFF);
@@ -255,6 +323,13 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	switch (addr & 0xFF) {
+	case 0x30:
+	case 0x31:
+	case 0x32:
+	case 0x33:
+		if (ppide)
+			ppide_write(ppide, addr & 3, val);
+		break;
 	case 0x44:
 		if (fdc)
 			wd17xx_command(fdc, val);
@@ -300,6 +375,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		wd17xx_set_side(fdc, !!(val & 0x10));
 		wd17xx_set_density(fdc, (val & 0x20) ? DEN_DD : DEN_SD);
 		/* 6 is ENMF ? */
+		fdc_latch = val;
 		break;
 	case 0x7F:	/* EGG EXRAM */
 		exram_latch = val;
@@ -315,7 +391,8 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		misc_out = val;
 		return;
 	case 0xFF:
-		/* Parallel - not implemented yet */
+		par_wr = 1;
+		parallel_out(val);
 		return;
 	default:
 		if (trace & TRACE_IO)
@@ -528,10 +605,8 @@ struct diskgeom {
 };
 
 struct diskgeom disktypes[] = {
-	{ "CP/M 2.2 40 Track SS", 184320, 1, 40, 18, 256, 0 },
-	{ "CP/M 2.2 40 Track DS", 368640, 2, 40, 18, 256, 0 },
-	{ "CP/M 3 40 Track SS", 204800, 1, 40, 10, 512, 0 },
-	{ "CP/M 3 8\" 77 Track SS", 670208, 1, 77, 17, 512, 0 },
+	/* Exidy Sorceror CP/M */
+	{ "CP/M 5.25\" 77T", 315392, 1, 77, 16, 256, 0 },
 	{ NULL, }
 };
 
@@ -557,6 +632,7 @@ static struct diskgeom *guess_format(const char *path)
 int main(int argc, char *argv[])
 {
 	static struct timespec tc;
+	unsigned cycles = 421;	/* 2.106MHz */
 	int opt;
 	int fd;
 	int l;
@@ -566,8 +642,10 @@ int main(int argc, char *argv[])
 	char *pacpath = NULL;
 	char *tapepath = NULL;
 	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
+	char *idepath = NULL;
+	char *wirepath = NULL;
 
-	while ((opt = getopt(argc, argv, "d:efp:r:t:m:A:B:C:D:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:efp:r:t:m:A:B:C:D:4I:w:")) != -1) {
 		switch (opt) {
 		case 'p':
 			pacpath = optarg;
@@ -601,6 +679,16 @@ int main(int argc, char *argv[])
 			break;
 		case 'D':
 			fdc_path[3] = optarg;
+			break;
+		case '4':
+			/* 4MHz: late machines and mods */
+			cycles = 800;
+			break;
+		case 'I':
+			idepath = optarg;
+			break;
+		case 'w':
+			wirepath = optarg;
 			break;
 		default:
 			usage();
@@ -679,6 +767,21 @@ int main(int argc, char *argv[])
 	}
 	if (fdc)
 		wd17xx_trace(fdc, trace & TRACE_FDC);
+
+	if (idepath) {
+		ppide = ppide_create("ppi0");
+		fd = open(idepath, O_RDWR);
+		if (fd == -1) {
+			perror(idepath);
+			exit(1);
+		}
+		ppide_reset(ppide);
+		ppide_attach(ppide, 0, fd);
+	}
+
+	drivewire_init();
+	if (wirepath)
+		drivewire_attach(0, wirepath, 0);
 
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -764,7 +867,7 @@ int main(int argc, char *argv[])
 		for (l = 0; l < 10; l++) {
 			int i;
 			for (i = 0; i < 10; i++)
-				Z80ExecuteTStates(&cpu_z80, 400);
+				Z80ExecuteTStates(&cpu_z80, cycles);
 			ui_event();
 			/* Do a small block of I/O and delays */
 			if (!fast)

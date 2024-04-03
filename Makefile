@@ -284,8 +284,8 @@ nybbles: nybbles.o ns807x.o
 max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 	cc -g3 max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
 
-sorceror: sorceror.o keymatrix.o wd17xx.o z80dis.o libz80/libz80.o
-	cc -g3 sorceror.o keymatrix.o wd17xx.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
+sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
 
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
