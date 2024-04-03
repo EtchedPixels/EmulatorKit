@@ -1,5 +1,5 @@
 /*
- *	6847 driver raster output for SDL2
+ *	TFT driver raster output for SDL2
  *
  *	There are lots of variants of this device that have subtle differences
  *	including NTSC and PAL versions.
