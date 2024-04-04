@@ -213,6 +213,10 @@ static void maxfdc_mlatch(uint8_t latch)
 		fprintf(stderr, "fdc: mlatch %02X\n", mlatch);
 }
 
+/* State of data out and control lines */
+static uint8_t sasi_data;
+static uint8_t sasi_ctrl;
+
 static uint8_t max_sasi_status(void)
 {
 	uint8_t r = 0;
@@ -228,17 +232,24 @@ static uint8_t max_sasi_status(void)
 	if (s & SASI_BSY)
 		r |= 0x04;
 	/* Bit 1 : TODO not clear how this works */
+	/* Looks like this is ATN and only used by UVC as an "ERR" line */
 	if (s & SASI_REQ)
 		r |= 0x01;
-//	fprintf(stderr, "sasi status %02x\n", r);
+	/* Hand cranked ACK/REQ emulatiomn. The underlying SASI emulation library
+	   assumes controller cranked */
+	if (sasi_ctrl & 1)		/* ACK set */
+		r &= ~0x01;		/* Hide REQ */
 	return r;
 }
 
 static uint8_t max_sasi_data(uint8_t addr)
 {
-	uint8_t r = sasi_read_data(sasi);
-	/* TODO: deal with ACK properly */
-	fprintf(stderr, "<%02X", r);
+	uint8_t r;
+
+	if (addr & 1) 	/* Read and ack */
+		r = sasi_read_data(sasi);
+	else		/* Read only */
+		r = sasi_read_bus(sasi);
 	return r;
 }
 
@@ -253,17 +264,23 @@ static void max_sasi_ctrl(uint8_t val)
 	if (val & 0x01)
 		bus |= SASI_ACK;
 	sasi_bus_control(sasi, bus);
-	fprintf(stderr, "sasi_control: %02X\n", val);
+	if ((val ^ sasi_ctrl) & 1 && (val & 1)) { /* Hand crank REQ/ACK */
+		/* If we are writing then we just hand cranked a byte out */
+		if (!(sasi_bus_state(sasi) & SASI_IO))
+			sasi_write_data(sasi, sasi_data);
+		else	/* We hand cranked an ACK */
+			sasi_ack_bus(sasi);
+	}
+	sasi_ctrl = val;
 }
 
 static void max_sasi_writedata(uint8_t addr, uint8_t val)
 {
-	/* TODO: deal with ACK properly */
-	fprintf(stderr, "%c%02X", addr & 1 ? '>' : ']', val);
 	if (addr & 1)
 		sasi_write_data(sasi, val);
 	else
 		sasi_set_data(sasi, val);
+	sasi_data = val;
 }
 
 static void crt_data(uint8_t val)
@@ -1332,7 +1349,7 @@ static SDL_Keycode keyboard[] = {
 	SDLK_0, SDLK_1, SDLK_2, SDLK_3, SDLK_4, SDLK_5, SDLK_6, SDLK_7,
 	SDLK_8, SDLK_9, SDLK_COLON, SDLK_SEMICOLON, SDLK_COMMA, SDLK_MINUS, SDLK_PERIOD, SDLK_SLASH,
 	SDLK_RETURN, SDLK_CLEAR, SDLK_PAUSE, SDLK_UP, SDLK_DOWN, SDLK_LEFT, SDLK_RIGHT, SDLK_SPACE,
-	SDLK_LSHIFT, SDLK_F1, SDLK_F2, SDLK_F3, SDLK_F4, SDLK_ESCAPE, 0, SDLK_RCTRL
+	SDLK_LSHIFT, SDLK_F1, SDLK_F2, SDLK_F3, SDLK_F4, SDLK_ESCAPE, 0, SDLK_LCTRL
 };
 
 /* Most PC layouts don't have a colon key so use # */
@@ -1441,11 +1458,12 @@ int main(int argc, char *argv[])
 	int fd;
 	int l;
 	int i;
+	unsigned eightinch = 0;		/* If set drives are 8" or 5.25" with no motor control */
 	char *rompath = "max80.rom";
 	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
 	char *disk_path = NULL;
 
-	while ((opt = getopt(argc, argv, "A:B:C:D:E:d:r:f")) != -1) {
+	while ((opt = getopt(argc, argv, "8A:B:C:D:S:d:r:f")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -1468,8 +1486,13 @@ int main(int argc, char *argv[])
 		case 'D':
 			fdc_path[3] = optarg;
 			break;
-		case 'E':
+		case 'S':
 			disk_path = optarg;
+			break;
+		case '8':
+			eightinch = 1;
+			if (dipswitches == 1)
+				dipswitches = 2;
 			break;
 		default:
 			usage();
@@ -1503,12 +1526,12 @@ int main(int argc, char *argv[])
 		}
 	}
 	wd17xx_trace(fdc, trace & TRACE_FDC);
-	wd17xx_set_motor_time(fdc, 3000);	/* Lobo max is a 3 second timer */
+	wd17xx_set_motor_time(fdc, 3000);	/* Lobo max is a 3 second timer for 5.25" */
 
 	/* SASI bus */
 	sasi = sasi_bus_create();
 	if (disk_path)
-		sasi_disk_attach(sasi, 0, disk_path, 256);
+		sasi_disk_attach(sasi, 0, disk_path, 512);
 	sasi_bus_reset(sasi);
 
 	pio_reset();
@@ -1613,6 +1636,10 @@ int main(int argc, char *argv[])
 		}
 		/* ~82950 T states */
 		wd17xx_tick(fdc, 16);
+		if (eightinch) {
+			wd17xx_set_motor_time(fdc, 30000);	/* No motor timeout */
+			wd17xx_motor(fdc, 1);
+		}
 		/* Render at about 60Hz */
 		if (vlatch & 0x08)
 			max80_rasterize_40();
