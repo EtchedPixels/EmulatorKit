@@ -12,6 +12,8 @@ void sasi_write_data(struct sasi_bus *bus, uint8_t data);
 void sasi_set_data(struct sasi_bus *bus, uint8_t data);
 uint8_t sasi_read_data(struct sasi_bus *bus);
 void sasi_bus_control(struct sasi_bus *bus, unsigned val);
+uint8_t sasi_read_bus(struct sasi_bus *bus);
+void sasi_ack_bus(struct sasi_bus *bus);
 unsigned sasi_bus_state(struct sasi_bus *bus);
 
 #define SCSI_ATN	0x100

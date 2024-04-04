@@ -116,13 +116,15 @@ static int do_write(struct sasi_disk *sd)
 static void sasi_status_in(struct sasi_disk *sd, uint8_t status)
 {
     sd->status = status;
+    sd->dptr = 0;		/* Used just as a counter */
     sd->bus->control &= ~SASI_MSG;
-    sd->bus->control |= SASI_CD | SASI_IO;
+    sd->bus->control |= SASI_CD | SASI_IO | SASI_REQ;
 }
 
 static void sasi_data_out(struct sasi_disk *sd, unsigned int length)
 {
     sd->bus->control &= ~(SASI_CD | SASI_IO | SASI_MSG);
+    sd->bus->control |= SASI_REQ;
     sd->dptr = 0;
     sd->dlen = length;
 }
@@ -130,7 +132,7 @@ static void sasi_data_out(struct sasi_disk *sd, unsigned int length)
 static void sasi_data_in(struct sasi_disk *sd, unsigned int length)
 {
     sd->bus->control &= ~(SASI_CD|SASI_MSG);
-    sd->bus->control |= SASI_IO;
+    sd->bus->control |= SASI_IO | SASI_REQ;
     sd->dptr = 0;
     sd->dlen = length;
 }
@@ -144,6 +146,7 @@ static void sasi_sense_only(struct sasi_disk *sd, uint8_t error)
 {
     sasi_sense_clear(sd);
     sd->sensebuf[0] = error;
+    printf("Sense %X\n", error);
 }
 
 static void sasi_sense_with_lba(struct sasi_disk *sd, uint8_t error)
@@ -152,6 +155,7 @@ static void sasi_sense_with_lba(struct sasi_disk *sd, uint8_t error)
     sd->sensebuf[2] = sd->lba >> 8;
     sd->sensebuf[3] = sd->lba;
     sd->sensebuf[0] = error | 0x80;
+    printf("LBA %x sense %X\n", sd->lba, error);
 }
     
 static void sasi_check_lba(struct sasi_disk *sd, uint32_t lba, uint16_t len)
@@ -410,7 +414,7 @@ static void sasi_command_execute_out(struct sasi_disk *sd)
 static void sasi_device_select(struct sasi_disk *sd)
 {
     /* We indicate to the initiator that we were selected */
-    sd->bus->control |= SASI_BSY;
+    sd->bus->control |= SASI_BSY | SASI_REQ;
 //    sd->bus->control &= ~SASI_SEL;
     sd->bus->selected = sd;
     sd->bus->state = BUS_ENDSEL;
@@ -434,15 +438,18 @@ static void sasi_device_reset(struct sasi_disk *sd)
  *	until done, then we change state accordingly
  */
 
-static uint8_t sasi_disk_read(struct sasi_disk *sd)
+static void sasi_disk_ack_read(struct sasi_disk *sd)
 {
-    uint8_t r;
-    r = sd->dbuf[sd->dptr++];
+    sd->dptr++;
     if (sd->dptr == sd->dlen)
         sasi_command_execute_in(sd);
     if (sd->dptr >= sizeof(sd->dbuf))
         sd->dptr = 0;
-    return r;
+}
+
+static uint8_t sasi_disk_read(struct sasi_disk *sd)
+{
+    return sd->dbuf[sd->dptr];
 }
 
 /*
@@ -461,8 +468,17 @@ static void sasi_bus_idle(struct sasi_bus *bus)
 
 static uint8_t sasi_disk_status(struct sasi_disk *sd)
 {
-    sasi_bus_idle(sd->bus);
-    return sd->status;
+    if (sd->dptr == 0)
+        return sd->status;
+    else
+        return 0;
+}
+
+static void sasi_disk_ack_status(struct sasi_disk *sd)
+{
+    sd->dptr++;
+    if (sd->dptr == 2)
+        sasi_bus_idle(sd->bus);
 }
 
 /*
@@ -470,8 +486,12 @@ static uint8_t sasi_disk_status(struct sasi_disk *sd)
  */
 static uint8_t sasi_disk_mesg(struct sasi_disk *sd)
 {
-    sd->bus->control &= ~(SASI_BSY|SASI_MSG|SASI_CD|SASI_IO);
     return 0;
+}
+
+static void sasi_disk_ack_mesg(struct sasi_disk *sd)
+{
+    sd->bus->control &= ~(SASI_BSY|SASI_MSG|SASI_CD|SASI_IO|SASI_REQ);
 }
 
 /*
@@ -498,7 +518,6 @@ static void sasi_disk_command(struct sasi_disk *sd, uint8_t val)
        and set any data direction needed or status info */
     sasi_command_process(sd);
 }
-
 
 /*
  *	The SASI_SEL line has been driven, find out if anyone is going
@@ -573,7 +592,7 @@ void sasi_set_data(struct sasi_bus *bus, uint8_t data)
  *	selection as we don't support multi-master so won't respond
  */
 
-uint8_t sasi_read_data(struct sasi_bus *bus)
+uint8_t sasi_read_bus(struct sasi_bus *bus)
 {
     if (bus->state == BUS_IDLE || bus->state == BUS_RESET)
         return 0xFF;	/* Reading a free bus */
@@ -585,6 +604,28 @@ uint8_t sasi_read_data(struct sasi_bus *bus)
         return sasi_disk_status(bus->selected);
     else
         return sasi_disk_read(bus->selected);
+}   
+
+void sasi_ack_bus(struct sasi_bus *bus)
+{
+    if (bus->control & SASI_MSG)
+        sasi_disk_ack_mesg(bus->selected);
+    if (!(bus->control & SASI_IO))
+        return;		/* Wrong direction */
+    if (bus->control & SASI_CD)
+        sasi_disk_ack_status(bus->selected);
+    else
+        sasi_disk_ack_read(bus->selected);
+}
+
+uint8_t sasi_read_data(struct sasi_bus *bus)
+{
+    uint8_t r;
+    if (bus->state == BUS_IDLE || bus->state == BUS_RESET)
+        return 0xFF;	/* Reading a free bus */
+    r = sasi_read_bus(bus);
+    sasi_ack_bus(bus);
+    return r;
 }   
 
 static void sasi_bus_exit_reset(struct sasi_bus *bus)
