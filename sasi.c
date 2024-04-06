@@ -146,7 +146,6 @@ static void sasi_sense_only(struct sasi_disk *sd, uint8_t error)
 {
     sasi_sense_clear(sd);
     sd->sensebuf[0] = error;
-    printf("Sense %X\n", error);
 }
 
 static void sasi_sense_with_lba(struct sasi_disk *sd, uint8_t error)
@@ -155,7 +154,6 @@ static void sasi_sense_with_lba(struct sasi_disk *sd, uint8_t error)
     sd->sensebuf[2] = sd->lba >> 8;
     sd->sensebuf[3] = sd->lba;
     sd->sensebuf[0] = error | 0x80;
-    printf("LBA %x sense %X\n", sd->lba, error);
 }
     
 static void sasi_check_lba(struct sasi_disk *sd, uint32_t lba, uint16_t len)
