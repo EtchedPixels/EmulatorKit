@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "libz180/z180.h"
+#include "sdcard.h"
 #include "z180_io.h"
 #include "z180copro.h"
 
@@ -36,6 +37,17 @@ static struct z180copro *get_copro(int n)
 	return copro[n];
 }
 
+/* Ugly: need to think how to fix this up */
+static struct z180copro *find_copro(struct z180_io *io)
+{
+	unsigned n;
+	for (n = 0; n < MAX_COPRO; n++) {
+		if (copro[n] && copro[n]->io == io)
+			return copro[n];
+	}
+	return NULL;
+}
+
 /* Coprocessor I/O model */
 static uint8_t sec_ior(int unit, uint16_t addr)
 {
@@ -48,16 +60,23 @@ static uint8_t sec_ior(int unit, uint16_t addr)
 static void sec_iow(int unit, uint16_t addr, uint8_t data)
 {
 	struct z180copro *c = get_copro(unit);
-	if (z180_iospace(c->io, addr))
+	if (z180_iospace(c->io, addr)) {
+		printf(">%X %X\n", addr, data);
 		z180_write(c->io, addr, data);
-	/* TODO: SPI select */
+	}
+	if (c->sdcard && (addr & 0x81) == 0x80) {
+		if (data & 1)
+			sd_spi_raise_cs(c->sdcard);
+		else
+			sd_spi_lower_cs(c->sdcard);
+	}
 }
 
 /* Coprocessor memory model */
 static uint8_t *mdecode(struct z180copro *c, uint32_t addr, uint8_t wr)
 {
 	if (addr < 0x80000)
-		return c->shared + (addr & 0x7FFF);
+		return c->shared + (addr & 0x3FF);
 	return c->ram + (addr & 0x7FFFF);
 }
 
@@ -121,22 +140,20 @@ static void mem_write(int unit, uint16_t addr, uint8_t val)
  *	Device interface
  */
 
-/*#include "bitrev.h" */
+#include "bitrev.h"
 
 uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 {
-	return 0xFF;
-	/* TODO: model the SPI */
-#if 0	
 	uint8_t r;
-	if (sdcard == NULL)
+	struct z180copro *c = find_copro(io);
+
+	if (c->sdcard == NULL)
 		return 0xFF;
 
-	r = bitrev[sd_spi_in(sdcard, bitrev[bits])];
-	if (trace & TRACE_SPI)
-		fprintf(stderr,	"[SPI %02X:%02X]\n", bitrev[bits], bitrev[r]);
+	r = bitrev[sd_spi_in(c->sdcard, bitrev[bits])];
+//	if (trace & TRACE_SPI)
+//		fprintf(stderr,	"[SPI %02X:%02X]\n", bitrev[bits], bitrev[r]);
 	return r;
-#endif	
 }
 
 
@@ -248,4 +265,12 @@ void z180copro_free(struct z180copro *c)
 void z180copro_trace(struct z180copro *c, int onoff)
 {
 	c->trace = onoff;
+}
+
+void z180copro_attach_sd(struct z180copro *c, int fd)
+{
+	char buf[8];
+	snprintf(buf, 8, "sd%d", c->unit);
+	c->sdcard = sd_create(buf);
+	sd_attach(c->sdcard, fd);
 }

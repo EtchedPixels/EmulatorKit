@@ -1,6 +1,7 @@
 struct z180copro {
     Z180Context cpu;
     struct z180_io *io;
+    struct sdcard *sdcard;
     int unit;
     uint8_t shared[1024];
     uint8_t ram[512 * 1024];
@@ -24,3 +25,4 @@ extern int z180copro_intraised(struct z180copro *c);
 extern struct z180copro *z180copro_create(void);
 extern void z180copro_free(struct z180copro *c);
 extern void z180copro_trace(struct z180copro *c, int onoff);
+extern void z180copro_attach_sd(struct z180copro *c, int fd);
