@@ -84,8 +84,12 @@ uint8_t keymatrix_input(struct keymatrix *km, uint16_t scanbits)
     for (row = 0; row < km->rows; row++) {
         if (scanbits & (1 << row)) {
             for (col = 0; col < km->cols; col++) {
-                if (*p++ == true)
+                if (*p++ == true) {
+                    if (km->trace)
+                         fprintf(stderr, "Key (%d,%d) was down and tested\n",
+                                row, col);
                     r |= (1 << col);
+                }
             }
         } else
             p += km->cols;
