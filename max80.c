@@ -138,17 +138,17 @@ static void recalc_interrupts(void)
 
 static void cpu_slow(void)
 {
-    /* TODO */
+	/* TODO */
 }
 
 static uint8_t scan_keyboard(uint16_t addr)
 {
-    return keymatrix_input(matrix, addr);
+	return keymatrix_input(matrix, addr);
 }
 
 uint8_t maxfdc_read(uint8_t addr)
 {
-	switch(addr & 3) {
+	switch (addr & 3) {
 	case 0:
 		return wd17xx_status(fdc);
 	case 1:
@@ -158,12 +158,12 @@ uint8_t maxfdc_read(uint8_t addr)
 	case 3:
 		return wd17xx_read_data(fdc);
 	}
-	return 0xFF;	/* Can't reach */
+	return 0xFF;		/* Can't reach */
 }
 
 static void maxfdc_write(uint8_t addr, uint8_t val)
 {
-	switch(addr & 3) {
+	switch (addr & 3) {
 	case 0:
 		wd17xx_command(fdc, val);
 		break;
@@ -184,24 +184,24 @@ static void maxfdc_mlatch(uint8_t latch)
 	/* The CPM code claims 0x80 is an NMI enable but it's never used so who
 	   knows. It's not in the technical manual */
 	/* Low 4 bits drive sel lines */
-	switch(latch & 0x0F) {
-		case 0:
-			wd17xx_no_drive(fdc);
-			return;
-		case 1:
-			wd17xx_set_drive(fdc, 0);
-			break;
-		case 2:
-			wd17xx_set_drive(fdc, 1);
-			break;
-		case 4:
-			wd17xx_set_drive(fdc, 2);
-			break;
-		case 8:
-			wd17xx_set_drive(fdc, 3);
-			break;
-		default:
-			fprintf(stderr, "fdc: invalid drive select %x\n", latch & 0x0F);
+	switch (latch & 0x0F) {
+	case 0:
+		wd17xx_no_drive(fdc);
+		return;
+	case 1:
+		wd17xx_set_drive(fdc, 0);
+		break;
+	case 2:
+		wd17xx_set_drive(fdc, 1);
+		break;
+	case 4:
+		wd17xx_set_drive(fdc, 2);
+		break;
+	case 8:
+		wd17xx_set_drive(fdc, 3);
+		break;
+	default:
+		fprintf(stderr, "fdc: invalid drive select %x\n", latch & 0x0F);
 	}
 	wd17xx_set_density(fdc, (latch & 0x40) ? DEN_DD : DEN_SD);
 	wd17xx_set_side(fdc, !!(latch & 0x10));
@@ -237,8 +237,8 @@ static uint8_t max_sasi_status(void)
 		r |= 0x01;
 	/* Hand cranked ACK/REQ emulatiomn. The underlying SASI emulation library
 	   assumes controller cranked */
-	if (sasi_ctrl & 1)		/* ACK set */
-		r &= ~0x01;		/* Hide REQ */
+	if (sasi_ctrl & 1)	/* ACK set */
+		r &= ~0x01;	/* Hide REQ */
 	return r;
 }
 
@@ -246,9 +246,9 @@ static uint8_t max_sasi_data(uint8_t addr)
 {
 	uint8_t r;
 
-	if (addr & 1) 	/* Read and ack */
+	if (addr & 1)		/* Read and ack */
 		r = sasi_read_data(sasi);
-	else		/* Read only */
+	else			/* Read only */
 		r = sasi_read_bus(sasi);
 	return r;
 }
@@ -264,11 +264,11 @@ static void max_sasi_ctrl(uint8_t val)
 	if (val & 0x01)
 		bus |= SASI_ACK;
 	sasi_bus_control(sasi, bus);
-	if ((val ^ sasi_ctrl) & 1 && (val & 1)) { /* Hand crank REQ/ACK */
+	if ((val ^ sasi_ctrl) & 1 && (val & 1)) {	/* Hand crank REQ/ACK */
 		/* If we are writing then we just hand cranked a byte out */
 		if (!(sasi_bus_state(sasi) & SASI_IO))
 			sasi_write_data(sasi, sasi_data);
-		else	/* We hand cranked an ACK */
+		else		/* We hand cranked an ACK */
 			sasi_ack_bus(sasi);
 	}
 	sasi_ctrl = val;
@@ -330,8 +330,7 @@ static struct z80_sio_chan sio[2];
 static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
 	if (trace & TRACE_IRQ) {
-		fprintf(stderr, "Clear intbits %d %x\n",
-			(int)(chan - sio), m);
+		fprintf(stderr, "Clear intbits %d %x\n", (int) (chan - sio), m);
 	}
 	chan->intbits &= ~m;
 	chan->pending &= ~m;
@@ -354,7 +353,7 @@ static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
 		if (!sio->irq) {
 			chan->irq = 1;
 			sio->rr[1] |= 0x02;
-			vector = 0; /* sio[1].wr[2]; */
+			vector = 0;	/* sio[1].wr[2]; */
 			/* This is a subset of the real options. FIXME: add
 			   external status change */
 			if (sio[1].wr[1] & 0x04) {
@@ -392,9 +391,8 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 			chan->vector += (sio[1].wr[2] & 0xF1);
 		else
 			chan->vector += sio[1].wr[2];
-		if (trace & (TRACE_IRQ|TRACE_SIO))
-			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
-				(int)(chan - sio), chan->vector);
+		if (trace & (TRACE_IRQ | TRACE_SIO))
+			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n", (int) (chan - sio), chan->vector);
 		if (chan == sio)
 			live_irq = IRQ_SIOA;
 		else
@@ -412,8 +410,7 @@ static int sio2_check_im2(struct z80_sio_chan *chan)
 static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
 {
 	if (trace & TRACE_SIO)
-		fprintf(stderr, "SIO %d queue %d: ",
-			(int) (chan - sio), c);
+		fprintf(stderr, "SIO %d queue %d: ", (int) (chan - sio), c);
 	/* Receive disabled */
 	if (!(chan->wr[3] & 1)) {
 		fprintf(stderr, "RX disabled.\n");
@@ -430,8 +427,7 @@ static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
 	} else {
 		/* FIFO add */
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "Queued %d (mode %d)\n",
-				chan->dptr, chan->wr[1] & 0x18);
+			fprintf(stderr, "Queued %d (mode %d)\n", chan->dptr, chan->wr[1] & 0x18);
 		chan->data[chan->dptr++] = c;
 		chan->rr[0] |= 1;
 		switch (chan->wr[1] & 0x18) {
@@ -505,8 +501,7 @@ static uint8_t sio2_read(uint16_t addr)
 			chan->rr[0] |= 2;
 
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read reg %d = ",
-				(addr & 2) ? 'b' : 'a', r);
+			fprintf(stderr, "sio%c read reg %d = ", (addr & 2) ? 'b' : 'a', r);
 		switch (r) {
 		case 0:
 		case 1:
@@ -516,8 +511,7 @@ static uint8_t sio2_read(uint16_t addr)
 		case 2:
 			if (chan != sio) {
 				if (trace & TRACE_SIO)
-					fprintf(stderr, "%02X\n",
-						chan->rr[2]);
+					fprintf(stderr, "%02X\n", chan->rr[2]);
 				return chan->rr[2];
 			}
 		case 3:
@@ -538,8 +532,7 @@ static uint8_t sio2_read(uint16_t addr)
 		chan->rr[0] &= 0x3F;
 		chan->rr[1] &= 0x3F;
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read data %d\n",
-				(addr & 2) ? 'b' : 'a', c);
+			fprintf(stderr, "sio%c read data %d\n", (addr & 2) ? 'b' : 'a', c);
 		if (chan->dptr && (chan->wr[1] & 0x10))
 			sio2_raise_int(chan, INT_RX);
 		return c;
@@ -553,10 +546,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 	uint8_t r;
 	if (addr & 1) {
 		if (trace & TRACE_SIO)
-			fprintf(stderr,
-				"sio%c write reg %d with %02X\n",
-				(addr & 2) ? 'b' : 'a',
-				chan->wr[0] & 7, val);
+			fprintf(stderr, "sio%c write reg %d with %02X\n", (addr & 2) ? 'b' : 'a', chan->wr[0] & 7, val);
 		switch (chan->wr[0] & 007) {
 		case 0:
 			chan->wr[0] = val;
@@ -571,13 +561,11 @@ static void sio2_write(uint16_t addr, uint8_t val)
 				sio2_clear_int(chan, INT_ERR);
 				chan->rr[1] &= 0xCF;	/* Clear status bits on rr0 */
 				if (trace & TRACE_SIO)
-					fprintf(stderr,
-						"[extint reset]\n");
+					fprintf(stderr, "[extint reset]\n");
 				break;
 			case 030:	/* Channel reset */
 				if (trace & TRACE_SIO)
-					fprintf(stderr,
-						"[channel reset]\n");
+					fprintf(stderr, "[channel reset]\n");
 				sio2_channel_reset(chan);
 				break;
 			case 040:	/* Enable interrupt on next rx */
@@ -593,12 +581,8 @@ static void sio2_write(uint16_t addr, uint8_t val)
 				if (chan == sio) {
 					sio->irq = 0;
 					sio->rr[1] &= ~0x02;
-					sio2_clear_int(sio,
-						       INT_RX |
-						       INT_TX | INT_ERR);
-					sio2_clear_int(sio + 1,
-						       INT_RX |
-						       INT_TX | INT_ERR);
+					sio2_clear_int(sio, INT_RX | INT_TX | INT_ERR);
+					sio2_clear_int(sio + 1, INT_RX | INT_TX | INT_ERR);
 				}
 				break;
 			}
@@ -612,8 +596,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		case 7:
 			r = chan->wr[0] & 7;
 			if (trace & TRACE_SIO)
-				fprintf(stderr, "sio%c: wrote r%d to %02X\n",
-					(addr & 2) ? 'b' : 'a', r, val);
+				fprintf(stderr, "sio%c: wrote r%d to %02X\n", (addr & 2) ? 'b' : 'a', r, val);
 			chan->wr[r] = val;
 			if (chan != sio && r == 2)
 				chan->rr[2] = val;
@@ -630,8 +613,7 @@ static void sio2_write(uint16_t addr, uint8_t val)
 		/* Should check chan->wr[5] & 8 */
 		sio2_clear_int(chan, INT_TX);
 		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c write data %d\n",
-				(addr & 2) ? 'b' : 'a', val);
+			fprintf(stderr, "sio%c write data %d\n", (addr & 2) ? 'b' : 'a', val);
 		write(1, &val, 1);
 	}
 }
@@ -644,21 +626,20 @@ static uint8_t rtc_read(void)
 	struct tm *tm = localtime(&t);
 	if ((pio_b & 0x20) == 0)
 		return 0xFF;
-	switch(pio_b & 0x0F) {
+	switch (pio_b & 0x0F) {
 	case 0:
 		return tm->tm_sec % 10;
 	case 1:
 		return tm->tm_sec / 10;
 	case 2:
-		return tm->tm_min %10;
+		return tm->tm_min % 10;
 	case 3:
 		return tm->tm_min / 10;
 	case 4:
 		return tm->tm_hour % 12 % 10;
 	case 5:
 		/* AM/PM mode */
-		return (tm->tm_hour % 12) / 10 +
-			tm->tm_hour >= 12 ? 4: 0;
+		return (tm->tm_hour % 12) / 10 + tm->tm_hour >= 12 ? 4 : 0;
 	case 6:
 		return tm->tm_wday;
 	case 7:
@@ -710,8 +691,7 @@ void pio_data_write(struct z80_pio *pio, uint8_t port, uint8_t val)
 {
 	if (port == 0) {
 		if (pio_a != val && (trace & TRACE_BANK))
-			fprintf(stderr, "Bank set : Low 32K: %s High 32K %s\n",
-				bank_name(val >> 4), bank_name(val >> 6));
+			fprintf(stderr, "Bank set : Low 32K: %s High 32K %s\n", bank_name(val >> 4), bank_name(val >> 6));
 		pio_a = val;
 	}
 	if (port == 1)
@@ -775,7 +755,7 @@ static void pio_write(uint8_t addr, uint8_t val)
 		return;
 	} else {
 		pio->data[pio_port] = val;
-		switch(pio->mode[pio_port]) {
+		switch (pio->mode[pio_port]) {
 		case 0:
 		case 2:	/* Not really emulated */
 			pio_data_write(pio, pio_port, val);
@@ -802,7 +782,7 @@ static uint8_t pio_read(uint8_t addr)
 	val = pio->data[pio_port];
 	rx = pio_data_read(pio, pio_port);
 
-	switch(pio->mode[pio_port]) {
+	switch (pio->mode[pio_port]) {
 	case 0:
 		/* Write only */
 		break;
@@ -846,9 +826,9 @@ static void pio_reset(void)
 static uint8_t *ram_addr(uint8_t bits)
 {
 	uint8_t *v;
-    bits &= 3;
-    v = ram + 0x8000 * bits;
-    return v;
+	bits &= 3;
+	v = ram + 0x8000 * bits;
+	return v;
 }
 
 /* Read through from Bank A */
@@ -859,11 +839,11 @@ static uint8_t read_banka(uint16_t addr)
 	return ram[addr & 0x7FFF];
 #else
 	uint8_t r;
-        if (addr & 0x8000)
-            r = ram_addr((pio_a >> 6) & 1)[addr & 0x7FFF];
-        else
-            r = ram_addr((pio_a >> 4) & 1)[addr & 0x7FFF];
-        return r;
+	if (addr & 0x8000)
+		r = ram_addr((pio_a >> 6) & 1)[addr & 0x7FFF];
+	else
+		r = ram_addr((pio_a >> 4) & 1)[addr & 0x7FFF];
+	return r;
 #endif
 }
 
@@ -873,223 +853,223 @@ static uint8_t read_banka(uint16_t addr)
 
 static uint8_t mb_read(uint16_t addr, unsigned debug)
 {
-    uint8_t r;
-    uint16_t paddr = addr;	/* Full physical address */
-    addr &= 0x0FFF;
+	uint8_t r;
+	uint16_t paddr = addr;	/* Full physical address */
+	addr &= 0x0FFF;
 
-    if (addr & 0x0700)
-        cpu_slow();
+	if (addr & 0x0700)
+		cpu_slow();
 
-    if (addr < 0x400) {
-        /* SWAP1K */
-        switch(vlatch & 7) {
-        case 0:
-            return bootrom[addr & 0x1FF];
-        case 1:
-            return read_banka(paddr);
-        case 2:
-        case 3:
-            return video[addr + 0x0400];
-        case 4:
-        case 5:
-            return shortchar[addr];
-        default:
-            return tallchar[addr];
-        }
-    }
-    if (addr < 0x0700) {
-        /* RAM400 */
-        return read_banka(paddr);
-    }
-    if (addr <= 0x07CF) {
-        /* SLORAM */
-        return read_banka(paddr);
-    }
-    if (addr >= 0xC00)	/* VIDEO */
-        return video[addr & 0x03FF];
-    if (addr >= 0x0900)	/* RAM900 */
-        return read_banka(paddr);
+	if (addr < 0x400) {
+		/* SWAP1K */
+		switch (vlatch & 7) {
+		case 0:
+			return bootrom[addr & 0x1FF];
+		case 1:
+			return read_banka(paddr);
+		case 2:
+		case 3:
+			return video[addr + 0x0400];
+		case 4:
+		case 5:
+			return shortchar[addr];
+		default:
+			return tallchar[addr];
+		}
+	}
+	if (addr < 0x0700) {
+		/* RAM400 */
+		return read_banka(paddr);
+	}
+	if (addr <= 0x07CF) {
+		/* SLORAM */
+		return read_banka(paddr);
+	}
+	if (addr >= 0xC00)	/* VIDEO */
+		return video[addr & 0x03FF];
+	if (addr >= 0x0900)	/* RAM900 */
+		return read_banka(paddr);
 
-    /* Below this point is I/O with potential side effects */
-    if (debug)
-    	return 0xFF;
+	/* Below this point is I/O with potential side effects */
+	if (debug)
+		return 0xFF;
 
-    if (addr >= 0x0800)	/* MATRIX */
-        return scan_keyboard(addr);
-    /* Misc I/O */
-    switch(addr & ~3) {
-    case 0x07D0:	/* BAUDA */
-    case 0x07D4:	/* BAUDB */
-    case 0x07D8:	/* MLATCH */
-    case 0x07DC:	/* VLATCH */
-        return read_banka(paddr);
-    case 0x07E0:	/* SYSCLR and SYSFLG CRTREG/CRTBYT */
-        r = sysstat;
-        r &= ~0x20;
-        if (wd17xx_get_motor(fdc))
-        	r |= 0x20;
-        sysstat ^= 0x40;	/* FIXME: hack to make DSPTMG toggle */
-        if (!(addr & 1)) {
-            sysstat &= 0x7F;	/* Clear heartbeat */
-            recalc_interrupts();
-        }
-        return r;
-    case 0x07E4:	/* SIO (DA CA DB CB) */
-        return sio2_read(addr & 3);	/* Check ordering .. */
-    case 0x07E8:	/* PSTAT/PDATA */
-        return 0x10;	/* For now just say "printer ready" */
-    case 0x07EC:	/* FDC (inverted) */
-        return ~maxfdc_read(addr & 3);
-    case 0x07F0:	/* SASI/UVC DATA */
-        return max_sasi_data(addr & 1);
-    case 0x07F4:	/* SASI/UVC CTRL */
-        return max_sasi_status();
-    case 0x07F8:	/* DIPSW/BEEP */
-        return dipswitches;
-    case 0x07FC:	/* PIO (DA CA DB CB) */
-        return pio_read(addr & 3);	/* Check order */
-    }
-    fprintf(stderr, "Unhandled MB read %x\n", addr);
-    return 0xFF;
+	if (addr >= 0x0800)	/* MATRIX */
+		return scan_keyboard(addr);
+	/* Misc I/O */
+	switch (addr & ~3) {
+	case 0x07D0:		/* BAUDA */
+	case 0x07D4:		/* BAUDB */
+	case 0x07D8:		/* MLATCH */
+	case 0x07DC:		/* VLATCH */
+		return read_banka(paddr);
+	case 0x07E0:		/* SYSCLR and SYSFLG CRTREG/CRTBYT */
+		r = sysstat;
+		r &= ~0x20;
+		if (wd17xx_get_motor(fdc))
+			r |= 0x20;
+		sysstat ^= 0x40;	/* FIXME: hack to make DSPTMG toggle */
+		if (!(addr & 1)) {
+			sysstat &= 0x7F;	/* Clear heartbeat */
+			recalc_interrupts();
+		}
+		return r;
+	case 0x07E4:		/* SIO (DA CA DB CB) */
+		return sio2_read(addr & 3);	/* Check ordering .. */
+	case 0x07E8:		/* PSTAT/PDATA */
+		return 0x10;	/* For now just say "printer ready" */
+	case 0x07EC:		/* FDC (inverted) */
+		return ~maxfdc_read(addr & 3);
+	case 0x07F0:		/* SASI/UVC DATA */
+		return max_sasi_data(addr & 1);
+	case 0x07F4:		/* SASI/UVC CTRL */
+		return max_sasi_status();
+	case 0x07F8:		/* DIPSW/BEEP */
+		return dipswitches;
+	case 0x07FC:		/* PIO (DA CA DB CB) */
+		return pio_read(addr & 3);	/* Check order */
+	}
+	fprintf(stderr, "Unhandled MB read %x\n", addr);
+	return 0xFF;
 }
 
 /* Write to the movable block */
 
 static unsigned mb_write(uint16_t addr, uint8_t val)
 {
-    addr &= 0x0FFF;
+	addr &= 0x0FFF;
 
-    if (addr & 0x0700)
-        cpu_slow();
+	if (addr & 0x0700)
+		cpu_slow();
 
-    if (addr < 0x400) {
-        /* SWAP1K */
-        switch(vlatch & 7) {
-        case 0:
-            return 0;
-        case 1:
-            return 1;
-        case 2:
-        case 3:
-            video[addr + 0x0400] = val;
-            return 0;
-        case 4:
-        case 5:
-            shortchar[addr] = val;
-            return 0;
-        default:
-            tallchar[addr] = val;
-            return 0;
-        }
-    }
-    if (addr < 0x0700) {
-        /* RAM400 */
-        return 1;
-    }
-    if (addr <= 0x07CF) {
-        /* SLORAM */
-        return 1;
-    }
-    if (addr >= 0xC00) {	/* VIDEO */
-        video[addr & 0x3FF] = val;
-        return 0;
-    }
-    if (addr >= 0x0900)	{/* RAM900 */
-        return 1;
-    }
-    if (addr >= 0x0800) {	/* MATRIX */
-        /* Undocumented. CP/M BIOS reads to this and it seems to work */
-        return 0;
-    }
-    /* Misc I/O */
-    switch(addr & ~3) {
-    case 0x07D0:	/* BAUDA */
-        bauda = val;
-        return 1;
-    case 0x07D4:	/* BAUDB */
-        baudb = val;
-        return 1;
-    case 0x07D8:	/* MLATCH */
-        mlatch = val;
-        maxfdc_mlatch(val);
-        return 1;
-    case 0x07DC:	/* VLATCH */
-        vlatch = val;
-        if (trace & TRACE_BANK)
-        	fprintf(stderr, "vlatch now %02x\n", vlatch);
-        video_recalc();
-        return 1;
-    case 0x07E0:	/* SYSCLR and SYSFLG CRTREG/CRTBYT */
-        if (addr & 1)
-            crt_data(val);
-        else
-            crt_set_reg(val);
-        return 0;
-    case 0x07E4:	/* SIO (DA CA DB CB) */
-        sio2_write(addr & 3, val);	/* Check ordering .. */
-        return 0;
-    case 0x07E8:	/* PSTAT/PDATA */
-        lpt_byte(val);
-        return 0;
-    case 0x07EC:	/* FDC (inverte) */
-        maxfdc_write(addr & 3, ~val);
-        return 0;
-    case 0x07F0:	/* SASI/UVC DATA */
-        max_sasi_writedata(addr & 1, val);
-        return 0;
-    case 0x07F4:	/* SASI/UVC CTRL */
-        max_sasi_ctrl(val);
-        return 0;
-    case 0x07F8:	/* DIPSW/BEEP */
-        return 0;		/* Makes a 2KHz beep for 1/15th sec */
-    case 0x07FC:	/* PIO (DA CA DB CB) */
-        pio_write(addr & 3, val);	/* Check order */
-        return 0;
-    }
-    fprintf(stderr, "Unhandled MB write %x, %x\n", addr, val);
-    return 0;
+	if (addr < 0x400) {
+		/* SWAP1K */
+		switch (vlatch & 7) {
+		case 0:
+			return 0;
+		case 1:
+			return 1;
+		case 2:
+		case 3:
+			video[addr + 0x0400] = val;
+			return 0;
+		case 4:
+		case 5:
+			shortchar[addr] = val;
+			return 0;
+		default:
+			tallchar[addr] = val;
+			return 0;
+		}
+	}
+	if (addr < 0x0700) {
+		/* RAM400 */
+		return 1;
+	}
+	if (addr <= 0x07CF) {
+		/* SLORAM */
+		return 1;
+	}
+	if (addr >= 0xC00) {	/* VIDEO */
+		video[addr & 0x3FF] = val;
+		return 0;
+	}
+	if (addr >= 0x0900) {	/* RAM900 */
+		return 1;
+	}
+	if (addr >= 0x0800) {	/* MATRIX */
+		/* Undocumented. CP/M BIOS reads to this and it seems to work */
+		return 0;
+	}
+	/* Misc I/O */
+	switch (addr & ~3) {
+	case 0x07D0:		/* BAUDA */
+		bauda = val;
+		return 1;
+	case 0x07D4:		/* BAUDB */
+		baudb = val;
+		return 1;
+	case 0x07D8:		/* MLATCH */
+		mlatch = val;
+		maxfdc_mlatch(val);
+		return 1;
+	case 0x07DC:		/* VLATCH */
+		vlatch = val;
+		if (trace & TRACE_BANK)
+			fprintf(stderr, "vlatch now %02x\n", vlatch);
+		video_recalc();
+		return 1;
+	case 0x07E0:		/* SYSCLR and SYSFLG CRTREG/CRTBYT */
+		if (addr & 1)
+			crt_data(val);
+		else
+			crt_set_reg(val);
+		return 0;
+	case 0x07E4:		/* SIO (DA CA DB CB) */
+		sio2_write(addr & 3, val);	/* Check ordering .. */
+		return 0;
+	case 0x07E8:		/* PSTAT/PDATA */
+		lpt_byte(val);
+		return 0;
+	case 0x07EC:		/* FDC (inverte) */
+		maxfdc_write(addr & 3, ~val);
+		return 0;
+	case 0x07F0:		/* SASI/UVC DATA */
+		max_sasi_writedata(addr & 1, val);
+		return 0;
+	case 0x07F4:		/* SASI/UVC CTRL */
+		max_sasi_ctrl(val);
+		return 0;
+	case 0x07F8:		/* DIPSW/BEEP */
+		return 0;	/* Makes a 2KHz beep for 1/15th sec */
+	case 0x07FC:		/* PIO (DA CA DB CB) */
+		pio_write(addr & 3, val);	/* Check order */
+		return 0;
+	}
+	fprintf(stderr, "Unhandled MB write %x, %x\n", addr, val);
+	return 0;
 }
 
-    		static void ui_event(void);
+static void ui_event(void);
 
 static uint8_t do_max_read(uint16_t addr, unsigned debug)
 {
-    uint8_t r;
-    if (trace & TRACE_MEM)
-    	fprintf(stderr, "addr %04X, vlatch %02X\n", addr, vlatch);
-    if (((addr >> 8) & 0x00F0) == (vlatch & 0xF0))
-        r = mb_read(addr, debug);
-    else {
-        if (addr & 0x8000)
-            r = ram_addr(pio_a >> 6)[addr & 0x7FFF];
-        else
-            r = ram_addr(pio_a >> 4)[addr & 0x7FFF];
-    }
-    if (trace & TRACE_MEM)
-        fprintf(stderr, "R %04X -> %02X\n", addr, r);
-    return r;
+	uint8_t r;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "addr %04X, vlatch %02X\n", addr, vlatch);
+	if (((addr >> 8) & 0x00F0) == (vlatch & 0xF0))
+		r = mb_read(addr, debug);
+	else {
+		if (addr & 0x8000)
+			r = ram_addr(pio_a >> 6)[addr & 0x7FFF];
+		else
+			r = ram_addr(pio_a >> 4)[addr & 0x7FFF];
+	}
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %04X -> %02X\n", addr, r);
+	return r;
 }
 
 static void mem_write(int unused, uint16_t addr, uint8_t val)
 {
-    if (trace & TRACE_MEM)
-        fprintf(stderr, "W %04X <- %02X\n", addr, val);
-    if (((addr >> 8) & 0x00F0) == (vlatch & 0xF0)) {
-    	if (mb_write(addr, val)) {
-    		/* Write through but into bank A */
-    		/* This is not well described so some guesswork is applied */
-    		ram[addr & 0x7FFF] = val;
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W %04X <- %02X\n", addr, val);
+	if (((addr >> 8) & 0x00F0) == (vlatch & 0xF0)) {
+		if (mb_write(addr, val)) {
+			/* Write through but into bank A */
+			/* This is not well described so some guesswork is applied */
+			ram[addr & 0x7FFF] = val;
 #if 0
-    		if (addr & 0x8000)
-    			ram_addr((pio_a >> 6) & 1)[addr & 0x7FFF] = val;
-		else
-    			ram_addr((pio_a >> 4) & 1)[addr & 0x7FFF] = val;
+			if (addr & 0x8000)
+				ram_addr((pio_a >> 6) & 1)[addr & 0x7FFF] = val;
+			else
+				ram_addr((pio_a >> 4) & 1)[addr & 0x7FFF] = val;
 #endif
-    	}
-    } else if (addr & 0x8000)
-        ram_addr(pio_a >> 6)[addr & 0x7FFF] = val;
-    else
-        ram_addr(pio_a >> 4)[addr & 0x7FFF] = val;
+		}
+	} else if (addr & 0x8000)
+		ram_addr(pio_a >> 6)[addr & 0x7FFF] = val;
+	else
+		ram_addr(pio_a >> 4)[addr & 0x7FFF] = val;
 }
 
 static uint8_t mem_read(int unused, uint16_t addr)
@@ -1101,7 +1081,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	   the interrupt chain */
 	if (cpu_z80.M1) {
 		/* DD FD CB see the Z80 interrupt manual */
-		if (r == 0xDD || r == 0xFD || r== 0xCB) {
+		if (r == 0xDD || r == 0xFD || r == 0xCB) {
 			rstate = 2;
 			return r;
 		}
@@ -1122,16 +1102,15 @@ static uint8_t io_read(int unused, uint16_t addr)
 {
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
-        return 0xFF;
+	return 0xFF;
 }
 
 static void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	if (trace & TRACE_IO) {
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
-		fprintf(stderr,
-			"Unknown write to port %04X of %02X\n", addr, val);
-        }
+		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
+	}
 }
 
 static unsigned int nbytes;
@@ -1158,26 +1137,22 @@ static void z80_trace(unsigned unused)
 		return;
 	nbytes = 0;
 	/* Spot XXXR repeating instructions and squash the trace */
-	if (cpu_z80.M1PC == lastpc && z80dis_byte_quiet(lastpc) == 0xED &&
-		(z80dis_byte_quiet(lastpc + 1) & 0xF4) == 0xB0) {
+	if (cpu_z80.M1PC == lastpc && z80dis_byte_quiet(lastpc) == 0xED && (z80dis_byte_quiet(lastpc + 1) & 0xF4) == 0xB0) {
 		return;
 	}
 	lastpc = cpu_z80.M1PC;
 	fprintf(stderr, "%04X: ", lastpc);
 	z80_disasm(buf, lastpc);
-	while(nbytes++ < 6)
+	while (nbytes++ < 6)
 		fprintf(stderr, "   ");
 	fprintf(stderr, "%-16s ", buf);
-	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n",
-		cpu_z80.R1.br.A, cpu_z80.R1.br.F,
-		cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL,
-		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
+	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n", cpu_z80.R1.br.A, cpu_z80.R1.br.F, cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL, cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
 }
 
 
 static void poll_irq_event(void)
 {
-	if ((sysstat &0x80) || sio2_check_im2(sio))
+	if ((sysstat & 0x80) || sio2_check_im2(sio))
 		Z80INT(&cpu_z80, 0xFE);
 	else
 		Z80NOINT(&cpu_z80);
@@ -1210,7 +1185,7 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 			fp--;
 		}
 		if (rows == 7 && (c & 0x80))
-			fp = tallchar + (c & 0x3F)  * 8 + 0x200;
+			fp = tallchar + (c & 0x3F) * 8 + 0x200;
 		for (pixels = 0; pixels < CWIDTH; pixels++) {
 			if (bits & 0x80)
 				*pixp++ = 0xFFD0D0D0;
@@ -1243,16 +1218,16 @@ static void max80_rasterize(void)
 	for (lines = 0; lines < max; lines++) {
 		/* TODO: fix this for the correct funky mapping */
 		ptr = lptr;
-		for (cols = 0; cols < crt_reg[1] && cols < COLS; cols ++) {
+		for (cols = 0; cols < crt_reg[1] && cols < COLS; cols++) {
 			raster_char(lines, cols, video[ptr & 0x07FF]);
 			ptr++;
 		}
-		for ( ; cols < COLS; cols ++)
+		for (; cols < COLS; cols++)
 			raster_char(lines, cols, ' ');
 		lptr += crt_reg[1];
 	}
-	for (; lines < ROWS; lines ++)
-		for (cols = 0; cols < COLS; cols ++)
+	for (; lines < ROWS; lines++)
+		for (cols = 0; cols < COLS; cols++)
 			raster_char(lines, cols, ' ');
 }
 
@@ -1276,7 +1251,7 @@ static void raster_char_wide(unsigned int y, unsigned int x, uint8_t c)
 			fp--;
 		}
 		if (rows == 7 && (c & 0x80))
-			fp = tallchar + (c & 0x3F)  * 8 + 0x200;
+			fp = tallchar + (c & 0x3F) * 8 + 0x200;
 		for (pixels = 0; pixels < CWIDTH; pixels++) {
 			if (bits & 0x80) {
 				*pixp++ = 0xFFD0D0D0;
@@ -1316,13 +1291,13 @@ static void max80_rasterize_40(void)
 			raster_char_wide(lines, cols, video[ptr & 0x07FF]);
 			ptr += 2;
 		}
-		for ( ; cols < COLS; cols += 2) {
+		for (; cols < COLS; cols += 2) {
 			raster_char_wide(lines, cols, ' ');
 			ptr++;
 		}
 		lptr += crt_reg[1];
 	}
-	for (; lines < ROWS; lines ++) {
+	for (; lines < ROWS; lines++) {
 		for (cols = 0; cols < COLS; cols += 2) {
 			raster_char_wide(lines, cols, ' ');
 			ptr++;
@@ -1351,7 +1326,7 @@ static void max80_render(void)
  */
 
 static SDL_Keycode keyboard[] = {
-	SDLK_AT, SDLK_a, SDLK_b, SDLK_c, SDLK_d, SDLK_e, SDLK_f,  SDLK_g,
+	SDLK_AT, SDLK_a, SDLK_b, SDLK_c, SDLK_d, SDLK_e, SDLK_f, SDLK_g,
 	SDLK_h, SDLK_i, SDLK_j, SDLK_k, SDLK_l, SDLK_m, SDLK_n, SDLK_o,
 	SDLK_p, SDLK_q, SDLK_r, SDLK_s, SDLK_t, SDLK_u, SDLK_v, SDLK_w,
 	SDLK_x, SDLK_y, SDLK_z, SDLK_LEFTBRACKET, SDLK_BACKSLASH, SDLK_RIGHTBRACKET, SDLK_CARET, SDLK_UNDERSCORE,
@@ -1365,7 +1340,7 @@ static SDL_Keycode keyboard[] = {
 static void keytranslate(SDL_Event *ev)
 {
 	SDL_Keycode c = ev->key.keysym.sym;
-	switch(c) {
+	switch (c) {
 	case SDLK_HASH:
 		c = SDLK_COLON;
 		break;
@@ -1386,7 +1361,7 @@ static void ui_event(void)
 {
 	SDL_Event ev;
 	while (SDL_PollEvent(&ev)) {
-		switch(ev.type) {
+		switch (ev.type) {
 		case SDL_QUIT:
 			emulator_done = 1;
 			break;
@@ -1463,7 +1438,7 @@ static void memrandom(uint8_t *p, unsigned len)
 {
 	time_t t = time(NULL) ^ getpid();
 	srand(t);
-	while(len--)
+	while (len--)
 		*p++ = rand() >> 3;
 }
 
@@ -1474,7 +1449,7 @@ int main(int argc, char *argv[])
 	int fd;
 	int l;
 	int i;
-	unsigned eightinch = 0;		/* If set drives are 8" or 5.25" with no motor control */
+	unsigned eightinch = 0;	/* If set drives are 8" or 5.25" with no motor control */
 	char *rompath = "max80.rom";
 	char *fdc_path[4] = { NULL, NULL, NULL, NULL };
 	char *disk_path = NULL;
@@ -1560,39 +1535,29 @@ int main(int argc, char *argv[])
 
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "max80: unable to initialize SDL: %s\n",
-			SDL_GetError());
+		fprintf(stderr, "max80: unable to initialize SDL: %s\n", SDL_GetError());
 		exit(1);
 	}
-	window = SDL_CreateWindow("LOBO MAX 80",
-			SDL_WINDOWPOS_UNDEFINED,
-			SDL_WINDOWPOS_UNDEFINED,
-			COLS * CWIDTH, ROWS * CHEIGHT,
-			SDL_WINDOW_RESIZABLE);
+	window = SDL_CreateWindow("LOBO MAX 80", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, COLS * CWIDTH, ROWS * CHEIGHT, SDL_WINDOW_RESIZABLE);
 	if (window == NULL) {
-		fprintf(stderr, "max80: unable to open window: %s\n",
-			SDL_GetError());
+		fprintf(stderr, "max80: unable to open window: %s\n", SDL_GetError());
 		exit(1);
 	}
 	render = SDL_CreateRenderer(window, -1, 0);
 	if (render == NULL) {
-		fprintf(stderr, "max80: unable to create renderer: %s\n",
-			SDL_GetError());
+		fprintf(stderr, "max80: unable to create renderer: %s\n", SDL_GetError());
 		exit(1);
 	}
-	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888,
-		SDL_TEXTUREACCESS_STREAMING,
-		COLS * CWIDTH, ROWS * CHEIGHT);
+	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, COLS * CWIDTH, ROWS * CHEIGHT);
 	if (texture == NULL) {
-		fprintf(stderr, "max80: unable to create texture: %s\n",
-			SDL_GetError());
+		fprintf(stderr, "max80: unable to create texture: %s\n", SDL_GetError());
 		exit(1);
 	}
 	SDL_SetRenderDrawColor(render, 0, 0, 0, 255);
 	SDL_RenderClear(render);
 	SDL_RenderPresent(render);
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-	SDL_RenderSetLogicalSize(render, COLS * CWIDTH,  ROWS * CHEIGHT);
+	SDL_RenderSetLogicalSize(render, COLS * CWIDTH, ROWS * CHEIGHT);
 
 	matrix = keymatrix_create(8, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
@@ -1651,7 +1616,7 @@ int main(int argc, char *argv[])
 				/* Clear this after because reti_event may set the
 				   flags to indicate there is more happening. We will
 				   pick up the next state changes on the reti if so */
-				if (!(cpu_z80.IFF1|cpu_z80.IFF2))
+				if (!(cpu_z80.IFF1 | cpu_z80.IFF2))
 					int_recalc = 0;
 			}
 		}
