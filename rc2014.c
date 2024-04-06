@@ -154,7 +154,6 @@ static uint8_t live_nonim2;
 #define IRQM_16X50	4
 
 static Z80Context cpu_z80;
-
 static nic_w5100_t *wiz;
 
 volatile int emulator_done;
@@ -2224,7 +2223,7 @@ static uint8_t io_read_2014(uint16_t addr)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "read %02x\n", addr);
 	/* Sort out an address TODO */
-	if (copro && (addr & 0xFC) == 0x8)
+	if (copro && (addr & 0xF8) == 0x8)
 		return z180copro_ioread(copro, addr);
 	if ((addr & 0xFF) == 0xBA) {
 		return 0xCC;
@@ -2324,7 +2323,7 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 
-	if (copro && (addr & 0xFC) == 0x8) {
+	if (copro && (addr & 0xF8) == 0x8) {
 		z180copro_iowrite(copro, addr, val);
 		return;
 	}
@@ -3353,6 +3352,11 @@ int main(int argc, char *argv[])
 		close(fd);
 	}
 
+	if (have_copro) {
+		copro = z180copro_create();
+		z180copro_trace(copro, (trace >> 17) & 3);
+	}
+
 	if (ide == 1 ) {
 		ide0 = ide_allocate("cf");
 		if (ide0) {
@@ -3390,7 +3394,6 @@ int main(int argc, char *argv[])
 		ncr5380_trace(ncr, !!(trace & TRACE_SCSI));
 	}
 
-
 	/* SD mapping */
 	if (cpuboard == CPUBOARD_MICRO80 || cpuboard == CPUBOARD_MICRO80W) {
 		sd_clock = 0x04;
@@ -3399,15 +3402,20 @@ int main(int argc, char *argv[])
 		sd_miso = 1;
 	}
 	if (sdpath) {
-		sdcard = sd_create("sd0");
+		if (!have_copro)
+			sdcard = sd_create("sd0");
 		fd = open(sdpath, O_RDWR);
 		if (fd == -1) {
 			perror(sdpath);
 			exit(1);
 		}
-		sd_attach(sdcard, fd);
-		if (trace & TRACE_SD)
-			sd_trace(sdcard, 1);
+		if (have_copro)
+			z180copro_attach_sd(copro, fd);
+		else {
+			sd_attach(sdcard, fd);
+			if (trace & TRACE_SD)
+				sd_trace(sdcard, 1);
+		}
 	}
 
 	if (have_acia) {
@@ -3492,10 +3500,6 @@ int main(int argc, char *argv[])
 	fdc_setdrive(fdc, 0, drive_a);
 	fdc_setdrive(fdc, 1, drive_b);
 
-	if (have_copro) {
-		copro = z180copro_create();
-		z180copro_trace(copro, (trace >> 17) & 3);
-	}
 
 	switch(indev) {
 	case INDEV_ACIA:
