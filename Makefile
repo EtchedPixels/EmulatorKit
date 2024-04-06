@@ -11,7 +11,7 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
-	sorceror
+	sorceror z80all
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -286,6 +286,9 @@ max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 
 sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
+
+z80all: z80all.o 16x50.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 z80all.o 16x50.o ide.o z80dis.o libz80/libz80.o -lSDL2 -o z80all
 
 makedisk: makedisk.o ide.o
 	cc -O2 -o makedisk makedisk.o ide.o
