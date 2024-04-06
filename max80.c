@@ -205,7 +205,7 @@ static void maxfdc_mlatch(uint8_t latch)
 	}
 	wd17xx_set_density(fdc, (latch & 0x40) ? DEN_DD : DEN_SD);
 	wd17xx_set_side(fdc, !!(latch & 0x10));
-	
+
 	/* 0x20 is 8" v 5" but also starts motor for 3 secs */
 	if (!(latch & 0x20))
 		wd17xx_motor(fdc, 1);
@@ -857,7 +857,7 @@ static uint8_t read_banka(uint16_t addr)
 {
 #if 1
 	return ram[addr & 0x7FFF];
-#else	
+#else
 	uint8_t r;
         if (addr & 0x8000)
             r = ram_addr((pio_a >> 6) & 1)[addr & 0x7FFF];
@@ -929,8 +929,10 @@ static uint8_t mb_read(uint16_t addr, unsigned debug)
         if (wd17xx_get_motor(fdc))
         	r |= 0x20;
         sysstat ^= 0x40;	/* FIXME: hack to make DSPTMG toggle */
-        if (!(addr & 1))
+        if (!(addr & 1)) {
             sysstat &= 0x7F;	/* Clear heartbeat */
+            recalc_interrupts();
+        }
         return r;
     case 0x07E4:	/* SIO (DA CA DB CB) */
         return sio2_read(addr & 3);	/* Check ordering .. */
@@ -1077,12 +1079,12 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
     		/* Write through but into bank A */
     		/* This is not well described so some guesswork is applied */
     		ram[addr & 0x7FFF] = val;
-#if 0    		
+#if 0
     		if (addr & 0x8000)
     			ram_addr((pio_a >> 6) & 1)[addr & 0x7FFF] = val;
 		else
     			ram_addr((pio_a >> 4) & 1)[addr & 0x7FFF] = val;
-#endif    			
+#endif
     	}
     } else if (addr & 0x8000)
         ram_addr(pio_a >> 6)[addr & 0x7FFF] = val;
@@ -1232,25 +1234,26 @@ static void max80_rasterize(void)
 	unsigned int lptr = crt_reg[12] << 8 | crt_reg[13];
 	unsigned int lines, cols;
 	unsigned int ptr;
-	for (lines = 0; lines < crt_reg[6]; lines ++) {
+	unsigned int max = crt_reg[6];
+
+	if (max > ROWS) {
+		fprintf(stderr, "m6845: set to %d rows!\n", max);
+		max = ROWS;
+	}
+	for (lines = 0; lines < max; lines++) {
 		/* TODO: fix this for the correct funky mapping */
 		ptr = lptr;
-		for (cols = 0; cols < crt_reg[1]; cols ++) {
+		for (cols = 0; cols < crt_reg[1] && cols < COLS; cols ++) {
 			raster_char(lines, cols, video[ptr & 0x07FF]);
 			ptr++;
 		}
-		for ( ; cols < COLS; cols ++) {
+		for ( ; cols < COLS; cols ++)
 			raster_char(lines, cols, ' ');
-			ptr++;
-		}
 		lptr += crt_reg[1];
 	}
-	for (; lines < ROWS; lines ++) {
-		for (cols = 0; cols < COLS; cols ++) {
+	for (; lines < ROWS; lines ++)
+		for (cols = 0; cols < COLS; cols ++)
 			raster_char(lines, cols, ' ');
-			ptr++;
-		}
-	}
 }
 
 static void raster_char_wide(unsigned int y, unsigned int x, uint8_t c)
@@ -1300,10 +1303,16 @@ static void max80_rasterize_40(void)
 	unsigned int lptr = crt_reg[12] << 8 | crt_reg[13];
 	unsigned int lines, cols;
 	unsigned int ptr;
-	for (lines = 0; lines < crt_reg[6]; lines ++) {
+	unsigned int max = crt_reg[6];
+
+	if (max > ROWS) {
+		fprintf(stderr, "m6845: set to %d rows!\n", max);
+		max = ROWS;
+	}
+	for (lines = 0; lines < max; lines++) {
 		/* TODO: fix this for the correct funky mapping */
 		ptr = lptr;
-		for (cols = 0; cols < crt_reg[1]; cols += 2) {
+		for (cols = 0; cols < crt_reg[1] && cols < COLS; cols += 2) {
 			raster_char_wide(lines, cols, video[ptr & 0x07FF]);
 			ptr += 2;
 		}
@@ -1326,7 +1335,7 @@ static void max80_rasterize_40(void)
 static void max80_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = COLS * CWIDTH;
 	rect.h = ROWS * CHEIGHT;
@@ -1450,6 +1459,13 @@ static struct diskgeom *guess_format(const char *path)
 	exit(1);
 }
 
+static void memrandom(uint8_t *p, unsigned len)
+{
+	time_t t = time(NULL) ^ getpid();
+	srand(t);
+	while(len--)
+		*p++ = rand() >> 3;
+}
 
 int main(int argc, char *argv[])
 {
@@ -1536,6 +1552,11 @@ int main(int argc, char *argv[])
 
 	pio_reset();
 	sio_reset();
+
+	memrandom(ram, sizeof(ram));
+	memrandom(video, sizeof(video));
+	memrandom(shortchar, sizeof(shortchar));
+	memrandom(tallchar, sizeof(tallchar));
 
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
