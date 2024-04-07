@@ -25,12 +25,13 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h>
 
 #include "system.h"
 #include "libz180/z180.h"
+#include "serialdevice.h"
 #include "z180_io.h"
 
+#include "ttycon.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
 #include "z80dis.h"
@@ -173,49 +174,10 @@ static void rhyophyre_trace(unsigned unused)
 		cpu_z180.R1.wr.IX, cpu_z180.R1.wr.IY, cpu_z180.R1.wr.SP);
 }
 
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
-}
-
 void recalc_interrupts(void)
 {
 	int_recalc = 1;
 }
-
 
 uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 {
@@ -354,7 +316,8 @@ int main(int argc, char *argv[])
 	}
 
 	io = z180_create(&cpu_z180);
-	z180_set_input(io, 0, 1);
+	z180_ser_attach(io, 0, &console);
+	z180_ser_attach(io, 1, &console_wo);
 	z180_trace(io, trace & TRACE_CPU_IO);
 
 	rtc = rtc_create();
