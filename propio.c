@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "serialdevice.h"
 #include "propio.h"
 
 /* PropIO v2 */
@@ -31,8 +32,8 @@ struct propio {
     uint8_t err;
     int fd;
     off_t cardsize;
-    unsigned int input;
     unsigned int trace;
+    struct serial_device *dev;
 };
 
 static uint32_t buftou32(struct propio *prop)
@@ -65,18 +66,13 @@ uint8_t propio_read(struct propio *prop, uint8_t addr)
 
     switch(addr) {
     case 0:		/* Console status */
-        if (prop->input) {
-            v = check_chario();
-            r = (v & 1) ? 0x20:0x00;
-            if (v & 2)
-                r |= 0x10;
-            return r;
-        }
-        return 0;
+        v = prop->dev->ready(prop->dev);
+        r = (v & 1) ? 0x20:0x00;
+        if (v & 2)
+            r |= 0x10;
+        return r;
     case 1:		/* Keyboard input */
-        if (prop->input)
-            return next_char();
-        return 0xFF;
+        return prop->dev->get(prop->dev);
     case 2:		/* Disk status */
         if (prop->trace)
             fprintf(stderr, "propio: read status %02X\n", prop->st);
@@ -109,7 +105,7 @@ void propio_write(struct propio *prop, uint8_t addr, uint8_t val)
             break;
         case 1:
             /* write to screen */
-            write(1, &val, 1);
+            prop->dev->put(prop->dev, val);
             break;
         case 2:
             if (prop->trace)
@@ -276,9 +272,9 @@ void propio_reset(struct propio *prop)
     prop->tlen = 4;
 }
 
-void propio_set_input(struct propio *prop, int onoff)
+void propio_attach(struct propio *prop, struct serial_device *dev)
 {
-    prop->input = onoff;
+    prop->dev = dev;
 }
 
 void propio_trace(struct propio *prop, int onoff)
