@@ -17,9 +17,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h>
 #include "6800.h"
 #include "ide.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 
 static uint8_t ramrom[65536];
@@ -43,44 +44,6 @@ static int trace = 0;
 struct m6800 cpu;
 struct acia *acia;
 struct wd17xx *wdfdc;
-
-int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
-}
 
 void recalc_interrupts(void)
 {
@@ -570,7 +533,7 @@ int main(int argc, char *argv[])
 	wd_attach(wdfdc, 1, "Flex2_b.dsk");
 	if (trace & TRACE_ACIA)
 		acia_trace(acia, 1);
-	acia_set_input(acia, 1);
+	acia_attach(acia, &console);
 
 	if (trace & TRACE_CPU)
 		cpu.debug = 1;
@@ -588,7 +551,6 @@ int main(int argc, char *argv[])
 			cycles -= clockrate;
 		}
 		/* Drive the internal serial */
-		i = check_chario();
 		acia_timer(acia);
 		/* Do 5ms of I/O and delays */
 		if (!fast)
