@@ -21,6 +21,8 @@
 #include <sys/select.h>
 #include "6800.h"
 #include "ide.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "16x50.h"
 
@@ -378,12 +380,12 @@ int main(int argc, char *argv[])
 		acia = acia_create();
 		if (trace & TRACE_UART)
 			acia_trace(acia, 1);
-		acia_set_input(acia, 1);
+		acia_attach(acia, &console);
 	} else {
 		uart = uart16x50_create();
 		if (trace & TRACE_UART)
 			uart16x50_trace(uart, 1);
-		uart16x50_set_input(uart, 1);
+		uart16x50_attach(uart, &console);
 	}
 
 	if (trace & TRACE_CPU)
