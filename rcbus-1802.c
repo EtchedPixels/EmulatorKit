@@ -31,6 +31,8 @@
 #include <errno.h>
 #include <sys/select.h>
 #include "1802.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "16x50.h"
 #include "ide.h"
@@ -533,13 +535,16 @@ int main(int argc, char *argv[])
 	if (acia_uart) {
 		acia = acia_create();
 		acia_trace(acia, trace & TRACE_ACIA);
-		acia_set_input(acia, acia_input);
+		acia_attach(acia, &console);
 	}
 
 	if (uart_16550a) {
 		uart = uart16x50_create();
 		uart16x50_trace(uart, trace & TRACE_UART);
-		uart16x50_set_input(uart, !acia_input);
+		if (acia_input)
+			uart16x50_attach(uart, &console_wo);
+		else
+			uart16x50_attach(uart, &console);
 	}
 
 	if (wiznet) {
