@@ -25,10 +25,11 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <sys/select.h>
 #include <sys/stat.h>
 #include "d6809.h"
 #include "e6809.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "ide.h"
 #include "wd17xx.h"
@@ -82,44 +83,6 @@ static volatile int done;
 #define TRACE_DAT	256
 
 static int trace = 0;
-
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
-}
 
 /*
  *	The DAT doe a 4->8 expansion where the upper 4 bits are
@@ -693,7 +656,7 @@ int main(int argc, char *argv[])
 	{
 		struct acia *acia = acia_create();
 		slot_attach(0, &mps_slot, acia);
-		acia_set_input(acia, 1);
+		acia_attach(acia, &console);
 		acia_trace(acia, trace & TRACE_ACIA);
 	}
 
