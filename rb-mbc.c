@@ -32,6 +32,8 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include "libz80/z80.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "16x50.h"
 #include "ide.h"
 #include "ppide.h"
@@ -362,7 +364,7 @@ int main(int argc, char *argv[])
     rtc_trace(rtc, trace & TRACE_RTC);
     uart = uart16x50_create();
     uart16x50_trace(uart, trace & TRACE_UART);
-    uart16x50_set_input(uart, 1);
+    uart16x50_attach(uart, &console);
 
     recalc_banks();
 
