@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "serialdevice.h"
 #include "libz180/z180.h"
 #include "z180_io.h"
 
@@ -19,8 +20,9 @@ struct z180_asci {
     uint8_t cntlb;
     uint16_t tc;
     uint8_t ecr;
-    bool input;
     bool irq;
+    struct serial_device *dev;
+    
 };
 
 struct z180_prt {
@@ -311,6 +313,7 @@ static void z180_asci_write(struct z180_io *io, uint8_t addr, uint8_t val)
     case 0x06:
         /* TDRE was high and tx was enabled */
         if ((asci->cntla & 0x20) && (asci->stat & 0x02)) {
+            asci->dev->put(asci->dev, val);
             write(1, &val, 1);
             asci->stat &= ~0x02;
         }
@@ -324,12 +327,12 @@ static void z180_asci_write(struct z180_io *io, uint8_t addr, uint8_t val)
 
 static void z180_asci_event(struct z180_io *io, struct z180_asci *asci)
 {
-    unsigned int r = check_chario();
+    unsigned int r = asci->dev->ready(asci->dev);
     if (r & 2)
         asci->stat |= 0x02;
-    if (asci->input && (r & 1)) {
+    if (r & 1) {
         asci->stat |= 0x80;
-        asci->rdr = next_char();
+        asci->rdr = asci->dev->get(asci->dev);
     }
     z180_asci_recalc(io, asci);
 }
@@ -939,9 +942,9 @@ void z180_trace(struct z180_io *io, int trace)
     io->trace = trace;
 }
 
-void z180_set_input(struct z180_io *io, int port, int onoff)
+void z180_ser_attach(struct z180_io *io, int port, struct serial_device *dev)
 {
-    io->asci[port].input = onoff;
+    io->asci[port].dev = dev;
 }
 
 void z180_set_clock(struct z180_io *io, unsigned hz)
