@@ -39,6 +39,8 @@
 #include <sys/mman.h>
 #include "libz80/z80.h"
 #include "z80dis.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "16x50.h"
 #include "ppide.h"
 #include "propio.h"
@@ -165,43 +167,6 @@ static void z80_trace(unsigned unused)
 		cpu_z80.R1.br.A, cpu_z80.R1.br.F,
 		cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL,
 		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
-}
-
-
-unsigned int check_chario(void)
-{
-    fd_set i, o;
-    struct timeval tv;
-    unsigned int r = 0;
-
-    FD_ZERO(&i);
-    FD_SET(0, &i);
-    FD_ZERO(&o);
-    FD_SET(1, &o);
-    tv.tv_sec = 0;
-    tv.tv_usec = 0;
-
-    if (select(2, &i, &o, NULL, &tv) == -1) {
-	perror("select");
-	exit(1);
-    }
-    if (FD_ISSET(0, &i))
-	r |= 1;
-    if (FD_ISSET(1, &o))
-	r |= 2;
-    return r;
-}
-
-unsigned int next_char(void)
-{
-    char c;
-    if (read(0, &c, 1) != 1) {
-	printf("(tty read without ready byte)\n");
-	return 0xFF;
-    }
-    if (c == 0x0A)
-        c = '\r';
-    return c;
 }
 
 void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
@@ -384,7 +349,7 @@ int main(int argc, char *argv[])
 
     if (prop) {
         propio = propio_create(ppath);
-        propio_set_input(propio, 1);
+        propio_attach(propio, &console);
         propio_trace(propio, trace & TRACE_PROP);
     }
 
@@ -396,7 +361,9 @@ int main(int argc, char *argv[])
 
     uart16x50_trace(uart[0], trace & TRACE_UART);
     if (!prop)
-        uart16x50_set_input(uart[0], 1);
+        uart16x50_attach(uart[0], &console);
+    else
+        uart16x50_attach(uart[0], &console_wo);
 
     if (wiznet) {
         wiz = nic_w5100_alloc();
