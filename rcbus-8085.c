@@ -29,8 +29,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h>
 #include "intel_8085_emulator.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "16x50.h"
 #include "ide.h"
@@ -186,44 +187,6 @@ void i8085_write(uint16_t addr, uint8_t val)
 		else if (trace & TRACE_MEM)
 			fprintf(stderr, "[Discarded: ROM]\n");
 	}
-}
-
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
 }
 
 void recalc_interrupts(void)
@@ -565,13 +528,13 @@ int main(int argc, char *argv[])
 		acia = acia_create();
 		if (trace & TRACE_ACIA)
 			acia_trace(acia, 1);
-		acia_set_input(acia, acia_input);
+		acia_attach(acia, acia_input ? &console : &console_wo);
 	}
 	if (uart_16550a) {
 		uart = uart16x50_create();
 		if (trace & TRACE_UART)
 			uart16x50_trace(uart, 1);
-		uart16x50_set_input(uart, 1);
+		uart16x50_attach(uart, acia_input ? & console_wo : &console);
 	}
 
 	if (wiznet) {
