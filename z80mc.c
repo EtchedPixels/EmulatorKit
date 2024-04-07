@@ -19,6 +19,8 @@
  *
  *	TODO
  *	Is there any sane way to handle the 7 segment displays ?
+ *
+ *	FIXME: move to standard uart lib
  */
 
 #include <stdio.h>
@@ -34,6 +36,9 @@
 #include <sys/mman.h>
 #include "libz80/z80.h"
 #include "z80dis.h"
+#include "serialdevice.h"
+#include "ttycon.h"
+#include "16x50.h"
 #include "sdcard.h"
 
 static uint8_t bankram[16][32768];
@@ -51,6 +56,7 @@ static Z80Context cpu_z80;
 static volatile int done;
 
 static struct sdcard *sdcard;
+static struct uart16x50 *uart;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
@@ -204,287 +210,14 @@ static void spi_clock(void)
 	    fprintf(stderr, "rxbit = %d]\n", sd_miso);
 }
 
-static int check_chario(void)
+static void recalc_interrupts(void)
 {
-    fd_set i, o;
-    struct timeval tv;
-    unsigned int r = 0;
-
-    FD_ZERO(&i);
-    FD_SET(0, &i);
-    FD_ZERO(&o);
-    FD_SET(1, &o);
-    tv.tv_sec = 0;
-    tv.tv_usec = 0;
-
-    if (select(2, &i, &o, NULL, &tv) == -1) {
-	perror("select");
-	exit(1);
-    }
-    if (FD_ISSET(0, &i))
-	r |= 1;
-    if (FD_ISSET(1, &o))
-	r |= 2;
-    return r;
+    if (uart16x50_irq_pending(uart) || (fpreg & 0x40))
+        Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
+    else
+        Z80NOINT(&cpu_z80);
 }
-
-static unsigned int next_char(void)
-{
-    char c;
-    if (read(0, &c, 1) != 1) {
-	printf("(tty read without ready byte)\n");
-	return 0xFF;
-    }
-    if (c == 0x0A)
-        c = '\r';
-    return c;
-}
-
-/* UART: very mimimal for the moment */
-
-struct uart16x50 {
-    uint8_t ier;
-    uint8_t iir;
-    uint8_t fcr;
-    uint8_t lcr;
-    uint8_t mcr;
-    uint8_t lsr;
-    uint8_t msr;
-    uint8_t scratch;
-    uint8_t ls;
-    uint8_t ms;
-    uint8_t dlab;
-    uint8_t irq;
-#define RXDA	1
-#define TEMT	2
-#define MODEM	8
-    uint8_t irqline;
-};
-
-static struct uart16x50 uart[1];
-
-static void uart_init(struct uart16x50 *uptr)
-{
-    uptr->dlab = 0;
-}
-
-/* Compute the interrupt indicator register from what is pending */
-static void uart_recalc_iir(struct uart16x50 *uptr)
-{
-    if (uptr->irq & RXDA)
-        uptr->iir = 0x04;
-    else if (uptr->irq & TEMT)
-        uptr->iir = 0x02;
-    else if (uptr->irq & MODEM)
-        uptr->iir = 0x00;
-    else {
-        uptr->iir = 0x01;	/* No interrupt */
-        uptr->irqline = 0;
-        return;
-    }
-    /* Ok so we have an event, do we need to waggle the line */
-    if (uptr->irqline)
-        return;
-    uptr->irqline = uptr->irq;
-    Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
     
-}
-
-/* Raise an interrupt source. Only has an effect if enabled in the ier */
-static void uart_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (uptr->irq & n)
-        return;
-    if (!(uptr->ier & n))
-        return;
-    uptr->irq |= n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
-{
-    if (!(uptr->irq & n))
-        return;
-    uptr->irq &= ~n;
-    uart_recalc_iir(uptr);
-}
-
-static void uart_event(struct uart16x50 *uptr)
-{
-    uint8_t r = check_chario();
-    uint8_t old = uptr->lsr;
-    uint8_t dhigh;
-    if (r & 1)
-        uptr->lsr |= 0x01;	/* RX not empty */
-    if (r & 2)
-        uptr->lsr |= 0x60;	/* TX empty */
-    dhigh = (old ^ uptr->lsr);
-    dhigh &= uptr->lsr;		/* Changed high bits */
-    if (dhigh & 1)
-        uart_interrupt(uptr, RXDA);
-    if (dhigh & 0x2)
-        uart_interrupt(uptr, TEMT);
-}
-
-static void show_settings(struct uart16x50 *uptr)
-{
-    uint32_t baud;
-
-    if (!(trace & TRACE_UART))
-        return;
-
-    baud = uptr->ls + (uptr->ms << 8);
-    if (baud == 0)
-        baud = 1843200;
-    baud = 1843200 / baud;
-    baud /= 16;
-    fprintf(stderr, "[%d:%d",
-            baud, (uptr->lcr &3) + 5);
-    switch(uptr->lcr & 0x38) {
-        case 0x00:
-        case 0x10:
-        case 0x20:
-        case 0x30:
-            fprintf(stderr, "N");
-            break;
-        case 0x08:
-            fprintf(stderr, "O");
-            break;
-        case 0x18:
-            fprintf(stderr, "E");
-            break;
-        case 0x28:
-            fprintf(stderr, "M");
-            break;
-        case 0x38:
-            fprintf(stderr, "S");
-            break;
-    }
-    fprintf(stderr, "%d ",
-            (uptr->lcr & 4) ? 2 : 1);
-
-    if (uptr->lcr & 0x40)
-        fprintf(stderr, "break ");
-    if (uptr->lcr & 0x80)
-        fprintf(stderr, "dlab ");
-    if (uptr->mcr & 1)
-        fprintf(stderr, "DTR ");
-    if (uptr->mcr & 2)
-        fprintf(stderr, "RTS ");
-    if (uptr->mcr & 4)
-        fprintf(stderr, "OUT1 ");
-    if (uptr->mcr & 8)
-        fprintf(stderr, "OUT2 ");
-    if (uptr->mcr & 16)
-        fprintf(stderr, "LOOP ");
-    fprintf(stderr, "ier %02x]\n", uptr->ier);
-}
-
-static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
-{
-    switch(addr) {
-    case 0:	/* If dlab = 0, then write else LS*/
-        if (uptr->dlab == 0) {
-            if (uptr == &uart[0]) {
-                putchar(val);
-                fflush(stdout);
-            }
-            uart_clear_interrupt(uptr, TEMT);
-            uart_interrupt(uptr, TEMT);
-        } else {
-            uptr->ls = val;
-            show_settings(uptr);
-        }
-        break;
-    case 1:	/* If dlab = 0, then IER */
-        if (uptr->dlab) {
-            uptr->ms= val;
-            show_settings(uptr);
-        }
-        else
-            uptr->ier = val;
-        break;
-    case 2:	/* FCR */
-        uptr->fcr = val & 0x9F;
-        break;
-    case 3:	/* LCR */
-        uptr->lcr = val;
-        uptr->dlab = (uptr->lcr & 0x80);
-        show_settings(uptr);
-        break;
-    case 4:	/* MCR */
-        uptr->mcr = val & 0x3F;
-        bankreg = uptr->mcr & 0x0F;
-        if (trace & TRACE_BANK)
-            fprintf(stderr, "[Bank %d selected.\n]", bankreg);
-        break;
-    case 5:	/* LSR (r/o) */
-        break;
-    case 6:	/* MSR (r/o) */
-        break;
-    case 7:	/* Scratch */
-        uptr->scratch = val;
-        break;
-    }
-}
-
-static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
-{
-    uint8_t r;
-
-    switch(addr) {
-    case 0:
-        /* receive buffer */
-        if (uptr == &uart[0] && uptr->dlab == 0) {
-            uart_clear_interrupt(uptr, RXDA);
-            if (check_chario() & 1)
-                return next_char();
-            return 0x00;
-        } else
-            return uptr->ls;
-        break;
-    case 1:
-        /* IER */
-        if (uptr->dlab == 0)
-            return uptr->ier;
-        return uptr->ms;
-    case 2:
-        /* IIR */
-        return uptr->iir;
-    case 3:
-        /* LCR */
-        return uptr->lcr;
-    case 4:
-        /* mcr */
-        return uptr->mcr;
-    case 5:
-        /* lsr */
-        r = check_chario();
-        uptr->lsr &=0x90;
-        if (r & 1)
-             uptr->lsr |= 0x01;	/* Data ready */
-        if (r & 2)
-             uptr->lsr |= 0x60;	/* TX empty | holding empty */
-        /* Reading the LSR causes these bits to clear */
-        r = uptr->lsr;
-        uptr->lsr &= 0xF0;
-        return r;
-    case 6:
-        /* MSR is used for the SD card MISO line */
-        /* msr */
-        uptr->msr &= 0x7F;
-        uptr->msr |= sd_miso ? 0x00 : 0x80;
-        r = uptr->msr;
-        /* Reading clears the delta bits */
-        uptr->msr &= 0xF0;
-        uart_clear_interrupt(uptr, MODEM);
-        return r;
-    case 7:
-        return uptr->scratch;
-    }
-    return 0xFF;
-}
-
 static void fpreg_write(uint8_t val)
 {
     fpreg &= ~0x47;	/* IRQ clear, clear counter */
@@ -494,6 +227,7 @@ static void fpreg_write(uint8_t val)
     fpreg |= fpcol;
     if (trace & TRACE_FPREG)
         fprintf(stderr, "fpreg write %02x now %02x\n", val, fpreg);
+    recalc_interrupts();
 }
 
 static uint8_t qreg_read(uint8_t addr)
@@ -523,6 +257,12 @@ static void qreg_write(uint8_t reg, uint8_t v)
         spi_select(v);
 }
 
+/* 16x50 callbacks */
+void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
+{
+	/* Nothing we care about */
+}
+
 static uint8_t io_read(int unused, uint16_t addr)
 {
     if (trace & TRACE_IO)
@@ -532,8 +272,11 @@ static uint8_t io_read(int unused, uint16_t addr)
         return fpreg;
     if (addr >= 0xC0 && addr <= 0xC7)
         qreg_read(addr & 7);
-    if (addr >= 0xC8 && addr <= 0xCF)
-        return uart_read(&uart[0], addr & 7);
+    if (addr >= 0xC8 && addr <= 0xCF) {
+        uint8_t r = uart16x50_read(uart, addr & 7);
+        recalc_interrupts();
+        return r;
+    }
     if (trace & TRACE_UNK)
         fprintf(stderr, "Unknown read from port %04X\n", addr);
     return 0xFF;
@@ -548,9 +291,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
         fpreg_write(val);
     else if (addr >= 0xC0 && addr <= 0xC7)
         qreg_write(addr & 7, val & 1);
-    else if (addr >= 0xC8 && addr <= 0xCF)
-        uart_write(&uart[0], addr & 7, val);
-    else if (addr == 0xFD) {
+    else if (addr >= 0xC8 && addr <= 0xCF) {
+        uart16x50_write(uart, addr & 7, val);
+        recalc_interrupts();
+    } else if (addr == 0xFD) {
         printf("trace set to %d\n", val);
         trace = val;
     }
@@ -630,7 +374,9 @@ int main(int argc, char *argv[])
 	    sd_trace(sdcard, 1);
     }
 
-    uart_init(&uart[0]);
+    uart = uart16x50_create();
+    uart16x50_trace(uart, !!(trace & TRACE_UART));
+    uart16x50_attach(uart, &console);
 
     /* No real need for interrupt accuracy so just go with the timer. If we
        ever do the UART as timer hack it'll need addressing! */
@@ -671,9 +417,9 @@ int main(int argc, char *argv[])
 	/* Do 1ms of I/O and delays */
 	if (!fast)
 	    nanosleep(&tc, NULL);
-	uart_event(uart);
+	uart16x50_event(uart);
 	fpreg |= 0x40;
-        Z80INT(&cpu_z80, 0xFF);	/* actually undefined */
+	recalc_interrupts();
     }
     exit(0);
 }

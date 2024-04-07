@@ -152,7 +152,6 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 }
 
 /* 16x50 callbacks */
-
 void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 {
 	/* Nothing we care about */
@@ -160,7 +159,6 @@ void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 
 /* Our port handling is 8bit wide because our bus is 8bit wide without any
    wide transaction indications */
-
 static uint8_t i808x_inport(uint16_t addr)
 {
 	if (trace & TRACE_IO)
