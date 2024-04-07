@@ -52,9 +52,10 @@
 #include "system.h"
 #include "libz180/z180.h"
 #include "lib765/include/765.h"
+#include "serialdevice.h"
 #include "z180_io.h"
 
-#include "16x50.h"
+#include "ttycon.h"
 #include "ide.h"
 #include "ps2.h"
 #include "ppide.h"
@@ -633,7 +634,8 @@ int main(int argc, char *argv[])
 	}
 
 	io = z180_create(&cpu_z180);
-	z180_set_input(io, 0, 1);
+	z180_ser_attach(io, 0, &console);
+	z180_ser_attach(io, 1, &console_wo);
 	z180_trace(io, trace & TRACE_CPU_IO);
 
 	rtc_trace(rtc, trace & TRACE_RTC);
