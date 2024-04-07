@@ -29,6 +29,8 @@
 #include <errno.h>
 #include <sys/select.h>
 
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "16x50.h"
 #include "sdcard.h"
 #include "system.h"
@@ -1013,7 +1015,7 @@ int main(int argc, char *argv[])
 	if (have_16x50) {
 		uart = uart16x50_create();
 		uart16x50_trace(uart, trace & TRACE_UART);
-		uart16x50_set_input(uart, 1);
+		uart16x50_attach(uart, &console);
 		uart16x50_reset(uart);
 	} else
 		sio2_input = 1;
