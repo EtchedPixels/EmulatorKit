@@ -36,6 +36,11 @@ static unsigned con_ready(struct serial_device *dev)
 	return r;
 }
 
+static unsigned con_wready(struct serial_device *dev)
+{
+	return con_ready(dev) & 2;
+}
+
 static unsigned con_noready(struct serial_device *dev)
 {
 	return 0;
@@ -76,9 +81,9 @@ struct serial_device console = {
 struct serial_device console_wo = {
     "Console",
     NULL,
-    con_get,
-    con_noput,
-    con_ready
+    con_noget,
+    con_put,
+    con_wready
 };
 
 struct serial_device nulldev = {
