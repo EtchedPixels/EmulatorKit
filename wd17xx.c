@@ -43,7 +43,7 @@ struct wd17xx {
 	unsigned int type;	/* Type - 1791, 1772 for now */
 	unsigned motor_timeout;	/* Timeout in ms */
 
-	unsigned int busyhack;
+	unsigned int busy;
 };
 
 #define NOTREADY 	0x80	/* all commands */
@@ -246,7 +246,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	}
 
 	fdc->lastcmd = v;
-	fdc->busyhack = 0;
+	fdc->busy = 0;
 
 	track = fdc->track;
 	if (fdc->side)
@@ -276,6 +276,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		return;
 
 	fdc->status = BUSY;
+	fdc->busy = 64;
 
 	fdc->rd = 0;
 	fdc->wr = 0;
@@ -284,7 +285,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	switch (v & 0xF0 ) {
 	case 0x00:
 		fdc->track = 0;
-		fdc->status = TRACK0 | INDEX;
+		fdc->status |= TRACK0 | INDEX;
 		if (v & 8)
 			fdc->status |= HEADLOAD;
 		fdc->intrq = 1;
@@ -292,12 +293,14 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		wd17xx_motor(fdc, motor);
 		if (v & 0x08) {
 			if (fdc->side >= fdc->sides[fdc->drive]) {
-				fdc->status = RECNFERR;
+				fdc->status |= RECNFERR;
 				fdc->intrq = 1;
 				return;
 			}
 			wd17xx_check_density(fdc);
 		}
+		/* Some systems issue a command and then poll for busy to check the command
+		   started */
 		break;
 	case 0x10:	/* seek */
 		fdc->intrq = 1;
@@ -306,7 +309,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (fdc->track > fdc->buf[0])
 			fdc->stepdir = -1;
 		fdc->track = fdc->buf[0];
-		fdc->status = INDEX;
+		fdc->status |= INDEX;
 		if (fdc->track >= fdc->tracks[fdc->drive]) {
 			fdc->status |= SEEKERR;
 			if (v & 0x08)
@@ -317,7 +320,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->status |= TRACK0;
 		if (v & 0x08) {
 			if (fdc->side >= fdc->sides[fdc->drive]) {
-				fdc->status = SEEKERR;
+				fdc->status |= SEEKERR;
 				fdc->intrq = 1;
 				return;
 			}
@@ -332,7 +335,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->track--;
 		if (fdc->track < 128 && fdc->stepdir == 1)
 			fdc->track++;
-		fdc->status = INDEX;
+		fdc->status |= INDEX;
 		if (fdc->track == 0)
 			fdc->status |= TRACK0;
 		if (v & 0x08) {
@@ -352,10 +355,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		   head position TODO */
 		if (track < 128)
 			fdc->track++;
-		fdc->status = INDEX;
+		fdc->status |= INDEX;
 		if (v & 0x08) {
 			if (fdc->side >= fdc->sides[fdc->drive]) {
-				fdc->status = RECNFERR;
+				fdc->status |= RECNFERR;
 				fdc->intrq = 1;
 				return;
 			}
@@ -390,12 +393,16 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (track >= fdc->tracks[fdc->drive] ||
 			fdc->sector - fdc->sector0[fdc->drive]
 				 >= fdc->spt[fdc->drive]) {
-			fdc->status = INDEX | RECNFERR;
+			fprintf(stderr, "want track %d, max %d: want sector %d, spt %d s0 %d\n",
+				track, fdc->tracks[fdc->drive], fdc->sector, fdc->spt[fdc->drive],
+				fdc->sector0[fdc->drive]);
+			fdc->status |= INDEX | RECNFERR;
 			fdc->intrq = 1;
 			return;
 		}
 		if (fdc->side >= fdc->sides[fdc->drive]) {
-			fdc->status = INDEX | RECNFERR;
+			fprintf(stderr, "want side %d max %d\n", fdc->side, fdc->sides[fdc->drive]);
+			fdc->status |= INDEX | RECNFERR;
 			fdc->intrq = 1;
 			return;
 		}
@@ -405,12 +412,13 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (read(fdc->fd[fdc->drive], fdc->buf, size) != size) {
 			perror("wd17xx: read: ");
 			fprintf(stderr, "wd17xx: I/O error.\n");
-			fdc->status = RECNFERR;
+			fdc->status |= RECNFERR;
 			fdc->intrq = 1;
 			return;
 		}
 		fdc->rdsize = size;
-		fdc->status |= BUSY | DRQ;
+		fdc->status |= DRQ;
+		fdc->busy = 0;
 #if 0
 		if (track == 20)
 			fdc->status |= 0x20;	/* HACK for DDAM */
@@ -422,16 +430,17 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (track >= fdc->tracks[fdc->drive] ||
 			fdc->sector - fdc->sector0[fdc->drive]
 				>= fdc->spt[fdc->drive]) {
-			fdc->status = RECNFERR;
+			fdc->status |= RECNFERR;
 			fdc->intrq = 1;
 			return;
 		}
 		if (fdc->side >= fdc->sides[fdc->drive]) {
-			fdc->status = RECNFERR;
+			fdc->status |= RECNFERR;
 			fdc->intrq = 1;
 			return;
 		}
-		fdc->status |= BUSY | DRQ;
+		fdc->status |= DRQ;
+		fdc->busy = 0;
 		fdc->wr = 1;
 		wd17xx_motor(fdc, motor);
 		wd17xx_side_control(fdc, v);
@@ -440,16 +449,21 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	case 0xC0:	/* read address */
 		wd17xx_side_control(fdc, v);
 		if (fdc->side >= fdc->sides[fdc->drive]) {
-			fdc->status = RECNFERR;
+			fdc->status |= RECNFERR;
 			fdc->intrq = 1;
 			return;
 		}
-		fdc->status |= BUSY | DRQ;
+		fdc->status |= DRQ;
+		fdc->busy = 0;
+
 		fdc->rd = 1;
 		fdc->rdsize = 7;
 
 		/* If we tried to seek off the end of the disk then
 		   we'll stop at the end track and see the data there */
+
+		/* This differs between 1772 and later devices. 1772 does not have the first
+		   byte it seems */
 		fdc->buf[0] = 0x00;	/* Junk byte ? FIXME what goes here */
 
 		fdc->buf[1] = track;
@@ -474,13 +488,15 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		}
 		fdc->buf[5] = 0xFA;
 		fdc->buf[6] = 0xAF;
+		if (fdc->type == 1772)
+			fdc->pos = 1;
 		/* Hardware weirdness */
 		fdc->sector = fdc->track;
 		fdc->intrq = 1;
 		/* busy handling ?? */
 //		fdc->status &= ~BUSY;	/* ?? need to know what real chip does */
 		wd17xx_motor(fdc, 1);
-		fdc->busyhack = 64;
+		fdc->busy = 64;
 		wd17xx_check_density(fdc);
 		break;
 	case 0xD0:	/* Force interrupt : handled above */
@@ -491,7 +507,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	case 0xF0:	/* write track */
 	default:
 		fprintf(stderr, "wd17xx: unemulated command %02X.\n", v);
-		fdc->status &= ~(BUSY | DRQ);
+		fdc->status &= ~DRQ;
 		fdc->rd = 0;
 		fdc->wr = 0;
 		fdc->intrq = 1;
@@ -504,9 +520,9 @@ uint8_t wd17xx_status(struct wd17xx *fdc)
 	if (fdc->trace)
 		fprintf(stderr, "fdc%d: status %x.\n", fdc->drive, fdc->status);
 	fdc->intrq = 0;
-	if (fdc->busyhack) {
-		fdc->busyhack--;
-		if (!fdc->busyhack)
+	if (fdc->busy) {
+		fdc->busy--;
+		if (!fdc->busy)
 			fdc->status &= ~BUSY;
 	}
 	/* On the 1793 0x80 is high when the drive is not ready
