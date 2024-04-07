@@ -161,18 +161,10 @@ static void sio_queue(struct z80_sio_chan *chan, uint8_t c)
 
 static void sio_channel_timer(struct z80_sio_chan *chan, uint8_t ab)
 {
-	if (ab == 0) {
-		int c = chan->dev->ready(chan->dev);
-		if (c & 1)
-			sio_queue(chan, chan->dev->get(chan->dev));
-		if (c & 2) {
-			if (!(chan->rr[0] & 0x04)) {
-				chan->rr[0] |= 0x04;
-				if (chan->wr[1] & 0x02)
-					sio_raise_int(chan, INT_TX, 0);
-			}
-		}
-	} else {
+	int c = chan->dev->ready(chan->dev);
+	if (c & 1)
+		sio_queue(chan, chan->dev->get(chan->dev));
+	if (c & 2) {
 		if (!(chan->rr[0] & 0x04)) {
 			chan->rr[0] |= 0x04;
 			if (chan->wr[1] & 0x02)
