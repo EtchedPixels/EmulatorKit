@@ -18,6 +18,8 @@
 #include <SDL2/SDL.h>
 
 #include "6502.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "keymatrix.h"
 
@@ -96,44 +98,6 @@ void write6502(uint16_t addr, uint8_t val)
 		if (trace & (TRACE_MEM|TRACE_CPU))
 			fprintf(stderr, "%04X ROM (write %02X fail)\n", addr, val);
 	}
-}
-
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
 }
 
 /*
@@ -344,7 +308,7 @@ int main(int argc, char *argv[])
 		usage();
 
 	acia = acia_create();
-	acia_set_input(acia, 1);
+	acia_attach(acia, &console);
 	acia_trace(acia, trace & TRACE_ACIA);
 
 	romsize = romload(rom_path, mem + 0xF800, 0x0800);
