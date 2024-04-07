@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "serialdevice.h"
 #include "system.h"
 #include "acia.h"
 
@@ -10,10 +11,10 @@ struct acia {
     uint8_t status;
     uint8_t config;
     uint8_t rxchar;
-    uint8_t input;
     uint8_t inint;
     uint8_t inreset;
     uint8_t trace;
+    struct serial_device *dev;
 };
 
 
@@ -46,7 +47,7 @@ static void acia_receive(struct acia *acia)
 	/* Already a character waiting so set OVRN */
 	if (acia->status & 1)
 		acia->status |= 0x20;
-	acia->rxchar = next_char();
+	acia->rxchar = acia->dev->get(acia->dev);
 	if (acia->trace)
 		fprintf(stderr, "ACIA rx.\n");
 	acia->status |= 0x01;	/* IRQ, and rx data full */
@@ -63,8 +64,8 @@ static void acia_transmit(struct acia *acia)
 
 void acia_timer(struct acia *acia)
 {
-	int s = check_chario();
-	if ((s & 1) && acia->input)
+	int s = acia->dev->ready(acia->dev);
+	if (s & 1)
 		acia_receive(acia);
 	if (s & 2)
 		acia_transmit(acia);
@@ -123,7 +124,7 @@ void acia_write(struct acia *acia, uint16_t addr, uint8_t val)
 		acia_irq_compute(acia);
 		return;
 	case 1:
-		write(1, &val, 1);
+		acia->dev->put(acia->dev, val);
 		/* Clear TDRE - we now have a byte */
 		acia->status &= ~0x02;
 		acia_irq_compute(acia);
@@ -131,16 +132,16 @@ void acia_write(struct acia *acia, uint16_t addr, uint8_t val)
 	}
 }
 
-void acia_set_input(struct acia *acia, int onoff)
+void acia_attach(struct acia *acia, struct serial_device *dev)
 {
-	acia->input = onoff;
+	acia->dev = dev;
 }
 
 void acia_reset(struct acia *acia)
 {
-    memset(acia, 0, sizeof(struct acia));
-    acia->status = 2;
-    acia_irq_compute(acia);
+	memset(acia, 0, sizeof(struct acia));
+	acia->status = 2;
+	acia_irq_compute(acia);
 }
 
 uint8_t acia_irq_pending(struct acia *acia)
@@ -150,21 +151,21 @@ uint8_t acia_irq_pending(struct acia *acia)
 
 struct acia *acia_create(void)
 {
-    struct acia *acia = malloc(sizeof(struct acia));
-    if (acia == NULL) {
-        fprintf(stderr, "Out of memory.\n");
-        exit(1);
-    }
-    acia_reset(acia);
-    return acia;
+	struct acia *acia = malloc(sizeof(struct acia));
+	if (acia == NULL) {
+		fprintf(stderr, "Out of memory.\n");
+		exit(1);
+	}
+	acia_reset(acia);
+	return acia;
 }
 
 void acia_free(struct acia *acia)
 {
-    free(acia);
+	free(acia);
 }
 
 void acia_trace(struct acia *acia, int onoff)
 {
-    acia->trace = onoff;
+	acia->trace = onoff;
 }

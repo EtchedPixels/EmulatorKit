@@ -8,7 +8,7 @@ void uart16x50_write(struct uart16x50 *uart16x50, uint8_t addr, uint8_t val);
 void uart16x50_event(struct uart16x50 *uart16x50);
 void uart16x50_reset(struct uart16x50 *uart16x50);
 uint8_t uart16x50_irq_pending(struct uart16x50 *uart16x50);
-void uart16x50_set_input(struct uart16x50 *uart16x50, int port);
+void uart16x50_attach(struct uart16x50 *uart16x50, struct serial_device *dev);
 void uart16x50_dsr_timer(struct uart16x50 *uart16x50);
 void uart16x50_signal_change(struct uart16x50 *uart16x50, uint8_t mcr);
 void uart16x50_signal_event(struct uart16x50 *uart16x50, uint8_t msr);
@@ -26,7 +26,4 @@ void uart16x50_set_clock(struct uart16x50 *d, unsigned clock);
 #define MSR_RI		0x40
 #define MSR_DCD		0x80
 
-/* Caller proviced */
-extern unsigned int next_char(void);
-extern unsigned int check_chario(void);
 

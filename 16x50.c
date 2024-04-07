@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "serialdevice.h"
 #include "16x50.h"
 
 /* UART: very mimimal for the moment */
@@ -26,7 +27,7 @@ struct uart16x50 {
     uint8_t irqline;
     unsigned clock;
     int trace;
-    int input;
+    struct serial_device *dev;
 };
 
 void uart16x50_reset(struct uart16x50 *uptr)
@@ -76,12 +77,12 @@ static void uart16x50_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
 
 void uart16x50_event(struct uart16x50 *uptr)
 {
-    uint8_t r = check_chario();
+    uint8_t r = uptr->dev->ready(uptr->dev);
     uint8_t old = uptr->lsr;
     uint8_t dhigh;
 
     uptr->lsr &= ~0x61;		/* Clear RX and TX bits */
-    if ((r & 1) && uptr->input)
+    if (r & 1)
         uptr->lsr |= 0x01;	/* RX not empty */
     if (r & 2)
         uptr->lsr |= 0x60;	/* TX empty */
@@ -153,7 +154,7 @@ void uart16x50_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
     switch(addr) {
     case 0:	/* If dlab = 0, then write else LS*/
         if (uptr->dlab == 0) {
-            write(1, &val, 1);
+            uptr->dev->put(uptr->dev, val);
             uart16x50_clear_interrupt(uptr, TEMT);
             uart16x50_interrupt(uptr, TEMT);
         } else {
@@ -201,9 +202,7 @@ uint8_t uart16x50_read(struct uart16x50 *uptr, uint8_t addr)
         /* receive buffer */
         if (uptr->dlab == 0) {
             uart16x50_clear_interrupt(uptr, RXDA);
-            if (uptr->input)
-                return next_char();
-            return 0xFF;
+            return uptr->dev->get(uptr->dev);
         } else
             return uptr->ls;
         break;
@@ -264,9 +263,9 @@ void uart16x50_signal_event(struct uart16x50 *uart16x50, uint8_t msr)
     }
 }
 
-void uart16x50_set_input(struct uart16x50 *uart16x50, int port)
+void uart16x50_attach(struct uart16x50 *uart16x50, struct serial_device *dev)
 {
-	uart16x50->input = port;
+	uart16x50->dev = dev;
 }
 
 void uart16x50_trace(struct uart16x50 *uart16x50, int onoff)
