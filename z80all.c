@@ -14,7 +14,6 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h>
 
 #include <SDL2/SDL.h>
 
@@ -24,7 +23,9 @@
 
 #include "ide.h"
 #include "ps2keymap.h"
+#include "serialdevice.h"
 #include "16x50.h"
+#include "ttycon.h"
 
 static SDL_Window *window;
 static SDL_Renderer *render;
@@ -328,44 +329,6 @@ static void z80_trace(unsigned unused)
 	fprintf(stderr, "[ %02X:%02X %04X %04X %04X %04X %04X %04X ]\n", cpu_z80.R1.br.A, cpu_z80.R1.br.F, cpu_z80.R1.wr.BC, cpu_z80.R1.wr.DE, cpu_z80.R1.wr.HL, cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
 }
 
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
-}
-
 static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 {
 	uint8_t *fp;
@@ -520,7 +483,7 @@ int main(int argc, char *argv[])
 
 	/* One for now */
 	uart = uart16x50_create();
-	uart16x50_set_input(uart, 1);
+	uart16x50_attach(uart, &console);
 
 	tc.tv_sec = 0;
 	tc.tv_nsec = 16666667;
@@ -594,6 +557,7 @@ int main(int argc, char *argv[])
 				Z80ExecuteTStates(&cpu_z80, 256);
 				poll_irq();
 			}
+			uart16x50_event(uart);
 			/* We want to run UI events regularly it seems */
 			ui_event();
 		}
