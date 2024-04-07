@@ -10,6 +10,7 @@
 
 #include "system.h"
 
+#include "serialdevice.h"
 #include "tms9902.h"
 
 struct tms9902 {
@@ -61,7 +62,8 @@ struct tms9902 {
 	uint16_t tdr;
 
 	unsigned trace;
-	unsigned input;
+
+	struct serial_device *dev;
 };
 
 
@@ -70,12 +72,12 @@ struct tms9902 {
  */
 static void tms9902_recalc(struct tms9902 *tms)
 {
-	int n = check_chario();
-	if ((n & 1) && tms->input) {
+	int n = tms->dev->ready(tms->dev);
+	if (n & 1) {
 		if (!(tms->cru_rd & (1 << RBRL))) {
 			tms->cru_rd |= (1 << RBRL);
 			tms->cru_rd &= ~0xFF;
-			tms->cru_rd |= next_char();
+			tms->cru_rd |= tms->dev->get(tms->dev);
 		}
 	}
 	if (n & 2) {
@@ -145,7 +147,7 @@ void tms9902_cru_write(struct tms9902 *tms, uint16_t addr, uint8_t bit)
 			if (addr == 7) {
 				uint8_t c = tms->tdr;
 				/* Not strictly correct - should check BRK etc and delay */
-				write(1, &c, 1);
+				tms->dev->put(tms->dev, c);
 				tms->cru_rd &= ~XBRE;
 			}
 		}
@@ -171,9 +173,9 @@ void tms9902_event(struct tms9902 *tms)
 	tms9902_recalc(tms);
 }
 
-void tms9902_set_input(struct tms9902 *tms, int port)
+void tms9902_attach(struct tms9902 *tms, struct serial_device *dev)
 {
-	tms->input = port;
+	tms->dev = dev;
 }
 
 void tms9902_trace(struct tms9902 *tms, int onoff)
