@@ -46,8 +46,8 @@ linc80:	linc80.o ide.o sdcard.o libz80/libz80.o
 z50bus-z80: z50bus-z80.o ide.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z50bus-z80.o ide.o sdcard.o z80dis.o libz80/libz80.o -o z50bus-z80
 
-littleboard:	littleboard.o ncr5380.o sasi.o wd17xx.o z80dis.o libz80/libz80.o
-	cc -g3 littleboard.o ncr5380.o sasi.o wd17xx.o z80dis.o libz80/libz80.o -o littleboard
+littleboard:	littleboard.o ncr5380.o sasi.o wd17xx.o z80sio.o ttycon.o z80dis.o libz80/libz80.o
+	cc -g3 littleboard.o ncr5380.o sasi.o wd17xx.o z80sio.o ttycon.o z80dis.o libz80/libz80.o -o littleboard
 
 mbc2:	mbc2.o z80dis.o libz80/libz80.o
 	cc -g3 mbc2.o z80dis.o libz80/libz80.o -o mbc2
@@ -167,8 +167,8 @@ p90mb.o: p90mb.c m68k/lib68k.a
 p90ce201.o: p90ce201.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c p90ce201.c
 
-z80mc:	z80mc.o sdcard.o z80dis.o libz80/libz80.o
-	cc -g3 z80mc.o sdcard.o z80dis.o libz80/libz80.o -o z80mc
+z80mc:	z80mc.o 16x50.o ttycon.o sdcard.o z80dis.o libz80/libz80.o
+	cc -g3 z80mc.o 16x50.o ttycon.o sdcard.o z80dis.o libz80/libz80.o -o z80mc
 
 z180-mini-itx_sdl2: z180-mini-itx.o rc2014_sdlui.o z180_io.o ttycon.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a
 	cc -g3 z180-mini-itx.o rc2014_sdlui.o z180_io.o ttycon.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a -lSDL2  -o z180-mini-itx_sdl2
