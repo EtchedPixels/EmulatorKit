@@ -40,6 +40,10 @@
 #include "libz180/z180.h"
 #include "lib765/include/765.h"
 
+/* TODO: this is a weird hybrid of serial conversion for now until we sort out the SIO mess */
+
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "16x50.h"
 #include "acia.h"
 #include "amd9511.h"
@@ -3422,6 +3426,7 @@ int main(int argc, char *argv[])
 		acia = acia_create();
 		if (trace & TRACE_ACIA)
 			acia_trace(acia, 1);
+		acia_attach(acia, &nulldev);
 	}
 	if (rtc && (trace & TRACE_RTC))
 		rtc_trace(rtc, 1);
@@ -3439,7 +3444,9 @@ int main(int argc, char *argv[])
 	if (have_16x50) {
 		uart = uart16x50_create();
 		if (indev == INDEV_16C550A)
-			uart16x50_set_input(uart, 1);
+			uart16x50_attach(uart, &console);
+		else
+			uart16x50_attach(uart, &console_wo);
 	}
 	if (have_tms) {
 		vdp = tms9918a_create();
@@ -3503,7 +3510,7 @@ int main(int argc, char *argv[])
 
 	switch(indev) {
 	case INDEV_ACIA:
-		acia_set_input(acia, 1);
+		acia_attach(acia, &console);
 		break;
 	case INDEV_SIO:
 		sio2_input = 1;
