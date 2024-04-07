@@ -11,13 +11,14 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include <sys/select.h>
 #include <signal.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <m68k.h>
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "16x50.h"
 #include "ds3234.h"
 #include "ide.h"
@@ -58,40 +59,6 @@ uint8_t fc;
 			(BASE)[(ADDR)+1] = ((VAL)>>16)&0xff; \
 			(BASE)[(ADDR)+2] = ((VAL)>>8)&0xff; \
 			(BASE)[(ADDR)+3] = (VAL)&0xff
-
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	return c;
-}
 
 static uint8_t msr_lines;
 
@@ -309,7 +276,7 @@ static void device_init(void)
 	irq_pending = 0;
 	ide_reset_begin(ide);
 	uart16x50_reset(uart);
-	uart16x50_set_input(uart, 1);
+	uart16x50_attach(uart, &console);
 }
 
 static struct termios saved_term, term;
