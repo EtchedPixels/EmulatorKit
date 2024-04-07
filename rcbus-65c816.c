@@ -49,9 +49,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h>
 #include <lib65816/cpu.h>
 #include <lib65816/cpuevent.h>
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "ide.h"
 #include "rtc_bitbang.h"
@@ -491,11 +492,11 @@ int main(int argc, char *argv[])
 
 	if (input == 1) {
 		acia = acia_create();
-		acia_set_input(acia, 1);
+		acia_attach(acia, &console);
 		acia_trace(acia, trace & TRACE_ACIA);
 	} else {
 		uart = uart16x50_create();
-		uart16x50_set_input(uart, 1);
+		uart16x50_attach(uart, &console);
 		uart16x50_trace(uart, trace & TRACE_UART);
 	}
 
