@@ -26,13 +26,14 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include <sys/select.h>
 #include <signal.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <m68k.h>
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "16x50.h"
 #include "ide.h"
@@ -422,12 +423,16 @@ int main(int argc, char *argv[])
 	acia = acia_create();
 	acia_trace(acia, trace & TRACE_UART);
 	if (input == IN_ACIA)
-		acia_set_input(acia, 1);
+		acia_attach(acia, &console);
+	else
+		acia_attach(acia, &console_wo);
 
 	uart = uart16x50_create();
 	uart16x50_trace(uart, trace & TRACE_UART);
 	if (input == IN_16X50)
-		uart16x50_set_input(uart, 1);
+		uart16x50_attach(uart, &console);
+	else
+		uart16x50_attach(uart, &console_wo);
 
 	rtc = rtc_create();
 	rtc_trace(rtc, trace & TRACE_RTC);

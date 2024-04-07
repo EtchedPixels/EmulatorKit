@@ -18,13 +18,14 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include <sys/select.h>
 #include <signal.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <m68k.h>
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "6522.h"
 #include "sdcard.h"
@@ -62,40 +63,6 @@ uint8_t fc;
 			(BASE)[(ADDR)+1] = ((VAL)>>16)&0xff; \
 			(BASE)[(ADDR)+2] = ((VAL)>>8)&0xff; \
 			(BASE)[(ADDR)+3] = (VAL)&0xff
-
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	return c;
-}
 
 /*
  *	VIA callbacks
@@ -379,7 +346,7 @@ int main(int argc, char *argv[])
 
 	acia = acia_create();
 	acia_trace(acia,  trace & TRACE_UART);
-	acia_set_input(acia, 1);
+	acia_attach(acia, &console);
 
 	via = via_create();
 	via_trace(via, trace & TRACE_VIA);

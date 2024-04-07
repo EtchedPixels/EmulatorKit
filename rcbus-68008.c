@@ -29,8 +29,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h>
 #include <m68k.h>
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "acia.h"
 #include "ide.h"
 #include "ppide.h"
@@ -100,44 +101,6 @@ static void remove_irq(int n)
 int cpu_irq_ack(int level)
 {
 	return M68K_INT_ACK_AUTOVECTOR;
-}
-
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
 }
 
 /* We do this in the main loop so no helper needed */
@@ -525,7 +488,7 @@ int main(int argc, char *argv[])
 	}
 	if (has_16550a) {
 		uart = uart16x50_create();
-		uart16x50_set_input(uart, 1);
+		uart16x50_attach(uart, &console);
 		uart16x50_trace(uart, trace & TRACE_UART);
 	}
 	if (wiznet) {
@@ -534,7 +497,7 @@ int main(int argc, char *argv[])
 	}
 	if (has_acia) {
 		acia = acia_create();
-		acia_set_input(acia, 1);
+		acia_attach(acia, &console);
 		acia_trace(acia, trace & TRACE_ACIA);
 	}
 	if (bmmu) {
