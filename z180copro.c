@@ -14,6 +14,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include "libz180/z180.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "sdcard.h"
 #include "z180_io.h"
 #include "z180copro.h"
@@ -252,6 +254,9 @@ struct z180copro *z180copro_create(void)
 	copro[c->unit] = c;
 	c->io = z180_create(&c->cpu);
 	z180copro_reset(c);
+	/* For now route the serial to NULL */
+	z180_ser_attach(c->io, 0, &nulldev);
+	z180_ser_attach(c->io, 1, &nulldev);
 	return c;
 }
 
