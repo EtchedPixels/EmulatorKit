@@ -19,6 +19,8 @@
 #include <sys/select.h>
 #include "tms9995.h"
 #include "ide.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "16x50.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
@@ -464,11 +466,11 @@ int main(int argc, char *argv[])
 
 	uart = uart16x50_create();
 	uart16x50_trace(uart, trace & TRACE_UART);
-	uart16x50_set_input(uart, !tmsin);
+	uart16x50_attach(uart, tmsin ? &console_wo: &console);
 
 	tmsser = tms9902_create();
 	tms9902_trace(tmsser, trace & TRACE_TMS9902);
-	tms9902_set_input(tmsser, tmsin);
+	tms9902_attach(tmsser, tmsin ? &console : &console_wo);
 
 	if (wiznet) {
 		wiz = nic_w5100_alloc();
