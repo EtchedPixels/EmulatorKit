@@ -40,8 +40,8 @@ rbcv2:	rbcv2.o 16x50.o ttycon.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w510
 searle:	searle.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 searle.o ide.o z80dis.o libz80/libz80.o -o searle
 
-linc80:	linc80.o ide.o sdcard.o libz80/libz80.o
-	cc -g3 linc80.o ide.o sdcard.o libz80/libz80.o -o linc80
+linc80:	linc80.o ide.o sdcard.o z80sio.o ttycon.o z80dis.o libz80/libz80.o
+	cc -g3 linc80.o ide.o sdcard.o z80sio.o ttycon.o z80dis.o libz80/libz80.o -o linc80
 
 z50bus-z80: z50bus-z80.o ide.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z50bus-z80.o ide.o sdcard.o z80dis.o libz80/libz80.o -o z50bus-z80
