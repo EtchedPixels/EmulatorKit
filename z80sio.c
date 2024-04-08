@@ -19,7 +19,6 @@ struct z80_sio_chan {
 #define INT_TX	1
 #define INT_RX	2
 #define INT_ERR	4
-	uint8_t pending;	/* Interrupt bits pending as an IRQ cause */
 	uint8_t vector;		/* Vector pending to deliver */
 	unsigned trace;
 	struct serial_device *dev;
@@ -37,7 +36,6 @@ static void sio_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
         struct z80_sio *sio = chan->sio;
 	chan->intbits &= ~m;
-	chan->pending &= ~m;
 	/* Check me - does it auto clear down or do you have to reti it ? */
 	if (!(sio->chan[0].intbits | sio->chan[1].intbits)) {
 		sio->chan[0].rr[1] &= ~0x02;
@@ -55,11 +53,11 @@ static void sio_raise_int(struct z80_sio_chan *chan, uint8_t m, unsigned recalc)
 	chan->intbits |= m;
 	if ((chan->trace) && new)
 		fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
-	if (new || recalc) {
-		if (!sio->irqchan) {
+	if ((new || recalc) && chan->intbits) {
+		if (!chan->irq) {
 			chan->irq = 1;
 			sio->chan[0].rr[1] |= 0x02;
-			vector = 0; /* sio[1].wr[2]; */
+			vector = 0; /* sio[1].wr[2] is added when delivered */
 			/* This is a subset of the real options. FIXME: add
 			   external status change */
 			if (chan->sio->chan[1].wr[1] & 0x04) {
@@ -72,9 +70,8 @@ static void sio_raise_int(struct z80_sio_chan *chan, uint8_t m, unsigned recalc)
 					vector |= 2;
 			}
 			if (chan->trace)
-				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
+				fprintf(stderr, "sio%c interrupt %02X\n", chan->unit, vector);
 			chan->vector = vector;
-			sio->irqchan = chan;
 		}
 	}
 }
@@ -101,12 +98,12 @@ static int sio_check_im2_chan(struct z80_sio_chan *chan)
 		if (chan->trace)
 			fprintf(stderr, "New live interrupt pending is sio%c (%02X).\n",
 				chan->unit, chan->vector);
-		if (chan == sio->chan)
-		        sio->irqchan = chan;
-		else
-		        sio->irqchan = chan + 1;
+		/* The act of delivering a tx int clears it as it is generated on going empty not
+		   when empty. Be careful of the order as this will clear chan->irq and irqchan
+		   potentially */
+		sio_clear_int(chan, INT_TX);
                 sio->vector = chan->vector;
-//		Z80INT(&cpu_z80, chan->vector);
+                sio->irqchan = chan;
 		return chan->vector;
 	}
 	return -1;
@@ -273,7 +270,7 @@ void sio_write(struct z80_sio *sio, uint8_t addr, uint8_t val)
 				break;
 			case 050:	/* Reset transmitter interrupt pending */
 				chan->txint = 0;
-                                /* ??? sio_clear_int(chan, INT_TX); */
+                                sio_clear_int(chan, INT_TX);
 				break;
 			case 060:	/* Reset the error latches */
 				chan->rr[1] &= 0x8F;
@@ -342,10 +339,9 @@ void sio_reti(struct z80_sio *sio)
 {
         struct z80_sio_chan *chan = sio->irqchan;
 	/* Recalculate the pending state and vectors */
-	if (chan) {
+	sio->irqchan = NULL;
+	if (chan)
 		chan->irq = 0;
-		sio_recalc_interrupts(sio);
-	}
 }
 
 struct z80_sio *sio_create(void)
@@ -381,7 +377,9 @@ void sio_attach(struct z80_sio *sio, unsigned chan, struct serial_device *dev)
 
 int sio_check_im2(struct z80_sio *sio)
 {
-	int r = sio_check_im2_chan(sio->chan);
+	int r;
+	sio_recalc_interrupts(sio);
+	r = sio_check_im2_chan(sio->chan);
 	if (r != -1)
 		return r;
 	return sio_check_im2_chan(sio->chan + 1);
