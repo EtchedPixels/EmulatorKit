@@ -168,14 +168,13 @@ void duart_tick(struct duart *d)
                 }
 	}
 	if (r & 2) {
-		if (!d->port[0].txdis && !(d->port[0].sr & 0x04)) {
-			d->port[0].sr |= 0x0C;
+		if (!d->port[0].txdis && !(d->port[0].sr & 0x04))
 			duart_irq_raise(d, 0x01);
-		}
-		if (!d->port[1].txdis && !(d->port[1].sr & 0x04)) {
-			d->port[1].sr |= 0x0C;
+		d->port[0].sr |= 0x0C;
+		if (!d->port[1].txdis && !(d->port[1].sr & 0x04))
 			duart_irq_raise(d, 0x10);
-		}
+		d->port[1].sr |= 0x0C;
+		fprintf(stderr, "sr0 now %x\n", d->port[0].sr);
 	}
 	switch ((d->acr & 0x70) >> 4) {
 		/* Clock and timer modes */
@@ -217,9 +216,7 @@ void duart_reset(struct duart *d)
 
 uint8_t do_duart_read(struct duart *d, uint16_t address)
 {
-	if (!(address & 1))
-		return 0x00;
-	switch (address >> 1) {
+	switch (address & 0x0F) {
 	case 0x00:		/* MR1A/MR2A */
 		if (d->port[0].mrp)
 			return d->port[0].mr2;
@@ -276,15 +273,14 @@ uint8_t duart_read(struct duart *d, uint16_t address)
 void duart_write(struct duart *d, uint16_t address, uint8_t value)
 {
 	int bgrc = 0;
-	if (!(address & 1))
-		return;
+
 	value &= 0xFF;
 
 	if (d->trace)
 		fprintf(stderr, "duart: write reg %02X <- %02X\n",
 			address >> 1, value);
 
-	switch (address >> 1) {
+	switch (address & 0x0F) {
 	case 0x00:
 		if (d->port[0].mrp)
 			d->port[0].mr2 = value;
@@ -347,8 +343,8 @@ void duart_write(struct duart *d, uint16_t address, uint8_t value)
 		break;
 	}
 	if (bgrc && d->trace) {
-		printf("BGR %d\n", d->acr >> 7);
-		printf("CSR %d\n", d->port[0].csr >> 4);
+		fprintf(stderr, "BGR %d\n", d->acr >> 7);
+		fprintf(stderr, "CSR %d\n", d->port[0].csr >> 4);
 	}
 }
 

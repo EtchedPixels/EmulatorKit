@@ -1,3 +1,41 @@
+/*
+ *	Arnewsh Inc SBC08K
+ *
+ *	68008 @ 8 or 10MHz
+ *	68230 PIT
+ *	68681 DUART
+ *	Up to 128K RAM in U5-U8, ROM in U4
+ *
+ *	Console on DUART port 0
+ *
+ *	TODO: Emulate PIT
+ *
+ *	Memory map (74S138) : not currently emulated
+ *	00000-01FFF RAM		U8
+ *	02000-03FFF RAM/ROM	U7
+ *	04000-05FFF RAM/ROM	U6
+ *	06000-07FFF RAM		U5
+ *	08000-09FFF ROM		U4
+ *	0A000-0BFFF Unused
+ *	0C000-0DFFF DUART
+ *	0E000-0FFFF PIT
+ *	10000-FFFFF Free
+ *
+ *	Memory map (PAL)
+ *	00000-07FFF RAM	U8
+ *	08000-0FFFF RAM	U7
+ *	10000-17FFF RAM	U6
+ *	18000-1FFFF RAM	U5
+ *	20000-DFFFF Free
+ *	E0000-EFFFF Tutor monitor (boot ROM)
+ *	F0000-FEFFF Unused
+ *	FF000-FF7FF PIT
+ *	FF800-FFFFF DUART
+ *
+ *	As is typical the ROM appears low for the first 8 read cycles then the counter
+ *	maps it high only.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -12,17 +50,12 @@
 #include <unistd.h>
 #include <m68k.h>
 #include <arpa/inet.h>
-#include "ide.h"
 #include "duart.h"
 
-/* 16MB RAM except for the top 32K which is I/O */
-
-static uint8_t ram[(16 << 20) - 32768];
-/* IDE controller */
-static struct ide_controller *ide;
+static uint8_t ram[1048576];	/* 20bit addres bus so just allocate for all of it */
 /* 68681 */
 static struct duart *duart;
-static int rcbus;
+static uint8_t rcount;		/* Counter for the first 8 fetches */
 
 static int trace = 0;
 
@@ -92,10 +125,11 @@ void recalc_interrupts(void)
 
 	/* Duart on IPL1 */
 	if (duart_irq_pending(duart))
-		irq_pending |= (1 << 2);
+		irq_pending |= (1 << 5);
 	else
-		irq_pending &= ~(1 << 2);
-
+		irq_pending &= ~(1 << 5);
+	/* TODO: PIT is 2 for peripheral ack, 7 (NMI) for timer */
+	/* Abort button is also 7 */
 	if (irq_pending) {
 		for (i = 7; i >= 0; i--) {
 			if (irq_pending & (1 << i)) {
@@ -107,19 +141,6 @@ void recalc_interrupts(void)
 		m68k_set_irq(0);
 }
 
-/* Until we plug any RC2014 emulation into this */
-
-static uint8_t rcbus_inb(uint8_t address)
-{
-	return 0xFF;
-}
-
-static void rcbus_outb(uint8_t address, uint8_t data)
-{
-}
-
-
-
 int cpu_irq_ack(int level)
 {
 	if (!(irq_pending & (1 << level)))
@@ -130,64 +151,23 @@ int cpu_irq_ack(int level)
 }
 
 
-/* TODO v2 board added an RTC */
-
-static unsigned int do_io_readb(unsigned int address)
-{
-	if (rcbus && address >= 0xFF8000 && address <= 0xFF8FFF)
-		return rcbus_inb(((address - 0xFF8000) >> 1) & 0xFF);
-	/* SPI is not modelled */
-	if (address >= 0xFFD000 && address <= 0xFFDFFF)
-		return 0xFF;
-	/* ATA CF */
-	/* FIXME: FFE010-01F sets CS1 */
-	if (address >= 0xFFE000 && address <= 0xFFEFFF)
-		return ide_read8(ide, (address & 31) >> 1);
-	/* DUART */
-	if (!(address & 1))
-		return 0x00;
-	return duart_read(duart, address >> 1);
-}
-
-static void do_io_writeb(unsigned int address, unsigned int value)
-{
-	if (address == 0xFFFFFF) {
-		printf("<%c>", value);
-		return;
-	}
-	if (rcbus && address >= 0xFF8000 && address <= 0xFF8FFF) {
-		rcbus_outb(((address - 0xFF8000) >> 1) & 0xFF, value);
-		return;
-	}
-	/* SPI is not modelled */
-	if (address >= 0xFFD000 && address <= 0xFFDFFF)
-		return;
-	/* ATA CF */
-	if (address >= 0xFFE000 && address <= 0xFFEFFF) {
-		ide_write8(ide, (address & 31) >> 1, value);
-		return;
-	}
-	/* DUART */
-	if (address & 1)
-		duart_write(duart, address >> 1, value);
-}
-
 /* Read data from RAM, ROM, or a device */
 unsigned int do_cpu_read_byte(unsigned int address)
 {
-	address &= 0xFFFFFF;
-	if (rcbus) {
-		/* Musashi can't emulate this properly it seems */
-		if (address >= 0x800000 && address <= 0xFF8000) {
-			fprintf(stderr, "R: bus error at %d\n", address);
-			return 0xFF;
-		}
-		if (address <= 0xFF8000)
-			address &= 0x1FFFFF;
+	address &= 0xFFFFF;
+	if (rcount < 8) {
+		rcount++;
+		return ram[(address & 0x3FFFF) + 0xE0000];
 	}
-	if (address < sizeof(ram))
+	if (address < 131072)
 		return ram[address];
-	return do_io_readb(address);
+	/* ROM */
+	if (address >= 0xE0000 && address <= 0xEFFFF)
+		return ram[address];
+	if (address >= 0xFF800)
+		return duart_read(duart, address >> 1);
+	/* TODO FF000-FF7FF PIT */
+	return 0xFF;
 }
 
 unsigned int cpu_read_byte(unsigned int address)
@@ -198,24 +178,8 @@ unsigned int cpu_read_byte(unsigned int address)
 	return v;
 }
 
-
 unsigned int do_cpu_read_word(unsigned int address)
 {
-	address &= 0xFFFFFF;
-
-	if (rcbus) {
-		if (address >= 0x800000 && address < 0xFF8000) {
-			fprintf(stderr, "R: bus error at %d\n", address);
-			return 0xFFFF;
-		}
-		/* RAM wraps four times */
-		if (address <= 0xFF8000)
-			address &= 0x1FFFFF;
-	}
-	if (address < sizeof(ram) - 1)
-		return READ_WORD(ram, address);
-	else if (address >= 0xFFE000 && address <= 0xFFEFFF)
-		return ide_read16(ide, (address & 31) >> 1);
 	return (do_cpu_read_byte(address) << 8) | do_cpu_read_byte(address + 1);
 }
 
@@ -229,7 +193,7 @@ unsigned int cpu_read_word(unsigned int address)
 
 unsigned int cpu_read_word_dasm(unsigned int address)
 {
-	if (address < 0xFF7FFF)
+	if (address < 0xFF000)
 		return cpu_read_word(address);
 	else
 		return 0xFFFF;
@@ -247,63 +211,31 @@ unsigned int cpu_read_long_dasm(unsigned int address)
 
 void cpu_write_byte(unsigned int address, unsigned int value)
 {
-	address &= 0xFFFFFF;
+	address &= 0xFFFFF;
 
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "WB %06X <- %02X\n", address, value);
 
-	if (rcbus) {
-		if (address >= 0x800000 && address <= 0xFF8000) {
-			fprintf(stderr, "W: bus error at %06X\n", address);
-			return;
-		}
-		if (address <= 0xFF8000)
-			address &= 0x1FFFFF;
-	}
-	if (address < sizeof(ram))
+	if (address < 131072)	/* 128K modelled */
 		ram[address] = value;
-	else
-		do_io_writeb(address, (value & 0xFF));
+	else if (address >= 0xFF800 && address <= 0xFFFFF)
+		duart_write(duart, address >> 1, value);
 }
 
 void cpu_write_word(unsigned int address, unsigned int value)
 {
-	address &= 0xFFFFFF;
-
-	if (trace & TRACE_MEM)
-		fprintf(stderr, "WW %06X <- %04X\n", address, value);
-
-	if (rcbus) {
-		if (address >= 0x800000 && address <= 0xFF8000) {
-			fprintf(stderr, "W: bus error at %06X\n", address);
-			return;
-		}
-		if (address <= 0xFF8000)
-			address &= 0x1FFFFF;
-	}
-	if (address < sizeof(ram) - 1) {
-		WRITE_WORD(ram, address, value);
-	} else if (address >= 0xFFE000 && address <= 0xFFEFFF)
-		ide_write16(ide, (address & 31) >> 1, value);
-	else {
-		/* Corner cases */
-		cpu_write_byte(address, value >> 8);
-		cpu_write_byte(address + 1, value & 0xFF);
-	}
+	cpu_write_byte(address, value >> 8);
+	cpu_write_byte(address + 1, value & 0xFF);
 }
 
 void cpu_write_long(unsigned int address, unsigned int value)
 {
-	address &= 0xFFFFFF;
-
 	cpu_write_word(address, value >> 16);
 	cpu_write_word(address + 2, value & 0xFFFF);
 }
 
 void cpu_write_pd(unsigned int address, unsigned int value)
 {
-	address &= 0xFFFFFF;
-
 	cpu_write_word(address + 2, value & 0xFFFF);
 	cpu_write_word(address, value >> 16);
 }
@@ -321,7 +253,6 @@ void cpu_instr_callback(void)
 static void device_init(void)
 {
 	irq_pending = 0;
-	ide_reset_begin(ide);
 	duart_reset(duart);
 	duart_set_input(duart, 1);
 }
@@ -360,7 +291,7 @@ void cpu_set_fc(int fc)
 
 void usage(void)
 {
-	fprintf(stderr, "tiny68k [-0][-1][-2][-e][-R][-r rompath][-i idepath][-d debug].\n");
+	fprintf(stderr, "sbc08k [-r rompath] [-f] [-d debug].\n");
 	exit(1);
 }
 
@@ -370,34 +301,15 @@ int main(int argc, char *argv[])
 	int cputype = M68K_CPU_TYPE_68000;
 	int fast = 0;
 	int opt;
-	const char *romname = "tiny68k.rom";
-	const char *diskname = "tiny68k.ide";
+	const char *romname = "Tutor131.bin";
 
-	while((opt = getopt(argc, argv, "012eRfd:i:r:")) != -1) {
+	while((opt = getopt(argc, argv, "r:d:f")) != -1) {
 		switch(opt) {
-		case '0':
-			cputype = M68K_CPU_TYPE_68000;
-			break;
-		case '1':
-			cputype = M68K_CPU_TYPE_68010;
-			break;
-		case '2':
-			cputype = M68K_CPU_TYPE_68020;
-			break;
-		case 'e':
-			cputype = M68K_CPU_TYPE_68EC020;
-			break;
-		case 'R':
-			rcbus = 1;
-			break;
 		case 'f':
 			fast = 1;
 			break;
 		case 'd':
 			trace = atoi(optarg);
-			break;
-		case 'i':
-			diskname = optarg;
 			break;
 		case 'r':
 			romname = optarg;
@@ -434,22 +346,11 @@ int main(int argc, char *argv[])
 		perror(romname);
 		exit(1);
 	}
-	if (read(fd, ram, 0x8000) < 0x1000) {
+	if (read(fd, ram + 0xE0000, 0x4000) != 0x4000) {
 		fprintf(stderr, "%s: too short.\n", romname);
 		exit(1);
 	}
 	close(fd);
-
-	fd = open(diskname, O_RDWR);
-	if (fd == -1) {
-		perror(diskname);
-		exit(1);
-	}
-	ide = ide_allocate("hd0");
-	if (ide == NULL)
-		exit(1);
-	if (ide_attach(ide, 0, fd))
-		exit(1);
 
 	duart = duart_create();
 	if (trace & TRACE_DUART)
@@ -463,11 +364,11 @@ int main(int argc, char *argv[])
 	device_init();
 
 	while (1) {
-		/* A 10MHz 68000 should do 1000 cycles per 1/10000th of a
+		/* A 10MHz 68008 should do 1000 cycles per 1/10000th of a
 		   second. We do a blind 0.01 second sleep so we are actually
 		   emulating a bit under 10Mhz - which will do fine for
 		   testing this stuff */
-		m68k_execute(1000);
+		m68k_execute(600);	/* We don't have an 008 emulation so approx the timing */
 		duart_tick(duart);
 		if (!fast)
 			take_a_nap();
