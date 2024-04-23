@@ -167,8 +167,8 @@ p90mb.o: p90mb.c m68k/lib68k.a
 p90ce201.o: p90ce201.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c p90ce201.c
 
-sbc08k: sbc08k.o ide.o duart.o m68k/lib68k.a
-	cc -g3 sbc08k.o ide.o duart.o m68k/lib68k.a -o sbc08k
+sbc08k: sbc08k.o ide.o duart.o 68230.o m68k/lib68k.a
+	cc -g3 sbc08k.o ide.o duart.o 68230.o m68k/lib68k.a -o sbc08k
 
 sbc08k.o: sbc08k.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c sbc08k.c

@@ -51,10 +51,14 @@
 #include <m68k.h>
 #include <arpa/inet.h>
 #include "duart.h"
+#include "68230.h"
 
 static uint8_t ram[1048576];	/* 20bit addres bus so just allocate for all of it */
 /* 68681 */
 static struct duart *duart;
+/* 68230 */
+static struct m68230 *pit;
+
 static uint8_t rcount;		/* Counter for the first 8 fetches */
 
 static int trace = 0;
@@ -62,6 +66,7 @@ static int trace = 0;
 #define TRACE_MEM	1
 #define TRACE_CPU	2
 #define TRACE_DUART	4
+#define TRACE_PIT	8
 
 uint8_t fc;
 
@@ -117,6 +122,15 @@ unsigned int next_char(void)
 	return c;
 }
 
+void m68230_write_port(struct m68230 *pit, unsigned port, uint8_t val)
+{
+}
+
+uint8_t m68230_read_port(struct m68230 *pit, unsigned port)
+{
+	return 0xFF;
+}
+
 static unsigned int irq_pending;
 
 void recalc_interrupts(void)
@@ -128,8 +142,18 @@ void recalc_interrupts(void)
 		irq_pending |= (1 << 5);
 	else
 		irq_pending &= ~(1 << 5);
-	/* TODO: PIT is 2 for peripheral ack, 7 (NMI) for timer */
-	/* Abort button is also 7 */
+
+	if (m68230_port_irq_pending(pit))
+		irq_pending |= (1 << 2);
+	else
+		irq_pending &= ~(1 << 2);
+
+	if (m68230_timer_irq_pending(pit))
+		irq_pending |= (1 << 7);
+	else
+		irq_pending &= ~(1 << 7);
+
+	/* TODO : emulate an abort button causing 7 */
 	if (irq_pending) {
 		for (i = 7; i >= 0; i--) {
 			if (irq_pending & (1 << i)) {
@@ -146,7 +170,11 @@ int cpu_irq_ack(int level)
 	if (!(irq_pending & (1 << level)))
 		return M68K_INT_ACK_SPURIOUS;
 	if (level == 2)
+		return m68230_timer_vector(pit);
+	if (level == 5)
 		return duart_vector(duart);
+	if (level == 2)
+		return m68230_port_vector(pit);
 	return M68K_INT_ACK_SPURIOUS;
 }
 
@@ -166,7 +194,8 @@ unsigned int do_cpu_read_byte(unsigned int address)
 		return ram[address];
 	if (address >= 0xFF800)
 		return duart_read(duart, address >> 1);
-	/* TODO FF000-FF7FF PIT */
+	if (address >= 0xFF000)
+		return m68230_read(pit, address >> 1);
 	return 0xFF;
 }
 
@@ -220,6 +249,8 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 		ram[address] = value;
 	else if (address >= 0xFF800 && address <= 0xFFFFF)
 		duart_write(duart, address >> 1, value);
+	else if (address >= 0xFF000 && address < 0xFF800)
+		m68230_write(pit, address >> 1, value);
 }
 
 void cpu_write_word(unsigned int address, unsigned int value)
@@ -356,6 +387,10 @@ int main(int argc, char *argv[])
 	if (trace & TRACE_DUART)
 		duart_trace(duart, 1);
 
+	pit = m68230_create();
+	if (trace & TRACE_PIT)
+		m68230_trace(pit, 1);
+
 	m68k_init();
 	m68k_set_cpu_type(cputype);
 	m68k_pulse_reset();
@@ -370,6 +405,7 @@ int main(int argc, char *argv[])
 		   testing this stuff */
 		m68k_execute(600);	/* We don't have an 008 emulation so approx the timing */
 		duart_tick(duart);
+		m68230_tick(pit, 600);
 		if (!fast)
 			take_a_nap();
 	}
