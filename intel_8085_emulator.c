@@ -536,7 +536,8 @@ int i8085_exec(int cycles) {
 				break;
 			case 0xE6: //ANI # - AND immediate with A
 				temp8 = i8085_read(reg_PC++);
-				if ((reg8[A] | temp8) & 0x08) set_AC(); else clear_AC();
+				/* This differs from 8080 */
+				set_AC();
 				reg8[A] &= temp8;
 				clear_C();
 				calc_SZP(reg8[A]);
@@ -1025,7 +1026,9 @@ int i8085_exec(int cycles) {
 			case 0xA7:
 				reg = opcode & 7;
 				temp8 = i8085_read_reg8(reg);
-				if ((reg8[A] | temp8) & 0x08) set_AC(); else clear_AC();
+				/* The 8085 always sets AC, the 8080 it's an
+				   or of bit 3 of the values */
+				set_AC();
 				reg8[A] &= temp8;
 				clear_C();
 				calc_SZP(reg8[A]);
