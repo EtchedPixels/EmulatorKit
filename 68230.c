@@ -47,6 +47,8 @@ void m68230_write(struct m68230 *pit, unsigned addr, uint8_t val)
 {
     addr &= 0x1F;
 
+    if (pit->trace)
+        fprintf(stderr, "pit: W %02X <- %02X\n", addr, val);
     /* CNTR is not writeable, and we keep the working value in here (or will do) */
     if (addr >= CNTR(0) && addr <= CNTR(3))
         return;

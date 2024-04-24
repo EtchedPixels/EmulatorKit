@@ -174,7 +174,6 @@ void duart_tick(struct duart *d)
 		if (!d->port[1].txdis && !(d->port[1].sr & 0x04))
 			duart_irq_raise(d, 0x10);
 		d->port[1].sr |= 0x0C;
-		fprintf(stderr, "sr0 now %x\n", d->port[0].sr);
 	}
 	switch ((d->acr & 0x70) >> 4) {
 		/* Clock and timer modes */
