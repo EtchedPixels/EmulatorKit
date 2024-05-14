@@ -38,18 +38,34 @@ static uint8_t mread(struct ns8060 *cpu, uint16_t addr)
     return mem_read(cpu, addr);
 }
 
-static uint16_t mread16(struct ns8060 *cpu, uint16_t addr)
-{
-    uint16_t val = mread(cpu, addr);
-    val |= mread(cpu, addr + 1) << 8;
-    return val;
-}
-
 static void mwrite(struct ns8060 *cpu, uint16_t addr, uint8_t val)
 {
-    return mem_write(cpu, addr, val);
+    mem_write(cpu, addr, val);
 }
 
+/* Binary */
+static void add(struct ns8060 *cpu, uint8_t b)
+{
+    int ov = 0;
+    int r  = cpu->a + b;
+    if (cpu->s & S_CL) {
+        r++;
+    }
+
+	if(( (cpu->a & 0x80)==(b & 0x80) )&&( (cpu->a & 0x80)!=(r & 0x80) )) {
+		ov = S_OV;
+	}
+
+    cpu->s &= ~(S_CL|S_OV);
+
+	if( r & 0x100 ) cpu->s |= S_CL;
+	
+	cpu->s |= ov;
+
+	cpu->a = r;
+}
+
+#if 0
 /* Binary */
 static void add(struct ns8060 *cpu, uint8_t b)
 {
@@ -73,6 +89,7 @@ static void add(struct ns8060 *cpu, uint8_t b)
 
     cpu->a = r;
 }
+#endif
 
 /* BCD */
 static void dad(struct ns8060 *cpu, uint8_t b)
@@ -189,7 +206,27 @@ static uint8_t get_imm8(struct ns8060 *cpu)
     return v;
 }
 
+/* Generate an effective address */
+static uint16_t make_address(struct ns8060 *cpu, int mode, int8_t off, int notjmp)
+{
+    if( (off&0xff) == 0x80 && notjmp)
+        off = cpu->e;
 
+    if (!(mode & 4)) {  // not AutoIndex
+        return add12(cpu->p[mode & 3], off);
+    } else {            // AutoIndex
+        if (off < 0) {
+            cpu->p[mode & 3] = add12(cpu->p[mode & 3], off);
+            return cpu->p[mode & 3];
+        }else {
+			uint16_t oldptr = cpu->p[mode & 3];
+            cpu->p[mode & 3] = add12(cpu->p[mode & 3], off);
+            return oldptr;
+        }
+    }
+}
+
+#if 0
 /* Generate an effective address */
 static uint16_t make_address(struct ns8060 *cpu, int mode, int8_t off, int notjmp)
 {
@@ -207,7 +244,7 @@ static uint16_t make_address(struct ns8060 *cpu, int mode, int8_t off, int notjm
         }
     }
 }
-
+#endif
 static void illegal(struct ns8060 *cpu)
 {
     fprintf(stderr, "Illegal operation 0x%02X at 0x%04X.\n",
@@ -274,7 +311,7 @@ static unsigned int memop(struct ns8060 *cpu)
                 add(cpu, mread(cpu, addr));
                 return 19;
             }
-            add(cpu, mread(cpu, addr));
+            add(cpu, val);
             return 11;
         case 0xF8:	/* CAD */
             if (!immediate) {
@@ -293,9 +330,15 @@ static unsigned int dbop(struct ns8060 *cpu)
     unsigned int ptr = cpu->i & 3;
     int8_t disp = get_off8(cpu);
 
+#if 1
+    int notjmp = 1;
+	if((cpu->i >= 0x90) &&(cpu->i < 0xa0)) notjmp = 0;
+	
+	unsigned int addr = make_address(cpu, cpu->i & 3, disp, notjmp);
+#else
     /* E substitution does not apply to 9x instructions */
     unsigned int addr = make_address(cpu, cpu->i & 3, disp, (cpu->i & 0x20));
-
+#endif
     switch(cpu->i & 0xFC)
     {
         case 0x8C:
@@ -410,6 +453,16 @@ static unsigned int execute_op(struct ns8060 *cpu)
         else
             cpu->s &= ~S_CL;
         return 5;
+
+#if 1 // Print I/O Hook.		
+    case 0x20:  /* UNDEFINED */
+		ns8060_emu_putch(cpu->a);
+        return 5;
+    case 0x21:  /* UNDEFINED */
+		cpu->a = cpu->e = ns8060_emu_getch();
+        return 5;
+#endif
+
     case 0x30:	/* XPAL */
     case 0x31:
     case 0x32:
@@ -454,10 +507,10 @@ static unsigned int execute_op(struct ns8060 *cpu)
     case 0x68:	/* DAE */
         dad(cpu, cpu->e);
         return 11;
-    case 0x80:	/* ADE */
+    case 0x70:	/* ADE */
         add(cpu, cpu->e);
         return 7;
-    case 0x88:	/* CAE */
+    case 0x78:	/* CAE */
         add(cpu, ~cpu->e);
         return 8;
     default:
@@ -497,6 +550,7 @@ struct ns8060 *ns8060_create(void)
     }
     cpu->trace = 0;
     ns8060_reset(cpu);
+	return cpu;
 }
 
 void ns8060_trace(struct ns8060 *cpu, unsigned int onoff)
