@@ -8,9 +8,11 @@ extern struct ns8060 *ns8060_create(void);
 extern void ns8060_reset(struct ns8060 *cpu);
 extern void ns8060_trace(struct ns8060 *cpu, unsigned int onoff);
 extern unsigned int ns8060_execute_one(struct ns8060 *cpu);
-extern void ns8060_seta(struct ns8060 *cpu, unsigned int a);
-extern void ns8060_setb(struct ns8060 *cpu, unsigned int b);
+extern void ns8060_set_a(struct ns8060 *cpu, unsigned int a);
+extern void ns8060_set_b(struct ns8060 *cpu, unsigned int b);
 
+extern int  ns8060_emu_getch(void);
+extern void ns8060_emu_putch(int ch);
 /*
  *	Helpers required by the implementor
  */
