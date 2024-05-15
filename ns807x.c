@@ -685,10 +685,14 @@ static unsigned int execute_high(struct ns8070 *cpu)
     case 0xE8:	/* UNUSED */
         return 7;	/* Unclear */
     case 0xF0:	/* ADD A,, */
+        if (!immed)
+            val = mread(cpu, addr);
         maths8add(cpu, cpu->a, val, cpu->a + val);
         cpu->a += val;
         return 7 + cost;
     case 0xF8:	/* SUB A,, */
+        if (!immed)
+            val = mread(cpu, addr);
         maths8sub(cpu, cpu->a, val, cpu->a - val);
         cpu->a -= val;
         return 7 + cost;

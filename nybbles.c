@@ -15,12 +15,36 @@
 #include <sys/select.h>
 #include "ns807x.h"
 
+#define PATCH_ROM 1
+
 static uint8_t ramrom[65536];
 static uint8_t fast;
 static volatile unsigned done;
 static unsigned trace;
 struct ns8070 *cpu;
 static uint8_t pendc;			/* Pending char */
+
+struct ns8070 {
+    uint16_t pc;
+    uint16_t t;
+    uint16_t sp;
+    uint16_t p2;
+    uint16_t p3;
+    uint8_t a;
+    uint8_t e;
+    uint8_t s;
+    uint8_t *rom;
+    uint8_t ram[64];
+
+    uint8_t i;
+    uint8_t int_latch;
+#define INT_A	1
+#define INT_B	2
+    uint8_t input;
+
+    int trace;			/* TODO */
+};
+
 
 /* Our little I/O ROM so we don't have decode bitbanging */
 static const uint8_t iorom[] = {
@@ -73,6 +97,19 @@ unsigned int next_char(void)
 	}
 	if (c == 0x0A)
 		c = '\r';
+
+	if (c == 0x1a) { // ^Z
+		exit(1);
+	}
+	if (c == 0x1b) { // ESC
+		exit(1);
+	}
+	if (c == 0x7f) { // DEL
+		c = 0x08;    // BS
+	}
+	if( (c>='a')&&(c<='z') ) {c=c-0x20;}
+	
+	
 	return c;
 }
 
@@ -145,13 +182,44 @@ static void usage(void)
 	exit(EXIT_FAILURE);
 }
 
+/****************************************************************************
+ *	メモリー内容をダンプ.
+ ****************************************************************************
+ */
+void mem_dump(char *msg,int adr,void *ptr,int len)
+{
+	unsigned char *p = (unsigned char *)ptr;
+	int i;//,j,c;
+	fprintf(stderr,"%s:\n",msg);
+
+	for(i=0; i<len; i++) {
+		if( (i & 15) == 0 ) fprintf(stderr,"%04x",adr);
+		if( (i & 15) == 8 ) fprintf(stderr," ");
+		fprintf(stderr," %02x",*p);
+		p++;adr++;
+		if( (i & 15) == 15 ) {
+			fprintf(stderr,"\n");
+		}
+	}
+	fprintf(stderr,"\n");
+}
+
+void dumpreg(struct ns8070 *cpu)
+{
+	mem_dump("ram",0xffc0,&cpu->ram[0]     ,64);
+//	mem_dump("rom",0xff00,&cpu->rom[0xff00],256);
+}
+
+//#define ROMSIZE	2560
+#define ROMSIZE	0x1100
+
 int main(int argc, char *argv[])
 {
 /*	static struct timespec tc; */
 	int opt;
 	int fd;
 	int rom = 1;
-	char *rompath = "nybble.rom";
+	char *rompath = "8070NIBL.rom";
 /*	unsigned int cycles = 0; */
 
 	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
@@ -172,18 +240,26 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+		
 	if (rom) {
+		memset(ramrom,0xff,sizeof(ramrom) );
+
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
 			exit(EXIT_FAILURE);
 		}
-		if (read(fd, ramrom, 2560) != 2560) {
+		if (read(fd, ramrom, ROMSIZE) != ROMSIZE) {
 			fprintf(stderr, "nybbles: short rom '%s'.\n",
 				rompath);
 			exit(EXIT_FAILURE);
 		}
 		close(fd);
+
+#if PATCH_ROM 
+		// TXTBGN PATCH ( =X'8000 )
+		ramrom[0x0c]=0x14;  // BASIC PROGRAM TEXT = 0x1400
+#endif
 	}
 
 	/* Patch in our I/O hooks */
@@ -219,8 +295,15 @@ int main(int argc, char *argv[])
 	   is loaded though */
 
 	while (!done) {
-	        /* TODO: timing, ints etc */
-                ns8070_execute_one(cpu);
+		/* TODO: timing, ints etc */
+		ns8070_execute_one(cpu);
+#if 0
+		// for debug.
+		if ( cpu->pc == 0x00d5 ) { dumpreg(cpu);}
+		if ( cpu->pc == 0x03c0 ) { dumpreg(cpu);}
+		if(( cpu->pc >= 0x0090 ) &&( cpu->pc <= 0x009f ) ){ dumpreg(cpu);}
+		if ( cpu->pc == 0x0046 ) { dumpreg(cpu); exit(1);}
+#endif		
 		if (check_chario() & 1) {
 			pendc  = next_char();
 			/* The TinyBASIC expects break type conditions
