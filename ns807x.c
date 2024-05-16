@@ -697,7 +697,7 @@ static unsigned int execute_high(struct ns8070 *cpu)
         cpu->a -= val;
         return 7 + cost;
     }
-    fprintf(stderr, "Uknonw instruction %x\n", op);
+    fprintf(stderr, "Unknown instruction %x\n", op);
     exit(1);
 }
 
