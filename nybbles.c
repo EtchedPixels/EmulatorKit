@@ -141,7 +141,7 @@ static void exit_cleanup(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"flexbox: [-f] -r rompath] [-d debug]\n");
+		"nybbles: [-f] -r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
