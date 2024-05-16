@@ -482,7 +482,7 @@ int main(int argc, char *argv[])
 		   testing this stuff */
 		m68k_execute(600);	/* We don't have an 008 emulation so approx the timing */
 		duart_tick(duart);
-		m68230_tick(pit, 600);
+		m68230_tick(pit, 1000);
 		if (!fast)
 			take_a_nap();
 	}
