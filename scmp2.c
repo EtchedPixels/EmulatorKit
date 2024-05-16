@@ -3,20 +3,20 @@
  */
 
 /* * HOW TO RUN: ====
- * 
+ *
  * 1) Get NIBL BASIC ROM: NIBL.bin
  *     URL https://github.com/iruka-/SCMP2Emulator/tree/main/scmp2sim/
  *    or
  *     URL https://github.com/ekuester/SCMP-INS8060-NIBL-FloatingPoint-TinyBASIC-Interpreter/tree/main/EMULATOR
- * 
- * 2) ./buid 
+ *
+ * 2) ./build
  *     $ make scmp2
- * 
+ *
  * 3) ./run
  *     $ ./scmp2
- * 
+ *
  * . Have Fun!
- * 
+ *
  */
 
 #include <stdio.h>
@@ -149,25 +149,14 @@ void terminal_init()
 static void usage(void)
 {
 	fprintf(stderr,
-		"flexbox: [-f] -r rompath] [-d debug]\n");
+		"scmp2: [-f] [-r rompath] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
 
-//----------------------------------------------------------------------------
-//  Memory Dump 
-//----------------------------------------------------------------------------
-void memdump(char *msg, uint8_t *buf, int len)
-{
-	int j;
-	fprintf(stderr, "%s", msg);
-	for (j = 0; j < len; j++) {
-		fprintf(stderr, " %02x", buf[j] & 0xff);
-		if((j & 0x1f)== 31)
-			fprintf(stderr, "\n +");
-	}
-	fprintf(stderr, "\n");
-}
+/*----------------------------------------------------------------------------
+   Memory Dump
+  ----------------------------------------------------------------------------*/
 
 int main(int argc, char *argv[])
 {
@@ -209,8 +198,6 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		close(fd);
-		
-		printf("read %x bytes.\n",n);
 	}
 
 	/* Patch in our I/O hooks */
@@ -250,15 +237,13 @@ int main(int argc, char *argv[])
 	exit(0);
 }
 
-
-//
 void ser_output(struct ns8060 *cpu, uint8_t bit)
 {
-	// ???
+	/* TODO: emulate bitbang serial */
 }
 uint8_t ser_input(struct ns8060 *cpu)
 {
-	// ???
+	/* TODO: emulate bitbang serial */
 	return 0;
 }
 
@@ -268,16 +253,13 @@ int  ns8060_emu_getch(void)
 	if( (c>='a')&&(c<='z') ) c=c-0x20;
 	if( c == 0x0a ) c=0x0d;
 	
-//	LogPrint("\nGETC:%02x:%c\n",c,c & 0x7f);
+/*	LogPrint("\nGETC:%02x:%c\n",c,c & 0x7f); */
 	return c;
 }
 void ns8060_emu_putch(int ch)
 {
-#if 1
 	putchar(ch & 0x7f);
-#else
-	printf("PUTC:%02x:%c\n",ch,ch & 0x7f);
-//	LogPrint("\nPUTC:%02x:%c\n",ch,ch & 0x7f);
-#endif
+/*	printf("PUTC:%02x:%c\n",ch,ch & 0x7f);
+	LogPrint("\nPUTC:%02x:%c\n",ch,ch & 0x7f); */
 }
 

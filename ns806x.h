@@ -11,6 +11,9 @@ extern unsigned int ns8060_execute_one(struct ns8060 *cpu);
 extern void ns8060_set_a(struct ns8060 *cpu, unsigned int a);
 extern void ns8060_set_b(struct ns8060 *cpu, unsigned int b);
 
+/*
+ *	Until we emulate the bitbanger properly
+ */
 extern int  ns8060_emu_getch(void);
 extern void ns8060_emu_putch(int ch);
 /*
