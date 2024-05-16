@@ -8,7 +8,12 @@
  *
  *	Console on DUART port 0
  *
- *	TODO: Emulate PIT
+ *	TODO:
+ *	-	Emulate PIT better
+ *	-	Option for 74S138 mode
+ *	-	8/10MHz CPU select
+ *	-	RAM expansion emulation
+ *
  *
  *	Memory map (74S138) : not currently emulated
  *	00000-01FFF RAM		U8
@@ -50,6 +55,7 @@
 #include <unistd.h>
 #include <m68k.h>
 #include <arpa/inet.h>
+#include "ide.h"
 #include "duart.h"
 #include "68230.h"
 
@@ -58,6 +64,8 @@ static uint8_t ram[1048576];	/* 20bit addres bus so just allocate for all of it 
 static struct duart *duart;
 /* 68230 */
 static struct m68230 *pit;
+/* IDE on the 230 */
+static struct ide_controller *ide;
 
 static uint8_t rcount;		/* Counter for the first 8 fetches */
 
@@ -122,13 +130,49 @@ unsigned int next_char(void)
 	return c;
 }
 
+static uint8_t ide_datav, ide_ctrl;
+
+/* Emulate a 68230 with a CF adapter wired data to port A control to port B
+   0-2: address bits 3: /CS 4: /CS 5: W 6: R 7: reset */
 void m68230_write_port(struct m68230 *pit, unsigned port, uint8_t val)
 {
+	if (port == 0)
+		ide_datav = val;
+	if (port == 1) {
+		uint8_t delta = ide_ctrl ^ val;
+		unsigned port = val & 7;
+		ide_ctrl = val;
+		if (!(val & 0x80)) {	/* RESET */
+			ide_reset_begin(ide);
+			return;
+		}
+		/* No CS selected */
+		if ((val & 0x18) == 0x18)
+			return;
+		if (val & 0x08)		/* CS for alt reg low, CS main high*/
+			port += 2;
+		/* Rising write edge */
+		if (delta & val & 0x20) {
+			if (trace & TRACE_DUART)
+				fprintf(stderr, "\\WR %d <- %02X\n", port, ide_datav);
+			ide_write8(ide, port, ide_datav);
+		}
+		/* Read edge going low */
+		if ((delta & 0x40) && !(val & 0x40)) {
+			ide_datav = ide_read8(ide, port);
+			if (trace & TRACE_DUART)
+				fprintf(stderr, "\\RD %d -> %02X\n", port, ide_datav);
+		}
+	}
 }
 
 uint8_t m68230_read_port(struct m68230 *pit, unsigned port)
 {
-	return 0xFF;
+	if (port == 1)
+		return ide_ctrl;
+	if (trace & TRACE_DUART)
+		fprintf(stderr, "R ide %02X\n", ide_datav);
+	return ide_datav;
 }
 
 static unsigned int irq_pending;
@@ -284,8 +328,10 @@ void cpu_instr_callback(void)
 static void device_init(void)
 {
 	irq_pending = 0;
+	ide_reset_begin(ide);
 	duart_reset(duart);
 	duart_set_input(duart, 1);
+	m68230_reset(pit);
 }
 
 static struct termios saved_term, term;
@@ -333,14 +379,18 @@ int main(int argc, char *argv[])
 	int fast = 0;
 	int opt;
 	const char *romname = "Tutor131.bin";
+	const char *diskname = NULL;
 
-	while((opt = getopt(argc, argv, "r:d:f")) != -1) {
+	while((opt = getopt(argc, argv, "i:r:d:f")) != -1) {
 		switch(opt) {
+		case 'd':
+			trace = atoi(optarg);
+			break;
 		case 'f':
 			fast = 1;
 			break;
-		case 'd':
-			trace = atoi(optarg);
+		case 'i':
+			diskname = optarg;
 			break;
 		case 'r':
 			romname = optarg;
@@ -377,11 +427,38 @@ int main(int argc, char *argv[])
 		perror(romname);
 		exit(1);
 	}
-	if (read(fd, ram + 0xE0000, 0x4000) != 0x4000) {
-		fprintf(stderr, "%s: too short.\n", romname);
+	/* copying the image is fine as this is read only space */
+	switch(read(fd, ram + 0xE0000, 0x10000)) {
+	case 0x10000:
+		break;
+	case 0x01000:
+		memcpy(ram + 0xE2000, ram + 0xE0000, 0x2000);
+	case 0x02000:
+		memcpy(ram + 0xE2000, ram + 0xE0000, 0x2000);
+	case 0x04000:
+		memcpy(ram + 0xE4000, ram + 0xE0000, 0x4000);
+		/* Fall through */
+	case 0x8000:
+		memcpy(ram + 0xE8000, ram + 0xE0000, 0x8000);
+		break;
+	default:
+		fprintf(stderr, "%s: unsupported size.\n", romname);
 		exit(1);
 	}
 	close(fd);
+
+	if (diskname) {
+		fd = open(diskname, O_RDWR);
+		if (fd == -1) {
+			perror(diskname);
+			exit(1);
+		}
+	}
+	ide = ide_allocate("hd0");
+	if (ide == NULL)
+		exit(1);
+	if (diskname && ide_attach(ide, 0, fd))
+		exit(1);
 
 	duart = duart_create();
 	if (trace & TRACE_DUART)
