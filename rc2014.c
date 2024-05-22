@@ -91,6 +91,7 @@ static uint8_t extreme;
 #define CPUBOARD_ZRC		12		/* Similar to ZRCC but not quite the same */
 #define CPUBOARD_SC720		13		/* Low 32K bankswitched, high 32K fixed */
 #define CPUBOARD_SC707		14		/* SC114 type memory board but with ROM bankable using 0x20/0x28 */
+#define CPUBOARD_TP128		15		/* Tadeusz 128K 32K/32K banked memory */
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -544,6 +545,44 @@ static void mem_write_sc707(uint16_t addr, uint8_t val)
 	ramrom[aphys] = val;
 }
 
+/* We use RAMROM in 32K chunks where 0-7FFF are the ROM and
+   10000 + are the 128K RAM */
+static uint32_t mmu_tp128(uint16_t addr, unsigned is_wr)
+{
+	if (addr < 0x8000) {
+		/* Bank 0 */
+		if (port38 || is_wr)
+			return 0x10000 + addr;
+		return addr;
+	}
+	switch(port38) {
+	case 0:
+	case 1:	/* Bank 1 18000-1FFFF in our mapping */
+		return 0x10000 + addr;
+	case 2:	/* Bank 2 */
+		return 0x18000 + addr;
+	case 3:	/* Bank 3 */
+		return 0x20000 + addr;
+	}
+	fprintf(stderr, "internal tp128\n");
+	exit(1);
+}
+
+static uint8_t mem_read_tp128(uint16_t addr)
+{
+	uint32_t aphys = mmu_tp128(addr, 0);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "R %05X = %02X\n", aphys, ramrom[aphys]);
+	return ramrom[aphys];
+}
+
+static void mem_write_tp128(uint16_t addr, uint8_t val)
+{
+	uint32_t aphys = mmu_tp128(addr, 1);
+	if (trace & TRACE_MEM)
+		fprintf(stderr, "W: %04X = %02X\n", addr, val);
+	ramrom[aphys] = val;
+}
 
 struct z84c15 {
 	uint8_t scrp;
@@ -791,6 +830,9 @@ uint8_t do_mem_read(uint16_t addr, int quiet)
 	case CPUBOARD_SC707:
 		r = mem_read_sc707(addr);
 		break;
+	case CPUBOARD_TP128:
+		r = mem_read_tp128(addr);
+		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
 		exit(1);
@@ -867,6 +909,9 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_SC707:
 		mem_write_sc707(addr, val);
+		break;
+	case CPUBOARD_TP128:
+		mem_write_tp128(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -2782,6 +2827,15 @@ static void io_write_sc707(uint16_t addr, uint8_t val)
 	io_write_2014(addr, val, known);
 }
 
+static void io_write_tp128(uint16_t addr, uint8_t val)
+{
+	if ((addr & 0x00F0) == 0x30) {
+		port38 = val & 3;
+		io_write_2014(addr, val, 1);
+	} else
+		io_write_2014(addr, val, 0);
+}
+
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
@@ -2828,6 +2882,9 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case CPUBOARD_SC707:
 		io_write_sc707(addr, val);
 		break;
+	case CPUBOARD_TP128:
+		io_write_tp128(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2844,6 +2901,7 @@ uint8_t io_read(int unused, uint16_t addr)
 	case CPUBOARD_ZRC:
 	case CPUBOARD_SC720:
 	case CPUBOARD_SC707:
+	case CPUBOARD_TP128:
 		if (extreme)
 			return io_read_2014_x(addr);
 		else
@@ -3196,8 +3254,16 @@ int main(int argc, char *argv[])
 				switchrom = 0;
 				bank512 = 0;
 				cpuboard = CPUBOARD_SC707;
+			} else if (strcmp(optarg, "tp128") == 0) {
+				switchrom = 0;
+				bank512 = 0;
+				rom = 1;
+				romsize = 32768;
+				cpuboard = CPUBOARD_TP128;
 			} else {
-				fputs("rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, sc707, sc720, z80sbc64, z80mb64, zrcc, tinyz80, pdog128, pdog512, micro80w, zrc.\n",
+				fputs(
+"rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, sc707, sc720\n"
+"z80sbc64, z80mb64, zrcc, tinyz80, pdog128, pdog512, micro80w, zrc, tp128.\n",
 						stderr);
 				exit(EXIT_FAILURE);
 			}
