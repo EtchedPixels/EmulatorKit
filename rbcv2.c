@@ -356,14 +356,15 @@ int main(int argc, char *argv[])
     if (ramfpath)
         ramf = ramf_create(ramfpath);
 
-    for (i = 0; i < 5; i++)
+    for (i = 0; i < 5; i++) {
         uart[i] = uart16x50_create();
+        if (!prop && i == 0)
+            uart16x50_attach(uart[i], &console);
+        else
+            uart16x50_attach(uart[i], &console_wo);
+    }
 
     uart16x50_trace(uart[0], trace & TRACE_UART);
-    if (!prop)
-        uart16x50_attach(uart[0], &console);
-    else
-        uart16x50_attach(uart[0], &console_wo);
 
     if (wiznet) {
         wiz = nic_w5100_alloc();
