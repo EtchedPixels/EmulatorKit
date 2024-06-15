@@ -314,7 +314,6 @@ static void z180_asci_write(struct z180_io *io, uint8_t addr, uint8_t val)
         /* TDRE was high and tx was enabled */
         if ((asci->cntla & 0x20) && (asci->stat & 0x02)) {
             asci->dev->put(asci->dev, val);
-            write(1, &val, 1);
             asci->stat &= ~0x02;
         }
         z180_asci_recalc(io, asci);
