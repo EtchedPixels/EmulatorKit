@@ -2699,7 +2699,7 @@ static uint8_t io_read_micro80(uint16_t addr)
 		return pio_read(r & 3);
 	else if (r >= 0xEE && r <= 0xF1)
 		return z84c15_read(r);
-	else if (r >= 0x90 && r <= 0x97)
+	else if (ide0 && r >= 0x90 && r <= 0x97)
 		return my_ide_read(r & 7);
 	else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
@@ -2717,7 +2717,7 @@ static void io_write_micro80(uint16_t addr, uint8_t val)
 		pio_write(r & 3, val);
 	else if ((r >= 0xEE && r <= 0xF1) || r == 0xF4)
 		z84c15_write(r, val);
-	else if (r >= 0x90 && r <= 0x97)
+	else if (ide0 && r >= 0x90 && r <= 0x97)
 		my_ide_write(r & 0x07, val);
 	else if (addr == 0xFD) {
 		fprintf(stderr, "trace set to %d\n", val);
