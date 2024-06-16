@@ -455,7 +455,7 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	int l;
-	int fast;
+	int fast = 0;
 	char *image = "fuzix.bin";
 	uint16_t addr = 0x0000;
 
