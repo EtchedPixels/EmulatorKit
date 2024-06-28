@@ -126,7 +126,7 @@ smallz80: smallz80.o ide.o libz80/libz80.o
 	cc -g3 smallz80.o ide.o libz80/libz80.o -o smallz80
 
 sbc2g:	sbc2g.o ide.o libz80/libz80.o
-	cc -g3 sbc2g.o ide.o libz80/libz80.o -o sbc2g
+	cc -g3 sbc2g.o ide.o z80dis.o libz80/libz80.o -o sbc2g
 
 tiny68k: tiny68k.o ide.o duart.o m68k/lib68k.a
 	cc -g3 tiny68k.o ide.o duart.o m68k/lib68k.a -o tiny68k
