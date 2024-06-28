@@ -19,8 +19,6 @@
  *
  *	TODO
  *	Is there any sane way to handle the 7 segment displays ?
- *
- *	FIXME: move to standard uart lib
  */
 
 #include <stdio.h>
@@ -152,8 +150,6 @@ static void z80_trace(unsigned unused)
 
 static uint8_t sd_bits;
 static uint8_t sd_bitct;
-static uint8_t sd_miso;
-
 
 static uint8_t spi_byte_sent(uint8_t val)
 {
@@ -203,11 +199,11 @@ static void spi_clock(void)
 		sd_bitct = 0;
 	}
 	/* Falling edge */
-	sd_miso = (rxbits & 0x80) ? 0x01 : 0x00;
+	uart16x50_signal_event(uart, (rxbits & 0x80) ^ 0x80);
+	if (trace & TRACE_SPI)
+	    fprintf(stderr, "rxbit = %d]\n", rxbits >> 7);
 	rxbits <<= 1;
 	rxbits |= 0x01;
-	if (trace & TRACE_SPI)
-	    fprintf(stderr, "rxbit = %d]\n", sd_miso);
 }
 
 static void recalc_interrupts(void)
@@ -260,7 +256,7 @@ static void qreg_write(uint8_t reg, uint8_t v)
 /* 16x50 callbacks */
 void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 {
-	/* Nothing we care about */
+    bankreg = mcr & 0x1F;
 }
 
 static uint8_t io_read(int unused, uint16_t addr)
