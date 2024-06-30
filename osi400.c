@@ -54,7 +54,7 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 {
 	if (addr >= 0xF000 && addr < 0xFE00 && !debug)
 		return acia_read(acia, addr & 1);
-	if (addr == 0xDF01)
+	if ((addr & 0xFF00)== 0xDF00)
 		return last_key;
 	if (basic && addr >= 0xA000 && addr <= 0xBFFF)
 		return mem[addr];
