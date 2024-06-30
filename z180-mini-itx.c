@@ -406,9 +406,9 @@ static void ppi_recalc(void)
 	static unsigned int old_cs = 7;
 	unsigned int new_cs = port_c & 7;
 	if (sdcard && new_cs != old_cs) {
-		if (old_cs == 0)
+		if (old_cs == 1)
 			sd_spi_raise_cs(sdcard);
-		else if (new_cs == 0)
+		else if (new_cs == 1)
 			sd_spi_lower_cs(sdcard);
 		old_cs = new_cs;
 	}
