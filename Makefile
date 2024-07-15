@@ -7,7 +7,7 @@ all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80 \
-	trcwm6809 swt6809 nybbles scmp2 sbc08k
+	trcwm6809 swt6809 nybbles scmp2 sbc08k mini11
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
@@ -203,8 +203,8 @@ n8_sdl2: n8.o n8_sdlui.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sd
 s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80
 
-mini11: mini11.o 68hc11.o sdcard.o
-	cc -g3 mini11.o sdcard.o 68hc11.o -o mini11
+mini11: mini11.o 68hc11.o sdcard.o 6522.o
+	cc -g3 mini11.o sdcard.o 6522.o 68hc11.o -o mini11
 
 mini-riscv: mini-riscv.o riscv-disas.o sdcard.o
 	cc -g3 mini-riscv.o riscv-disas.o sdcard.o -o mini-riscv

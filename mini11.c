@@ -1,11 +1,24 @@
 /*
  *	Platform features
  *
+ *	Mini 11
  *	68HC11A CPU
  *	512K RAM
  *	Top 16K is pageable ROM (controlled by PA3 - low is ROM enable)
  *	A18-A16 are PA6-PA3
  *	SD on the SPI, internal serial
+ *
+ *	Mini 11 / M8
+ *	Related board but RAM is only F000-FFFF is reserved for other
+ *	stuff or internal space, and the banking registers move from the
+ *	CPU GPIO to matches. Also adds an extension bus and optional 6522
+ *
+ *	F400-F7FF	External I/O space (6522 VIA at F400)
+ *	F800-FFFF	ROM/paging latches (partial decode)
+ *
+ *	Latch
+ *	bit 4: 64K contiguous
+ *	bit 3-0: bank	16 x 64K
  *
  */
 
@@ -19,6 +32,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include "6522.h"
 #include "6800.h"
 #include "ide.h"
 #include "ppide.h"
@@ -31,12 +45,16 @@ static uint8_t rom[32768];		/* System EPROM */
 static uint8_t monitor[8192];		/* Monitor ROM - usually Buffalo */
 static uint8_t eerom[2048];		/* EEROM - not properly emulated yet */
 
-static uint8_t fast = 0;
+static unsigned fast = 0;
+static unsigned is_m8;
 
 static uint32_t flatahigh = 0;
 static uint8_t romen = 0;
 
-struct sdcard *sdcard;
+static uint8_t mlatch;			/* Must be uint8_t due to m6800_map */
+
+static struct sdcard *sdcard;
+static struct via6522 *via;
 
 /* The CPU E clock runs at CLK/4. We clock at 8MHz with a 2MHz E */
 
@@ -159,12 +177,11 @@ static void flatarecalc(struct m6800 *cpu)
 	romen = !!(bits & 0x08);
 }
 
-
 /* I/O ports */
 
 void m6800_port_output(struct m6800 *cpu, int port)
 {
-	/* Port A is the flat model A16-A20 */
+	/* Port A is the flat model A16-A20 on the M11 */
 	if (port == 1)
 		flatarecalc(cpu);
 	if (sdcard && port == 4) {
@@ -208,8 +225,44 @@ uint8_t m68hc11_spi_done(struct m6800 *cpu)
 	return spi_rxbyte;
 }
 
+/*
+ *	External memory and I/O model
+ *	Latch & VIA on the M8
+ */
+
+void via_recalc_outputs(struct via6522 *via)
+{
+}
+
+void via_handshake_a(struct via6522 *via)
+{
+}
+
+void via_handshake_b(struct via6522 *via)
+{
+}
+
 uint8_t *m6800_map(uint16_t addr, int wr)
 {
+	static uint8_t rdummy = 0xFF, wdummy;
+
+	if (is_m8) {
+		/* The ROM is readable from F800-FFFF */
+		if (addr >= 0xF800) {
+			if (wr)
+				return &mlatch;
+			else
+				return rom + (addr & 0x7FF);
+		}
+		if (addr >= 0xF400) {
+			if (wr)
+				return &wdummy;
+			return &rdummy;
+		}
+		if (addr & 0x8000)
+			return ram + (addr & 0x7FFF) + ((mlatch & 0xF0) << 11);
+		return ram + addr  + ((mlatch & 0x0F) << 15);
+	}
 	if (addr >= 0xC000 && romen == 0) {
 		if (wr)
 			return NULL;
@@ -220,12 +273,18 @@ uint8_t *m6800_map(uint16_t addr, int wr)
 
 uint8_t m6800_debug_read(struct m6800 *cpu, uint16_t addr)
 {
+	/* Avoid debugger read side effects */
+	if (is_m8 && addr >= 0xF400 && addr < 0xF800)
+		return 0xFF;
 	return *m6800_map(addr, 0);
 }
 
 uint8_t m6800_read(struct m6800 *cpu, uint16_t addr)
 {
 	uint8_t r;
+	/* Qualify this properly later TODO */
+	if (is_m8 && addr >= 0xF400 && addr < 0xF800)
+		return via_read(via, addr & 15);
 	r = *m6800_map(addr, 0);
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %04X = %02X\n", addr, r);
@@ -235,7 +294,14 @@ uint8_t m6800_read(struct m6800 *cpu, uint16_t addr)
 
 void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 {
-	uint8_t *rp = m6800_map(addr, 1);
+	uint8_t *rp;
+
+	/* Qualify this properly later TODO */
+	if (is_m8 && addr >= 0xF400 && addr < 0xF800) {
+		via_write(via, addr & 15, val);
+		return;
+	}
+	rp = m6800_map(addr, 1);
 	if (rp == NULL)
 		fprintf(stderr, "%04X: write to ROM.\n", addr);
 	else
@@ -262,7 +328,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "mini11: [-f] [-r rom] [-S sdcard] [-m monitor] [-w] [-d debug]\n");
+	fprintf(stderr, "mini11: [-f] [-8] [-r rom] [-S sdcard] [-m monitor] [-w] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -276,7 +342,7 @@ int main(int argc, char *argv[])
 	char *sdpath = NULL;
 	unsigned int cycles = 0;
 
-	while ((opt = getopt(argc, argv, "r:d:fS:m:")) != -1) {
+	while ((opt = getopt(argc, argv, "r:d:fS:m:8")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -293,6 +359,9 @@ int main(int argc, char *argv[])
 		case 'm':
 			monpath = optarg;
 			break;
+		case '8':
+			is_m8 = 1;
+			break;
 		default:
 			usage();
 		}
@@ -305,11 +374,21 @@ int main(int argc, char *argv[])
 		perror(rompath);
 		exit(EXIT_FAILURE);
 	}
-	if (read(fd, rom, 32768) != 32768) {
-		fprintf(stderr, "mini11: short rom '%s'.\n", rompath);
-		exit(EXIT_FAILURE);
+	if (is_m8) {
+		if (read(fd, rom, 0x800) != 0x800) {
+			fprintf(stderr, "mini11: short rom '%s'.\n", rompath);
+			exit(EXIT_FAILURE);
+		}
+	} else {
+		if (read(fd, rom, 32768) != 32768) {
+			fprintf(stderr, "mini11: short rom '%s'.\n", rompath);
+			exit(EXIT_FAILURE);
+		}
 	}
 	close(fd);
+
+	if (is_m8)
+		via = via_create();
 
 	if (monpath) {
 		fd = open(monpath, O_RDONLY);
