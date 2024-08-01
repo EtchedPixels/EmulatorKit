@@ -1,7 +1,7 @@
 all: mktables
 
 mktables: mktables.c
-	gcc -g -o mktables mktables.c
+	$(CC) -g -o mktables mktables.c
 	
 force: clean opcodes
 	
