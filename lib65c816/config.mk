@@ -1,6 +1,5 @@
-CC      := gcc
 CCFLAGS := -c -O2 -fomit-frame-pointer $(CCOPTS) -DDEBUG -Werror
-LD      := gcc
+LD      := $(CC)
 LDFLAGS :=
 
 PREFIX  := /opt/v65c816/
