@@ -9,15 +9,15 @@
  *	SD on the SPI, internal serial
  *
  *	Mini 11 / M8
- *	Related board but RAM is only F000-FFFF is reserved for other
- *	stuff or internal space, and the banking registers move from the
- *	CPU GPIO to matches. Also adds an extension bus and optional 6522
+ *	Related board but F000-FFFF is reserved for other stuff or internal
+ *	space, and the banking registers move from the CPU GPIO to latches.
+ *	Also adds an extension bus and optional 6522
  *
  *	F400-F7FF	External I/O space (6522 VIA at F400)
  *	F800-FFFF	ROM/paging latches (partial decode)
  *
  *	Latch
- *	bit 4: 64K contiguous
+ *	bit 7-4: bank   16 x 64K
  *	bit 3-0: bank	16 x 64K
  *
  */
@@ -72,6 +72,7 @@ static volatile int done;
 #define TRACE_SD	64
 #define TRACE_SPI	128
 #define TRACE_UART	256
+#define TRACE_LATCH	512
 
 static int trace = 0;
 
@@ -302,6 +303,8 @@ void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 		return;
 	}
 	rp = m6800_map(addr, 1);
+	if ((trace & TRACE_LATCH) && rp == &mlatch && mlatch != val)
+		fprintf(stderr, "**Mlatch to %02X\n", val);
 	if (rp == NULL)
 		fprintf(stderr, "%04X: write to ROM.\n", addr);
 	else
