@@ -1798,9 +1798,10 @@ static void m6800_shift16(struct m6800 *cpu, int c)
 /* CPX depends on the CPU variant. With the 6803 and later you can sensibly
    use the carry based comparisons, with the 6800 whilst V is set up the C
    flag is not affected */
-static void m6800_cpx(struct m6800 *cpu, uint16_t a, uint16_t b, uint16_t r)
+static void m6800_cpx(struct m6800 *cpu, uint16_t a, uint16_t b)
 {
     if (cpu->type == CPU_6800) {
+        uint16_t r = (a & 0xFF00) - (b & 0xFF00);
         cpu->p &= ~(P_Z|P_N|P_V);
         if (r == 0)
             cpu->p |= P_Z;
@@ -1814,7 +1815,7 @@ static void m6800_cpx(struct m6800 *cpu, uint16_t a, uint16_t b, uint16_t r)
                 cpu->p |= P_V;
         }
     } else
-        m6800_maths16_noh(cpu, a, b, r);
+        m6800_maths16_noh(cpu, a, b, a - b);
 }
 
 static void m6800_bra(struct m6800 *cpu, uint8_t data8, uint8_t taken)
@@ -2858,10 +2859,10 @@ static int m6800_execute_one(struct m6800 *cpu)
         cpu->a = m6800_maths8(cpu, cpu->a, data8, cpu->a + data8);
         return clocks;
     case 0x188C:/* CPY */
-        m6800_cpx(cpu, cpu->y, data16, cpu->y - data16);
+        m6800_cpx(cpu, cpu->y, data16);
         return clocks;
     case 0x8C:	/* CPX */
-        m6800_cpx(cpu, cpu->x, data16, cpu->x - data16);
+        m6800_cpx(cpu, cpu->x, data16);
         return clocks;
     case 0x8D:	/* BSR */
         m6800_push16(cpu, cpu->pc);
@@ -2958,12 +2959,12 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x189C:/* CPY */
         tmp16 = m6800_do_read(cpu, data8) << 8;
         tmp16 |= m6800_do_read(cpu, data8 + 1);
-        m6800_cpx(cpu, cpu->y, tmp16, cpu->y - tmp16);
+        m6800_cpx(cpu, cpu->y, tmp16);
         return clocks;
     case 0x9C:	/* CPX */
         tmp16 = m6800_do_read(cpu, data8) << 8;
         tmp16 |= m6800_do_read(cpu, data8 + 1);
-        m6800_cpx(cpu, cpu->x, tmp16, cpu->x - tmp16);
+        m6800_cpx(cpu, cpu->x, tmp16);
         return clocks;
     case 0x9D:	/* JSR */
         if (cpu->type == CPU_6800)
@@ -3066,13 +3067,13 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x18AC:/* CPY ,Y*/
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
-        m6800_cpx(cpu, cpu->y, data16, cpu->y - tmp16);
+        m6800_cpx(cpu, cpu->y, tmp16);
         return clocks;
     case 0xCDAC:/* CPX ,Y */
     case 0xAC:	/* CPX ,X*/
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
-        m6800_cpx(cpu, cpu->x, tmp16, cpu->x - tmp16);
+        m6800_cpx(cpu, cpu->x, tmp16);
         return clocks;
     case 0x18AD:/* JSR ,Y */
     case 0xAD:	/* JSR ,X */
@@ -3158,12 +3159,12 @@ static int m6800_execute_one(struct m6800 *cpu)
     case 0x18BC:/* CPY */
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
-        m6800_cpx(cpu, cpu->y, tmp16, cpu->y - tmp16);
+        m6800_cpx(cpu, cpu->y, tmp16);
         return clocks;
     case 0xBC:	/* CPX */
         tmp16 = m6800_do_read(cpu, data16) << 8;
         tmp16 |= m6800_do_read(cpu, data16 + 1);
-        m6800_cpx(cpu, cpu->x, tmp16, cpu->x - tmp16);
+        m6800_cpx(cpu, cpu->x, tmp16);
         return clocks;
     case 0xBD:	/* JSR ext */
         m6800_push16(cpu, cpu->pc);
