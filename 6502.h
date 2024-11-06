@@ -18,6 +18,7 @@ extern uint8_t read6502_debug(uint16_t address);
 extern void write6502(uint16_t address, uint8_t value);
 
 extern int log_6502;
+extern uint8_t mempage;
 
 #ifdef _6502_PRIVATE
 

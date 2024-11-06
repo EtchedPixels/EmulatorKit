@@ -1,7 +1,7 @@
 
 CFLAGS = -Wall -pedantic -g3 -Werror
 
-all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-65c816-mini \
+all:	rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 	rcbus-65c816 rcbus-6800 rcbus-68008 rcbus-6809 rcbus-68hc11 \
 	rcbus-80c188 rcbus-8085 rcbus-z8 rcbus-z180 rbcv2 searle linc80 \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
@@ -60,6 +60,9 @@ rcbus-6303: rcbus-6303.o 6800.o ide.o w5100.o ppide.o rtc_bitbang.o
 
 rcbus-6502: rcbus-6502.o 6502.o 6502dis.o ide.o 6522.o acia.o ttycon.o 16x50.o rtc_bitbang.o w5100.o
 	cc -g3 rcbus-6502.o ide.o 6522.o acia.o ttycon.o 16x50.o rtc_bitbang.o w5100.o 6502.o 6502dis.o -o rcbus-6502
+
+rcbus-6509: rcbus-6509.o 6502.o 6502dis.o ide.o 6522.o acia.o ttycon.o 16x50.o rtc_bitbang.o w5100.o
+	cc -g3 rcbus-6509.o ide.o 6522.o acia.o ttycon.o 16x50.o rtc_bitbang.o w5100.o 6502.o 6502dis.o -o rcbus-6509
 
 rcbus-65c816: rcbus-65c816.o sram_mmu8.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o ttycon.o w5100.o lib65c816/src/lib65816.a
 	cc -g3 rcbus-65c816.o sram_mmu8.o ide.o 6522.o rtc_bitbang.o acia.o 16x50.o ttycon.o w5100.o lib65c816/src/lib65816.a -o rcbus-65c816

@@ -33,6 +33,7 @@ uint64_t instructions = 0;	//keep track of total instructions executed
 uint64_t clockticks6502 = 0, clockgoal6502 = 0;
 uint16_t oldpc, ea, reladdr, value, result;
 uint8_t opcode, oldstatus;
+uint8_t mempage;		// address holding the memory page to use (low 4 bits)
 
 //a few general functions used by various other functions
 static void push16(uint16_t pushval)
@@ -919,6 +920,10 @@ uint64_t exec6502(uint64_t tickcount)
 	startticks = clockticks6502;
 	while (clockticks6502 < clockgoal6502) {
 		opcode = read6502(pc++);
+		/* Track for 6509 emulation */
+		mempage = 0;
+		if (opcode == 0xB1 || opcode == 0x91)
+			mempage = 1;
 		status |= FLAG_CONSTANT;
 		if (log_6502) {
 			uint8_t c[3];
