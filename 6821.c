@@ -74,7 +74,7 @@ void m6821_calc_cr(struct m6821 *pia)
         pia->ctrl |= M6821_CB2;
         break;
     }
-    if (pia->ctrl |= pia->ctrl_last) {
+    if ((pia->ctrl |= pia->ctrl_last)) {
         m6821_ctrl_change(pia, pia->ctrl);
         pia->ctrl_last = pia->ctrl;
     }
