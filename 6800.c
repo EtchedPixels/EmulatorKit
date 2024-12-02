@@ -1803,7 +1803,7 @@ static void m6800_cpx(struct m6800 *cpu, uint16_t a, uint16_t b)
     if (cpu->type == CPU_6800) {
         uint16_t r = (a & 0xFF00) - (b & 0xFF00);
         cpu->p &= ~(P_Z|P_N|P_V);
-        if (r == 0)
+        if (a == b)
             cpu->p |= P_Z;
         if (r & 0x8000)
             cpu->p |= P_N;
