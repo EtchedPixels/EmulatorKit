@@ -15,3 +15,4 @@ extern uint8_t duart_vector(struct duart *duart);
 extern unsigned int next_char(void);
 extern unsigned int check_chario(void);
 extern void recalc_interrupts(void);
+extern void duart_signal_change(struct duart *d, uint8_t opr);
