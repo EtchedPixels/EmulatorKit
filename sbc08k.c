@@ -222,6 +222,9 @@ int cpu_irq_ack(int level)
 	return M68K_INT_ACK_SPURIOUS;
 }
 
+void duart_signal_change(struct duart *d, uint8_t opr)
+{
+}
 
 /* Read data from RAM, ROM, or a device */
 unsigned int do_cpu_read_byte(unsigned int address)

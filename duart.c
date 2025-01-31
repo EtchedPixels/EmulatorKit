@@ -28,6 +28,8 @@ struct duart {
 	uint8_t imr;
 	uint8_t ivr;
 	uint8_t opcr;
+	uint8_t opr;
+	uint8_t ip;
 	uint8_t acr;
 	uint8_t irq;
 	int input;		/* Which port if any is console */
@@ -204,9 +206,11 @@ void duart_reset(struct duart *d)
 	d->ctr = 0xFFFF;
 	d->ct = 0x0000;
 	d->acr = 0xFF;
+	d->opr = 0;   /* Specified by section 2.4 RESET. */
 	d->isr = 0;
 	d->imr = 0;
-        d->ivr = 0xF;
+	d->ivr = 0xF;
+	d->ip = 0x00; /* Data sheet does not specify this. */
 	d->port[0].mrp = 0;
 	d->port[0].sr = 0x00;
 	d->port[1].mrp = 0;
@@ -227,6 +231,16 @@ uint8_t do_duart_read(struct duart *d, uint16_t address)
 	case 0x03:		/* RHRA */
 		return duart_input(d, 0);
 	case 0x04:		/* IPCR */
+		/*
+		** Section 4.3.14.1: [The state change bits] are cleared
+		** when the CPU reads the input port change register.
+		*/
+		d->ipcr &= 0xF;
+		/*
+		** Section 4.3.15.1: This [ISR] bit [7] is cleared
+		** when the CPU reads the input port change register.
+		*/
+		d->isr &= 0x7F;
 		return d->ipcr;
 	case 0x05:		/* ISR */
 		return d->isr;
@@ -247,7 +261,7 @@ uint8_t do_duart_read(struct duart *d, uint16_t address)
 	case 0x0C:		/* IVR */
 		return d->ivr;
 	case 0x0D:		/* IP */
-		return 0xff;	/* d->ip; */
+		return d->ip;
 	case 0x0E:		/* START */
 		d->ct = d->ctr;
 		d->ctstop = 0;
@@ -335,16 +349,55 @@ void duart_write(struct duart *d, uint16_t address, uint8_t value)
 		d->opcr = value;
 		break;
 	case 0x0E:
-		d->opcr |= value;
-		break;
+		d->opr |= value;
+                duart_signal_change(d, d->opr);
+                break;
 	case 0x0F:
-		d->opcr &= ~value;
-		break;
+		d->opr &= ~value;
+                duart_signal_change(d, d->opr);
+                break;
 	}
 	if (bgrc && d->trace) {
 		fprintf(stderr, "BGR %d\n", d->acr >> 7);
 		fprintf(stderr, "CSR %d\n", d->port[0].csr >> 4);
 	}
+}
+
+void duart_set_input_pin(struct duart *d, const int pin_number)
+{
+	if (pin_number < 0 || pin_number > 5) return;
+	uint8_t before = d->ip;
+	const uint8_t pin_mask = 1 << pin_number;
+	if (pin_number < 4) {
+		/* Indicate state change if pin value is currently 0. */
+		if (!(d->ip & pin_mask)) {
+			d->ipcr |= (pin_mask << 4);
+			d->isr |= 0x80; /* Set ISR[7] on pin state change. */
+		}
+		d->ipcr |= pin_mask;
+	}
+	d->ip |= pin_mask;
+	if (d->trace) fprintf(stderr, "DUART IP set pin %d: 0x%02x -> 0x%02x\n", pin_number, before, d->ip);
+	duart_irq_calc(d);
+}
+
+void duart_clear_input_pin(struct duart *d, const int pin_number)
+{
+	if (pin_number < 0 || pin_number > 5) return;
+	uint8_t before = d->ip;
+	const uint8_t pin_mask = 1 << pin_number;
+	if (pin_number < 4) {
+		/* Indicate state change if pin value is currently 1. */
+		if (d->ip & pin_mask) {
+			d->ipcr |= (pin_mask << 4);
+			d->isr |= 0x80; /* Set ISR[7] on pin state change */
+		}
+		d->ipcr &= ~pin_mask;
+	}
+	d->ip &= ~pin_mask;
+	if (d->trace) fprintf(stderr, "DUART IP clear pin %d: 0x%02x -> 0x%02x\n", pin_number, before, d->ip);
+
+	duart_irq_calc(d);
 }
 
 void duart_set_input(struct duart *duart, int port)

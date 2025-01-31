@@ -118,8 +118,6 @@ static void rcbus_outb(uint8_t address, uint8_t data)
 {
 }
 
-
-
 int cpu_irq_ack(int level)
 {
 	if (!(irq_pending & (1 << level)))
@@ -129,6 +127,9 @@ int cpu_irq_ack(int level)
 	return M68K_INT_ACK_SPURIOUS;
 }
 
+void duart_signal_change(struct duart *d, uint8_t opr)
+{
+}
 
 /* TODO v2 board added an RTC */
 
