@@ -226,12 +226,6 @@ static void ula_write(uint8_t v)
 	/* ear is bit 4 mic is bit 3, border low bits */
 	ula = v;
 	repaint_border(v & 7);
-	if (model == ZX_PLUS3) {
-		if (v & 0x08)
-			fdc_set_motor(fdc, 3);
-		else
-			fdc_set_motor(fdc, 0);
-	}
 }
 
 static uint8_t ula_read(uint16_t addr)
@@ -288,7 +282,6 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		}
 	}
 	if (model == ZX_PLUS3 && (addr & 0xF002) == 0x3000) {
-		fprintf(stderr, "FDC W: %02X\n", val);
 		fdc_write_data(fdc, val);
 	}
 	if (model == ZX_PLUS3 && (addr & 0xC002) == 0x4000) {
@@ -300,6 +293,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	if (model == ZX_PLUS3 && (addr & 0xF002) == 0x1000) {
 		/* Does the memory latch lock this too ? TODO */
 		p3latch = val;
+		if (p3latch & 0x08)
+			fdc_set_motor(fdc, 3);
+		else
+			fdc_set_motor(fdc, 0);
 		recalc_mmu();
 	}
 }
