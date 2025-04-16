@@ -298,6 +298,9 @@ max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
 
+spectrum: spectrum.o keymatrix.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 spectrum.o keymatrix.o ide.o z80dis.o libz80/libz80.o -lm -o spectrum -lSDL2
+
 z80all: z80all.o 16x50.o ttycon.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 z80all.o 16x50.o ttycon.o ide.o z80dis.o libz80/libz80.o -lSDL2 -o z80all
 
