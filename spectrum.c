@@ -20,7 +20,7 @@
 #include "libz80/z80.h"
 #include "z80dis.h"
 #include "ide.h"
-#include "ppide.h"
+#include "lib765/include/765.h"
 
 #include <SDL2/SDL.h>
 #include "keymatrix.h"
@@ -62,9 +62,11 @@ static uint8_t ram[16][16384];
 
 static struct keymatrix *matrix;
 static Z80Context cpu_z80;
+static FDC_PTR fdc;
+static FDRV_PTR drive_a, drive_b;
 
 static int tape = -1;		/* Tape file handle */
-static unsigned mem = 16;	/* First byte above RAM (defaults to 16K) */
+static unsigned mem = 48;	/* First byte above RAM (defaults to 48K) */
 static uint8_t ula;		/* ULA state */
 static uint8_t frames;		/* Flash counter */
 static uint8_t mlatch;
@@ -91,6 +93,7 @@ static unsigned int_recalc;
 #define TRACE_IRQ	4
 #define TRACE_KEY	8
 #define TRACE_CPU	16
+#define TRACE_FDC	32
 
 static int trace = 0;
 
@@ -210,21 +213,37 @@ static void repaint_border(unsigned colour)
 			*p++ = border;
 }
 
+static void fdc_log(int debuglevel, char *fmt, va_list ap)
+{
+	if ((trace & TRACE_FDC) || debuglevel == 0) {
+		fprintf(stderr, "fdc: ");
+		vfprintf(stderr, fmt, ap);
+	}
+}
+
 static void ula_write(uint8_t v)
 {
 	/* ear is bit 4 mic is bit 3, border low bits */
 	ula = v;
 	repaint_border(v & 7);
+	if (model == ZX_PLUS3) {
+		if (v & 0x08)
+			fdc_set_motor(fdc, 3);
+		else
+			fdc_set_motor(fdc, 0);
+	}
 }
 
 static uint8_t ula_read(uint16_t addr)
 {
 	uint8_t r = 0xA0;	/* Fixed bits */
 
-	if (ula & 0x10)		/* Issue 3 and later */
-		r |= 0x40;
-	if (model == ZX_48K_2 && (ula & 0x08))
-		r |= 0x40;
+	if (model != ZX_PLUS3) {
+		if (ula & 0x10)		/* Issue 3 and later */
+			r |= 0x40;
+		if (model == ZX_48K_2 && (ula & 0x08))
+			r |= 0x40;
+	}
 	/* Low 5 bits are keyboard matrix map */
 	r |= ~keymatrix_input(matrix, ~(addr >> 8)) & 0x1F;
 	return r;
@@ -247,6 +266,12 @@ static uint8_t io_read(int unused, uint16_t addr)
 	/* Timex checks XXFE, Sinclair just the low bit */
 	if ((addr & 0x01) == 0)	/* ULA */
 		return ula_read(addr);
+	if (model == ZX_PLUS3) {
+		if ((addr & 0xF002) == 0x2000)
+			return fdc_read_ctrl(fdc);
+		if ((addr & 0xF002) == 0x3000)
+			return fdc_read_data(fdc);
+	}
 	return floating();
 }
 
@@ -261,6 +286,10 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 			mlatch = val;
 			recalc_mmu();
 		}
+	}
+	if (model == ZX_PLUS3 && (addr & 0xF002) == 0x3000) {
+		fprintf(stderr, "FDC W: %02X\n", val);
+		fdc_write_data(fdc, val);
 	}
 	if (model == ZX_PLUS3 && (addr & 0xC002) == 0x4000) {
 		if ((mlatch & 0x20) == 0) {
@@ -451,7 +480,7 @@ static void run_scanlines(unsigned lines, unsigned blank)
 
 static void usage(void)
 {
-	fprintf(stderr, "spectrum: [-f] [-r path] [-d debug]\n");
+	fprintf(stderr, "spectrum: [-f] [-r path] [-d debug] [-A disk] [-B disk]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -464,8 +493,10 @@ int main(int argc, char *argv[])
 	char *rompath = "spectrum.rom";
 	char *idepath = NULL;
 	char *tapepath = NULL;
+	char *patha = NULL;
+	char *pathb = NULL;
 
-	while ((opt = getopt(argc, argv, "d:f:r:m:i::")) != -1) {
+	while ((opt = getopt(argc, argv, "d:f:r:m:i:A:B:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -484,6 +515,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			idepath = optarg;
+			break;
+		case 'A':
+			patha = optarg;
+			break;
+		case 'B':
+			pathb = optarg;
 			break;
 		default:
 			usage();
@@ -520,6 +557,37 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
+
+	if (model == ZX_PLUS3) {
+		fdc = fdc_new();
+
+		lib765_register_error_function(fdc_log);
+
+		if (patha) {
+			drive_a = fd_newdsk();
+			fd_settype(drive_a, FD_30);
+			fd_setheads(drive_a, 1);
+			fd_setcyls(drive_a, 40);
+			fdd_setfilename(drive_a, patha);
+			printf("Attached disk '%s' as A\n", patha);
+		} else
+			drive_a = fd_new();
+
+		if (pathb) {
+			drive_b = fd_newdsk();
+			fd_settype(drive_a, FD_35);
+			fd_setheads(drive_a, 2);
+			fd_setcyls(drive_a, 80);
+			fdd_setfilename(drive_a, pathb);
+		} else
+			drive_b = fd_new();
+
+		fdc_reset(fdc);
+		fdc_setisr(fdc, NULL);
+
+		fdc_setdrive(fdc, 0, drive_a);
+		fdc_setdrive(fdc, 1, drive_b);
+	}
 
 	if (tapepath) {
 		tape = open(tapepath, O_RDONLY);	/* No writes for now just minimal stuff */
@@ -609,6 +677,7 @@ int main(int argc, char *argv[])
 		/* Do a small block of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+		fdc_tick(fdc);
 	}
 	exit(0);
 }
