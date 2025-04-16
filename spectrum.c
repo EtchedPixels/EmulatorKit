@@ -82,7 +82,6 @@ static uint8_t divmem[524288];/* Full 512K emulated */
 static uint8_t divrom[524288];
 static uint8_t divide_latch;
 static unsigned divide_mapped;	/* 0 no, 1 yes */
-static unsigned divide_mapnext;	/* 0 no, 1 yes */
 static unsigned divide_oe;
 static unsigned divide_pair;	/* Latches other half of wordstream for IDE */
 static unsigned divide;
@@ -208,16 +207,13 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	static uint8_t rstate;
 	uint8_t r;
 
-	/* TODO: the non immediate cases I think should take effect next M1
-	   cycle start ? */
 	if (cpu_z80.M1) {
-		divide_mapped = divide_mapnext;
-		/* Immediate map : don't do this in 128K ROM mapping */
+		/* Immediate map */
 		if (divide == 1 && addr >= 0x3D00 && addr <= 0x3DFF)
-			divide_mapped = divide_mapnext = 1;
+			divide_mapped = 1;
 		/* TODO: correct this based on the B4 latch and 128K flag */
-		if (divide == 2 && (!divplus_128k || (mlatch & 0x10)) && addr >= 0x3D00 && addr <= 0x3DFF)
-			divide_mapped = divide_mapnext = 1;
+		if (divide == 2 && (model <= ZX_48K_3 || !divplus_128k || (mlatch & 0x10)) && addr >= 0x3D00 && addr <= 0x3DFF)
+			divide_mapped = 1;
 	}
 
 	r = do_mem_read(addr, 0);
@@ -227,10 +223,10 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	if (cpu_z80.M1) {
 		/* ROM paging logic */
 		if (divide && addr >= 0x1FF8 && addr <= 0x1FFF)
-			divide_mapnext = 0;
+			divide_mapped = 0;
 		if (divide && (addr == 0x0000 || addr == 0x0008 || addr == 0x0038 ||
 			addr == 0x0066 || addr == 0x04C6 || addr == 0x0562))
-				divide_mapnext = 1;
+				divide_mapped = 1;
 		/* DD FD CB see the Z80 interrupt manual */
 		if (r == 0xDD || r == 0xFD || r == 0xCB) {
 			rstate = 2;
@@ -368,7 +364,7 @@ static void divplus_ctrl(uint8_t val)
 		divide_latch = 0;
 		divplus_latch = 0;
 		divplus_7ffd = 0;
-		divide_mapped = divide_mapnext = 0;
+		divide_mapped = 0;
 		break;
 	case 0x00:
 		/* DivIDE mode */
@@ -409,7 +405,6 @@ static uint8_t io_read(int unused, uint16_t addr)
 				divide_oe = 1;	/* Odd mode */
 				return ide_read16(ide, r);
 			}
-			fprintf(stderr, "ide read trigger %04X\n", addr);
 			if (divide_oe == 0) {
 				divide_oe = 1;
 				return divide_pair;
@@ -458,7 +453,6 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 			uint8_t r = (addr >> 2) & 0x07;
 			if (r) {
 				divide_oe = 1;	/* Odd mode */
-				fprintf(stderr, "ide: W %d = %02x\n", r, val);
 				ide_write16(ide, r, val);
 			} else if (divide_oe == 1) {
 				divide_oe = 0;
@@ -473,7 +467,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 			val |= divide_latch & 0x40;
 			divide_latch = val;
 			if (val & 0x80)
-				divide_mapped = divide_mapnext = 1;
+				divide_mapped = 1;
 		}
 		if (divide ==2 && (addr & 0xFF) == 0x17)
 			divplus_ctrl(val);
@@ -656,7 +650,8 @@ static void run_scanlines(unsigned lines, unsigned blank)
 
 static void usage(void)
 {
-	fprintf(stderr, "spectrum: [-f] [-r path] [-d debug] [-A disk] [-B disk]\n");
+	fprintf(stderr, "spectrum: [-f] [-r path] [-d debug] [-A disk] [-B disk]\n"
+			"          [-i idedisk] [-I dividerom]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -667,12 +662,13 @@ int main(int argc, char *argv[])
 	int fd;
 	int l;
 	char *rompath = "spectrum.rom";
+	char *divpath = "divide.rom";
 	char *idepath = NULL;
 	char *tapepath = NULL;
 	char *patha = NULL;
 	char *pathb = NULL;
 
-	while ((opt = getopt(argc, argv, "d:f:r:m:i:A:B:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:f:r:m:i:I:A:B:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -691,6 +687,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			idepath = optarg;
+			break;
+		case 'I':
+			divpath = optarg;
 			break;
 		case 'A':
 			patha = optarg;
@@ -784,9 +783,9 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "ide: attach failed.\n");
 			exit(1);
 		}
-		fd = open("divide.rom", O_RDONLY);
+		fd = open(divpath, O_RDONLY);
 		if (fd == -1) {
-			perror("divide.rom");
+			perror(divpath);
 			exit(1);
 		}
 		l = read(fd, divrom, 524288);
