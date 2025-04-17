@@ -485,9 +485,8 @@ static void setiwreg(struct z8 *z8, uint8_t reg, uint8_t val)
 	setreg_internal(z8, getreg_internal(z8, makereg(z8, reg)), val);
 }
 
-static uint16_t getIrr(struct z8 *z8, uint8_t reg)
+static uint16_t getIRR(struct z8 *z8, uint8_t reg)
 {
-	reg = getwreg(z8, reg);
 	return (getreg(z8, reg) << 8) | getreg(z8, reg + 1);
 }
 
@@ -500,12 +499,6 @@ static uint16_t getrr(struct z8 *z8, uint8_t reg)
 	r <<= 8;
 	r |= getwreg(z8, reg + 1);
 	return r;
-}
-
-static uint16_t getIRR(struct z8 *z8, uint8_t reg)
-{
-	reg = getreg(z8, reg);
-	return (getreg_internal(z8, reg) << 8) | getreg_internal(z8, reg + 1);
 }
 
 static uint8_t z8_pop8(struct z8 *z8)
@@ -904,7 +897,7 @@ static void z8_execute_group3(struct z8 *z8, uint_fast8_t oph, uint_fast8_t opl)
 		break;
 	case 0x03:		/* JP and SRP */
 		if (opl == 0x00) {
-			z8->pc = getIrr(z8, r);
+			z8->pc = getIRR(z8, r);
 			z8->cycles += 8;
 		} else {
 			setreg(z8, R_RP, r);
