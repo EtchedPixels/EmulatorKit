@@ -13,7 +13,7 @@ all: $(BINS)
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
-	sorceror z80all osi400 osi500
+	sorceror z80all osi400 osi500 spectrum microtan
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -295,8 +295,14 @@ scmp2: scmp2.o ns806x.o
 max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 	cc -g3 max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
 
+microtan: microtan.o asciikbd_sdl2.o 6502.o 6502dis.o
+	cc -g3 microtan.o asciikbd_sdl2.o 6502.o 6502dis.o -lSDL2 -o microtan
+
 sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
+
+spectrum: spectrum.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o
+	cc -g3 spectrum.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o -lm -o spectrum -lSDL2
 
 z80all: z80all.o 16x50.o ttycon.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 z80all.o 16x50.o ttycon.o ide.o z80dis.o libz80/libz80.o -lSDL2 -o z80all
