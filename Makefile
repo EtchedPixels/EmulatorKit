@@ -83,8 +83,8 @@ rcbus-65c816.o: rcbus-65c816-mini.c lib65816/config.h
 rcbus-65c816-mini.o: rcbus-65c816-mini.c lib65816/config.h
 	$(CC) $(CFLAGS) -Ilib65c816 -c rcbus-65c816-mini.c
 
-rcbus-6800: rcbus-6800.o 6800.o ide.o acia.o 16x50.o ttycon.o
-	cc -g3 rcbus-6800.o ide.o acia.o 6800.o 16x50.o ttycon.o -o rcbus-6800
+rcbus-6800: rcbus-6800.o 6800.o ide.o acia.o 16x50.o ttycon.o 6840.o
+	cc -g3 rcbus-6800.o ide.o acia.o 6800.o 16x50.o ttycon.o 6840.o -o rcbus-6800
 
 rcbus-6809: rcbus-6809.o d6809.o e6809.o ide.o ppide.o sdcard.o  w5100.o rtc_bitbang.o 6821.o 6840.o 16x50.o ttycon.o
 	cc -g3 rcbus-6809.o ide.o ppide.o sdcard.o w5100.o rtc_bitbang.o 6821.o 6840.o 16x50.o ttycon.o d6809.o e6809.o -o rcbus-6809

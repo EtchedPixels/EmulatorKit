@@ -25,6 +25,7 @@
 #include "ttycon.h"
 #include "acia.h"
 #include "16x50.h"
+#include "6840.h"
 
 static uint8_t ramrom[1024 * 1024];
 
@@ -47,12 +48,14 @@ static volatile int done;
 #define TRACE_UART	16
 #define TRACE_CPU	32
 #define TRACE_IRQ	64
+#define TRACE_PTM	128
 
 static int trace = 0;
 
 struct m6800 cpu;
 struct acia *acia;
 struct uart16x50 *uart;
+struct m6840 *ptm;
 
 unsigned int check_chario(void)
 {
@@ -101,6 +104,9 @@ void recalc_interrupts(void)
 	else
 		pend = uart16x50_irq_pending(uart);
 
+	if (m6840_irq_pending(ptm))
+		pend |= 1;
+
 	if (pend)
 		m6800_raise_interrupt(&cpu, IRQ_IRQ1);
 	else
@@ -134,6 +140,19 @@ uint8_t m6800_port_input(struct m6800 *cpu, int port)
 	return 0xFF;
 }
 
+/* Clock timer 3 off timer 2 */
+void m6840_output_change(struct m6840 *m, uint8_t outputs)
+{
+	static int old = 0;
+	if ((outputs ^ old) & 2) {
+		/* timer 2 high to low -> clock timer 3 */
+		if (!(outputs & 2))
+			m6840_external_clock(ptm, 3);
+	}
+	old = outputs;
+}
+
+
 static int ide = 0;
 struct ide_controller *ide0;
 
@@ -157,6 +176,8 @@ static uint8_t m6800_do_ior(uint8_t addr)
 		return uart16x50_read(uart, addr & 7);
 	if (ide && (addr >= 0x10 && addr <= 0x17))
 		return my_ide_read(addr & 7);
+	if (ptm && (addr >= 0x60 && addr <= 0x67))
+		return m6840_read(ptm, addr & 7);
 	return 0xFF;
 }
 
@@ -165,6 +186,7 @@ static uint8_t m6800_ior(uint16_t addr)
 	uint8_t r = m6800_do_ior(addr);
 	if (trace & TRACE_IO)
 		fprintf(stderr, "IR %04X = %02X\n", addr, r);
+	recalc_interrupts();
 	return r;
 }
 
@@ -185,9 +207,12 @@ static void m6800_iow(uint8_t addr, uint8_t val)
 		bankenable = val & 1;
 	else if (uart && addr >= 0xC0 && addr <= 0xC7)
 		uart16x50_write(uart, addr & 7, val);
+	else if (ptm && addr >= 0x60 && addr <= 0x67)
+		m6840_write(ptm, addr, val);
 	else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown I/O write to 0x%02X of %02X\n",
 			addr, val);
+	recalc_interrupts();
 }
 
 static uint8_t *mmu_map(uint16_t addr, int write)
@@ -264,6 +289,7 @@ void m6800_write(struct m6800 *cpu, uint16_t addr, uint8_t val)
 
 static void poll_irq_event(void)
 {
+	recalc_interrupts();
 }
 
 static struct termios saved_term, term;
@@ -388,6 +414,9 @@ int main(int argc, char *argv[])
 		uart16x50_attach(uart, &console);
 	}
 
+	ptm = m6840_create();
+	m6840_trace(ptm, trace & TRACE_PTM);
+
 	if (trace & TRACE_CPU)
 		cpu.debug = 1;
 
@@ -397,10 +426,13 @@ int main(int argc, char *argv[])
 	   is loaded though */
 
 	while (!done) {
-		unsigned int i;
+		unsigned int i, j;
 		for (i = 0; i < 100; i++) {
 			while (cycles < clockrate)
 				cycles += m6800_execute(&cpu);
+			m6840_tick(ptm, cycles);
+			for (j = 0; j < cycles; j++)
+				m6840_external_clock(ptm, 2);
 			cycles -= clockrate;
 		}
 		/* Drive the internal serial */
