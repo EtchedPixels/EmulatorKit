@@ -1,5 +1,5 @@
 /*
- *	A simple NS806x implementation
+ *	A simple NS807x implementation
  */
 
 struct ns8070;
