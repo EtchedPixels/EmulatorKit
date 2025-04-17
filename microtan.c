@@ -26,6 +26,7 @@
 #include <SDL2/SDL.h>
 
 #include "6502.h"
+#include "6522.h"
 #include "asciikbd.h"
 
 #define CWIDTH 8
@@ -40,7 +41,12 @@ static uint8_t mem[65536];
 static uint8_t vgfx[512];	/* Extra bit for video */
 static uint8_t font[8192];	/* Chars in 8x16 (repeated twice) then gfx */
 
+static unsigned tanex;		/* Set if we have a tanex */
+static unsigned romsize;	/* System ROM size */
+static unsigned basic;		/* BASIC (etc) ROM present at C000-E7FF */
+
 static struct asciikbd *kbd;
+static struct via6522 *via1, *via2;
 
 static uint8_t fast;
 volatile int emulator_done;
@@ -57,18 +63,45 @@ static int trace = 0;
 
 uint8_t do_read_6502(uint16_t addr, unsigned debug)
 {
-	if (addr <= 0x8000)
-		return mem[addr & 0x03FF];
-	if (addr >= 0xC000)
-		return mem[0xFC00 + (addr & 0x03FF)];
-	/* I/O space */
-	switch(addr & 0x0F) {
-	case 0x00:
-		gfx_bit = 1;
-		break;
-	case 0x03:
-		return (asciikbd_read(kbd) & 0x7F) | (asciikbd_ready(kbd) ? 0x80 : 0x00);
+	/* Everything is mirrored everywhere on the base unit */
+	if (!tanex) {
+		if (addr <= 0x8000)
+			addr &= 0x03FF;
+		else if (addr <= 0xC000)
+			addr = 0xBFF0 | (addr & 0x0F);
+		else {
+			if (romsize == 0x0400)
+				addr = 0xFC00 | (addr & 0x3FF);
+			else
+				addr = 0xF800 | (addr & 0x7FF);
+		}
 	}
+	/* Tanex RAM : unpaged */
+	if (addr <= 0x2000)
+		return mem[addr];
+	/* TODO: TANDOS card */
+	if (basic && addr >= 0xC000 && addr <= 0xE800)
+		return mem[addr];
+	/* TODO Toolkit ROM space */
+	/* TODO: might have tanex but no ROM F000-F7FF - need a way to config this */
+	if (addr >= 0x10000 - romsize)
+		return mem[addr];
+	if (addr >= 0xBC00 && addr <= 0xBFFF) {
+		if ((addr & 0xFFF0) == 0xBFC0)
+			return via_read(via1, addr & 0x0F);
+/* TODO 6551	if ((addr & 0xFFF0) == 0xBFD0) */
+		if ((addr & 0xFFF0) == 0xBFE0)
+			return via_read(via2, addr & 0x0F);
+		/* I/O space */
+		switch(addr) {
+		case 0xBFF0:
+			gfx_bit = 1;
+			break;
+		case 0xBFF3:
+			return (asciikbd_read(kbd) & 0x7F) | (asciikbd_ready(kbd) ? 0x80 : 0x00);
+		}
+	}
+	/* Paged space - TANRAM, Video etc, TODO */
 	return 0xFF;
 }
 
@@ -87,29 +120,69 @@ uint8_t read6502_debug(uint16_t addr)
 
 void write6502(uint16_t addr, uint8_t val)
 {
-	if (addr <= 0x8000) {
-		mem[addr & 0x03FF] = val;
-		/* TODO: should wrap likewise */
+	if (!tanex) {
+		if (addr < 0xBC00)
+			addr &= 0x3FF;
+		else if (addr <= 0xC000)
+			addr = 0xBFF0 | (addr & 0x0F);
+		else
+			return;
+	}
+	if (addr <= 0x2000) {
+		mem[addr] = val;
 		if (addr >= 0x200 && addr <= 0x03FF)
 			vgfx[addr & 0x01FF] = gfx_bit;
-	} else if (addr >= 0xC000) {
+		return;
+	}
+	/* Can have RAM high - TODO */
+	if (addr >= 0xC000) {
 		if (addr >= 0xFFF0)
 			mem_be = val;
 		return;
-	} else switch(addr & 0x0F) {
-	case 0x00:
+	}
+	if ((addr & 0xFFF0) == 0xBFC0) {
+		via_write(via1, addr & 0x0F, val);
+		return;
+	}
+	if ((addr & 0xFFF0) == 0xBFD0) {
+		/* TODO: 6551 */
+		return;
+	}
+	if ((addr & 0xFFF0) == 0xBFE0) {
+		via_write(via2, addr & 0x0F, val);
+		return;
+	}
+	switch(addr) {
+	case 0xBFF0:
 		asciikbd_ack(kbd);
 		break;
-	case 0x01:
+	case 0xBFF1:
 		/* Delayed NMI - not implemented yet */
 		break;
-	case 0x02:
+	case 0xBFF2:
 		/* Set kbd pattern */
-	case 0x03:
+	case 0xBFF3:
 		gfx_bit = 0;
 		break;
 	}
 }
+
+/*
+ *	VIA glue - TODO
+ */
+
+void via_recalc_outputs(struct via6522 *via)
+{
+}
+
+void via_handshake_a(struct via6522 *via)
+{
+}
+
+void via_handshake_b(struct via6522 *via)
+{
+}
+
 
 /*
  *	32x16 video
@@ -172,6 +245,10 @@ static void irqnotify(void)
 {
 	if (asciikbd_ready(kbd))
 		irq6502();
+	else if (via1 && via_irq_pending(via1))
+		irq6502();
+	else if (via2 && via_irq_pending(via2))
+		irq6502();
 }
 
 static struct termios saved_term, term;
@@ -225,7 +302,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
 
 static void usage(void)
 {
-	fprintf(stderr, "utan: [-f] [-r monitor] [-F font] [-d debug]\n");
+	fprintf(stderr, "utan: [-f] [-r monitor] [-b basic] [-F font] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -236,10 +313,13 @@ int main(int argc, char *argv[])
 	int opt;
 	char *rom_path = "microtan.rom";
 	char *font_path = "microtan.font";
-	int romsize;
+	char *basic_path = NULL;
 
-	while ((opt = getopt(argc, argv, "d:fr:F:")) != -1) {
+	while ((opt = getopt(argc, argv, "b:d:fr:F:")) != -1) {
 		switch (opt) {
+		case 'b':
+			basic_path = optarg;
+			break;
 		case 'd':
 			trace = atoi(optarg);
 			break;
@@ -259,8 +339,16 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-	romsize = romload(rom_path, mem + 0xFC00, 0x0400);
-	if (romsize != 0x0400) {
+	romsize = romload(rom_path, mem + 0xF000, 0x1000);
+	if (romsize == 0x1000)
+		tanex = 1;
+	else if (romsize == 0x0800)
+		/* Move it up */
+		memcpy(mem + 0xF800, mem + 0xF000, 0x0800);
+	else if (romsize == 0x0400)
+		/* Move it up */
+		memcpy(mem + 0xFC00, mem + 0xF000, 0x0400);
+	else {
 		fprintf(stderr, "microtan: invalid ROM size '%s'.\n", rom_path);
 		exit(EXIT_FAILURE);
 	}
@@ -268,9 +356,18 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "microtan: invalid font ROM\n");
 		exit(EXIT_FAILURE);
 	}
+	if (basic_path) {
+		if (romload(basic_path, mem + 0xC000, 0x2800) != 0x2800) {
+			fprintf(stderr, "microtan: invalid BASIC ROM\n");
+			exit(EXIT_FAILURE);
+		}
+		basic = 1;
+	}
 	make_blockfont();
 
 	kbd = asciikbd_create();
+	via1 = via_create();
+	via2 = via_create();
 
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -345,6 +442,10 @@ int main(int argc, char *argv[])
 		int i;
 		for (i = 0; i < 10; i++) {
 			exec6502(tstates);
+			if (tanex) {
+				via_tick(via1, tstates);
+				via_tick(via2, tstates);
+			}
 		}
 		/* We want to run UI events before we rasterize */
 		asciikbd_event(kbd);
