@@ -295,8 +295,8 @@ scmp2: scmp2.o ns806x.o
 max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 	cc -g3 max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
 
-microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 6502.o 6502dis.o
-	cc -g3 microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 6502.o 6502dis.o -lSDL2 -o microtan
+microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o
+	cc -g3 microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o -lSDL2 -o microtan
 
 sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2

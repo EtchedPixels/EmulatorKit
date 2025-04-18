@@ -2,11 +2,26 @@
  *	Microtan 65
  *	6502 CPU at 750KHz (or 1.5MHz with mods)
  *	1K of RAM at 0000-03FF
- *	1K of ROM at FC00-FFFF
+ *	1K of ROM at FC00-FFFF (F800-FFFF later)
  *	32x16 video using 0200-03FF
  *	Uppercase - lowercase option covering 00-1F/60-7F
  *
- *	Keyboard or matrix
+ *	Related boards existed without the video and at higher speeds.
+ *
+ *	TANEX
+ *	External buffers for Microtan 65
+ *	ROM C000-F7FF	(F000-F7FF is Xbug, C000-E7FFF is usually BASIC
+ *			 E800-EFFF extensions ROMs)
+ *	RAM 0400-1FFF
+ *	2 x VIA		Printing/User (CF adapter)
+ *	1 x 6551	Serial console
+ *
+ *	TANRAM
+ *	RAM 2000-BBFF	Pageable RAM banks (64K card equivalents can handle
+ *			upper space without ROM if set up right)
+ *
+ *	TANDOS A800-BBFF RAM/ROM/FDC
+ *
  */
 
 #include <stdio.h>
@@ -33,6 +48,7 @@
 #include "asciikbd.h"
 #include "wd17xx.h"
 #include "ide.h"
+#include "58174.h"
 
 #define CWIDTH 8
 #define CHEIGHT 16
@@ -62,6 +78,7 @@ static struct via6522 *via1, *via2;
 static struct m6551 *uart;
 static struct wd17xx *fdc;
 static struct ide_controller *ide;
+static struct mm58174 *rtc;
 
 static uint8_t fast;
 volatile int emulator_done;
@@ -74,6 +91,8 @@ static unsigned gfx_bit;
 #define TRACE_IRQ	0x000004
 #define TRACE_CPU	0x000008
 #define TRACE_6551	0x000010
+#define TRACE_RTC	0x000020
+#define TRACE_FDC	0x000040
 
 static int trace = 0;
 
@@ -93,11 +112,11 @@ static uint8_t tandos_read(uint16_t addr)
 	case 0x04:
 		r = wd17xx_status_noclear(fdc);
 		res = dosctrl & 0x3E;
-		if ((dosctrl & 0x80) && (r & 0x02))	/* DRQ */
+		if (r & 0x02)	/* DRQ */
 			res |= 0x80;
-		if ((dosctrl & 0x40) && (r & 0x20))	/* HEADLOAD */
+		if (r & 0x20)	/* HEADLOAD */
 			res |= 0x40;
-		if ((dosctrl & 0x01) && wd17xx_intrq(fdc))
+		if (wd17xx_intrq(fdc))
 			res |= 0x01;
 		return res;
 	case 0x05:
@@ -130,14 +149,12 @@ static void tandos_write(uint16_t addr, uint8_t val)
 	case 0x04:
 		/* Control TODO */
 		dosctrl = val;
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "fdc: dosctrl set to %02X\n", dosctrl);
 		wd17xx_set_density(fdc, (val & 0x20) ? DEN_SD : DEN_DD);
-		wd17xx_set_side(fdc, val & 0x10);
-		if (val & 0x04)
-			wd17xx_set_drive(fdc, 0);
-		else if (val & 0x08)
-			wd17xx_set_drive(fdc, 1);
-		else
-			wd17xx_no_drive(fdc);
+		wd17xx_set_drive(fdc, (val >> 2) & 0x03);
+		/* Not clear how motor timing works ? */
+		wd17xx_motor(fdc, 1);
 		break;
 	case 0x05:
 	case 0x06:
@@ -174,7 +191,7 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 		if (addr >= 0xA800 && addr < 0xB800)
 			return dosrom[(addr - 0xA800) ^ 0x0800];
 		if (addr >= 0xB800 && addr <= 0xBC00)
-			return dosram[addr - 0xA800];
+			return dosram[addr - 0xB800];
 	}
 	/* TODO Toolkit ROM space */
 	/* TODO: might have tanex but no ROM F000-F7FF - need a way to config this */
@@ -189,6 +206,8 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 			return m6551_read(uart, addr & 0x03);
 		if ((addr & 0xFFF0) == 0xBFE0)
 			return via_read(via2, addr & 0x0F);
+		if ((addr & 0xFFF0) == 0xBC40)
+			return mm58174_read(rtc, addr & 0x0F);
 		/* I/O space */
 		switch(addr) {
 		case 0xBFF0:
@@ -260,6 +279,10 @@ void write6502(uint16_t addr, uint8_t val)
 	if ((addr & 0xFFF0) == 0xBFD0) {
 		if (uart)
 			m6551_write(uart, addr & 0x03, val);
+		return;
+	}
+	if ((addr & 0xFFF0) == 0xBC40) {
+		mm58174_write(rtc, addr & 0x0F, val);
 		return;
 	}
 	if ((addr & 0xFFF0) == 0xBFE0) {
@@ -405,6 +428,8 @@ static void irqnotify(void)
 		irq6502();
 	else if (uart && m6551_irq_pending(uart))
 		irq6502();
+	else if (tandos && (dosctrl & 0x01) && wd17xx_intrq(fdc))
+		irq6502();
 }
 
 static struct termios saved_term, term;
@@ -547,6 +572,9 @@ int main(int argc, char *argv[])
 	}
 	make_blockfont();
 
+	/* TODO: the TANDOS boot disk if present should
+	   tell us the disk config and memory sizes at least for
+	   track count */
 	if (drive_a || drive_b) {
 		tandos = 1;
 		/* TODO: make path settable */
@@ -555,6 +583,7 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		fdc = wd17xx_create(1791);
+		wd17xx_trace(fdc, trace & TRACE_FDC);
 		if (drive_a) {
 			wd17xx_attach(fdc, 0, drive_a, 1, 40, 10, 256);
 			wd17xx_set_media_density(fdc, 0, DEN_SD);
@@ -585,6 +614,8 @@ int main(int argc, char *argv[])
 		m6551_attach(uart, &console);
 		m6551_trace(uart, trace & TRACE_6551);
 	}
+	rtc = mm58174_create();
+	mm58174_trace(rtc, trace & TRACE_RTC);
 
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -668,6 +699,7 @@ int main(int argc, char *argv[])
 		asciikbd_event(kbd);
 		utan_rasterize();
 		utan_render();
+		mm58174_tick(rtc);
 		if (uart)
 			m6551_timer(uart);
 		/* Do 10ms of I/O and delays */
