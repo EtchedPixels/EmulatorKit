@@ -606,7 +606,7 @@ static void pla(void)
 
 static void plp(void)
 {
-	status = pull8() | FLAG_CONSTANT;
+	status = pull8();
 }
 
 static void rol(void)
@@ -893,7 +893,7 @@ static const uint32_t ticktable[256] = {
 void nmi6502(void)
 {
 	push16(pc);
-	push8(status);
+	push8(status & ~FLAG_BREAK);
 	status |= FLAG_INTERRUPT;
 	pc = (uint16_t) read6502(0xFFFA) | ((uint16_t) read6502(0xFFFB) << 8);
 }
@@ -903,7 +903,7 @@ void irq6502(void)
 	if ((status & FLAG_INTERRUPT) == FLAG_INTERRUPT)
 		return;		//abort if interrupts are inhibited
 	push16(pc);
-	push8(status);
+	push8(status & ~FLAG_BREAK);
 	status |= FLAG_INTERRUPT;
 	pc = (uint16_t) read6502(0xFFFE) | ((uint16_t) read6502(0xFFFF) << 8);
 }
@@ -925,6 +925,7 @@ uint64_t exec6502(uint64_t tickcount)
 		if (opcode == 0xB1 || opcode == 0x91)
 			mempage = 1;
 		status |= FLAG_CONSTANT;
+		status &= ~FLAG_BREAK;
 		if (log_6502) {
 			uint8_t c[3];
 			char *dis;
