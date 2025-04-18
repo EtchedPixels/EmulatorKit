@@ -31,6 +31,7 @@
 #include "6522.h"
 #include "6551.h"
 #include "asciikbd.h"
+#include "wd17xx.h"
 
 #define CWIDTH 8
 #define CHEIGHT 16
@@ -41,16 +42,23 @@ static SDL_Texture *texture;
 static uint32_t texturebits[32 * CWIDTH * 16 * CHEIGHT];
 
 static uint8_t mem[65536];
+static uint8_t paged[16][65536];/* Paged space by board slot */
 static uint8_t vgfx[512];	/* Extra bit for video */
 static uint8_t font[8192];	/* Chars in 8x16 (repeated twice) then gfx */
+static uint8_t dosrom[4096];	/* TANDOS ROM */
+static uint8_t dosram[1024];	/* TANDOS RAM */
+static uint8_t dosctrl;
 
 static unsigned tanex;		/* Set if we have a tanex */
 static unsigned romsize;	/* System ROM size */
 static unsigned basic;		/* BASIC (etc) ROM present at C000-E7FF */
+static unsigned numpages;	/* Pages of high memory */
+static unsigned tandos;		/* TANDOS card present */
 
 static struct asciikbd *kbd;
 static struct via6522 *via1, *via2;
 static struct m6551 *uart;
+static struct wd17xx *fdc;
 
 static uint8_t fast;
 volatile int emulator_done;
@@ -65,6 +73,79 @@ static unsigned gfx_bit;
 #define TRACE_6551	0x000010
 
 static int trace = 0;
+
+static uint8_t tandos_read(uint16_t addr)
+{
+	unsigned r;
+	uint8_t res;
+	switch(addr & 0x0F) {
+	case 0x00:
+		return wd17xx_status(fdc);
+	case 0x01:
+		return wd17xx_read_track(fdc);
+	case 0x02:
+		return wd17xx_read_sector(fdc);
+	case 0x03:
+		return wd17xx_read_data(fdc);
+	case 0x04:
+		r = wd17xx_status_noclear(fdc);
+		res = dosctrl & 0x3E;
+		if ((dosctrl & 0x80) && (r & 0x02))	/* DRQ */
+			res |= 0x80;
+		if ((dosctrl & 0x40) && (r & 0x20))	/* HEADLOAD */
+			res |= 0x40;
+		if ((dosctrl & 0x01) && wd17xx_intrq(fdc))
+			res |= 0x01;
+		return res;
+	case 0x05:
+	case 0x06:
+	case 0x07:
+		/* Switches - TODO */
+		return 0xFF;
+	default:
+		/* TMS9914 - model not fitted for now */
+		return 0xFF;
+	}
+	/* Can't get here */
+	return 0xFF;
+}
+
+static void tandos_write(uint16_t addr, uint8_t val)
+{
+	switch(addr & 0x0F) {
+	case 0x00:
+		wd17xx_command(fdc, val);
+		break;
+	case 0x01:
+		wd17xx_write_track(fdc, val);
+		break;
+	case 0x02:
+		wd17xx_write_sector(fdc, val);
+		break;
+	case 0x03:
+		wd17xx_write_data(fdc, val);
+	case 0x04:
+		/* Control TODO */
+		dosctrl = val;
+		wd17xx_set_density(fdc, (val & 0x20) ? DEN_SD : DEN_DD);
+		wd17xx_set_side(fdc, val & 0x10);
+		if (val & 0x04)
+			wd17xx_set_drive(fdc, 0);
+		else if (val & 0x08)
+			wd17xx_set_drive(fdc, 1);
+		else
+			wd17xx_no_drive(fdc);
+		break;
+	case 0x05:
+	case 0x06:
+	case 0x07:
+		/* Switches - RO */
+		break;
+	default:
+		/* TMS9914 */
+		break;
+	}
+}
 
 uint8_t do_read_6502(uint16_t addr, unsigned debug)
 {
@@ -84,14 +165,21 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 	/* Tanex RAM : unpaged */
 	if (addr <= 0x2000)
 		return mem[addr];
-	/* TODO: TANDOS card */
-	if (basic && addr >= 0xC000 && addr <= 0xE800)
+	if (basic && addr >= 0xC000 && addr < 0xE800)
 		return mem[addr];
+	if (tandos) {
+		if (addr >= 0xA800 && addr < 0xB800)
+			return dosrom[(addr - 0xA800) ^ 0x0800];
+		if (addr >= 0xB800 && addr <= 0xBC00)
+			return dosram[addr - 0xA800];
+	}
 	/* TODO Toolkit ROM space */
 	/* TODO: might have tanex but no ROM F000-F7FF - need a way to config this */
 	if (addr >= 0x10000 - romsize)
 		return mem[addr];
 	if (addr >= 0xBC00 && addr <= 0xBFFF) {
+		if (tandos && (addr & 0xFFF0) == 0xBF90)
+			return tandos_read(addr);
 		if ((addr & 0xFFF0) == 0xBFC0)
 			return via_read(via1, addr & 0x0F);
 		if (uart && (addr & 0xFFF0) == 0xBFD0)
@@ -106,8 +194,11 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 		case 0xBFF3:
 			return (asciikbd_read(kbd) & 0x7F) | (asciikbd_ready(kbd) ? 0x80 : 0x00);
 		}
+		return 0xFF;
 	}
-	/* Paged space - TANRAM, Video etc, TODO */
+	/* Paged space */
+	if ((mem_be >> 4) < numpages)
+		return paged[mem_be >> 4][addr];
 	return 0xFF;
 }
 
@@ -140,10 +231,23 @@ void write6502(uint16_t addr, uint8_t val)
 			vgfx[addr & 0x01FF] = gfx_bit;
 		return;
 	}
-	/* Can have RAM high - TODO */
-	if (addr >= 0xC000) {
+	if (basic && addr >= 0xC000 && addr < 0xE800)
+		return;
+	if (addr >= 0xE800) {
 		if (addr >= 0xFFF0)
 			mem_be = val;
+		return;
+	}
+	if (tandos) {
+		if (addr >= 0xA800 && addr < 0xB800)
+			return;
+		if (addr >= 0xB800 && addr < 0xBC00) {
+			dosram[addr - 0xB800] = val;
+			return;
+		}
+	}
+	if (tandos && (addr & 0xFFF0) == 0xBF90) {
+		tandos_write(addr, val);
 		return;
 	}
 	if ((addr & 0xFFF0) == 0xBFC0) {
@@ -171,6 +275,10 @@ void write6502(uint16_t addr, uint8_t val)
 	case 0xBFF3:
 		gfx_bit = 0;
 		break;
+	}
+	if ((addr < 0xBC00 || addr >= 0xC000) && (mem_be & 0x0F) < numpages) {
+		paged[mem_be & 0x0F][addr] = val;
+		return;
 	}
 }
 
@@ -311,7 +419,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
 
 static void usage(void)
 {
-	fprintf(stderr, "utan: [-f] [-a] [-r monitor] [-b basic] [-F font] [-d debug]\n");
+	fprintf(stderr, "utan: [-f] [-a] [-A disk] [-B disk] [-r monitor] [-b basic] [-F font] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -322,10 +430,12 @@ int main(int argc, char *argv[])
 	int opt;
 	char *rom_path = "microtan.rom";
 	char *font_path = "microtan.font";
+	char *drive_a = NULL;
+	char *drive_b = NULL;
 	char *basic_path = NULL;
 	unsigned has_uart = 0;
 
-	while ((opt = getopt(argc, argv, "ab:d:fr:F:")) != -1) {
+	while ((opt = getopt(argc, argv, "ab:d:fr:p:A:B:F:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_uart = 1;
@@ -339,11 +449,24 @@ int main(int argc, char *argv[])
 		case 'f':
 			fast = 1;
 			break;
-		case 'F':
-			font_path = optarg;
-			break;
 		case 'r':
 			rom_path = optarg;
+			break;
+		case 'p':
+			numpages = atoi(optarg);
+			if (numpages > 16) {
+				fprintf(stderr, "microtan: maximum of 16 banks supported.\n");
+				exit(EXIT_FAILURE);
+			}
+			break;
+		case 'A':
+			drive_a = optarg;
+			break;
+		case 'B':
+			drive_b = optarg;
+			break;
+		case 'F':
+			font_path = optarg;
 			break;
 		default:
 			usage();
@@ -378,6 +501,24 @@ int main(int argc, char *argv[])
 	}
 	make_blockfont();
 
+	if (drive_a || drive_b) {
+		tandos = 1;
+		/* TODO: make path settable */
+		if (romload("tandos.rom", dosrom, 4096) != 4096) {
+			fprintf(stderr, "microtan: invalid TANDOS ROM\n");
+			exit(EXIT_FAILURE);
+		}
+		fdc = wd17xx_create(1791);
+		if (drive_a) {
+			wd17xx_attach(fdc, 0, drive_a, 1, 40, 10, 256);
+			wd17xx_set_media_density(fdc, 0, DEN_SD);
+		}
+		if (drive_b) {
+			wd17xx_attach(fdc, 1, drive_b, 1, 40, 10, 256);
+			wd17xx_set_media_density(fdc, 1, DEN_SD);
+		}
+	}
+
 	kbd = asciikbd_create();
 	via1 = via_create();
 	via2 = via_create();
@@ -386,7 +527,6 @@ int main(int argc, char *argv[])
 		m6551_attach(uart, &console);
 		m6551_trace(uart, trace & TRACE_6551);
 	}
-
 
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
