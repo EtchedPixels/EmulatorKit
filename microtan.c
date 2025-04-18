@@ -32,6 +32,7 @@
 #include "6551.h"
 #include "asciikbd.h"
 #include "wd17xx.h"
+#include "ide.h"
 
 #define CWIDTH 8
 #define CHEIGHT 16
@@ -59,6 +60,7 @@ static struct asciikbd *kbd;
 static struct via6522 *via1, *via2;
 static struct m6551 *uart;
 static struct wd17xx *fdc;
+static struct ide_controller *ide;
 
 static uint8_t fast;
 volatile int emulator_done;
@@ -283,11 +285,47 @@ void write6502(uint16_t addr, uint8_t val)
 }
 
 /*
- *	VIA glue - TODO
+ *	VIA glue
+ *
+ *	Emulate CF directly attached to the second VIA, (resistors are a good
+ *	idea on port B in case of screwups with DDRB)
+ *
+ *	Emulation doesn't consider DDR and the like properly. TODO
  */
+
+#define IDE_ADDR	0x07
+#define	IDE_CS0		0x08
+#define	IDE_CS1		0x10	/* Not emulated at this point */
+#define IDE_R		0x20
+#define IDE_W		0x40
+#define IDE_RESET	0x80
 
 void via_recalc_outputs(struct via6522 *via)
 {
+	static unsigned old_pa;
+	unsigned pa, pb, delta;
+
+	if (via == via2 && ide) {
+		/* See what is cooking */
+		pa = via_get_port_a(via2);
+		pb = via_get_port_b(via2);
+
+		delta = pa ^ old_pa;
+		if (delta & IDE_RESET) {
+			if (!(pa & IDE_RESET))
+				ide_reset_begin(ide);
+		}
+		if (!(pa & IDE_RESET) || (pa & IDE_CS0))
+			return;
+		if (delta & pa & IDE_W) {
+			/* Write rising edge */
+			ide_write8(ide, pa & IDE_ADDR, pb);
+		}
+		if (delta & IDE_R) {
+			if (!(pa & IDE_R))
+				via_set_port_b(via2, ide_read8(ide, pa & IDE_ADDR));
+		}
+	}
 }
 
 void via_handshake_a(struct via6522 *via)
@@ -419,7 +457,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
 
 static void usage(void)
 {
-	fprintf(stderr, "utan: [-f] [-a] [-A disk] [-B disk] [-r monitor] [-b basic] [-F font] [-d debug]\n");
+	fprintf(stderr, "utan: [-f] [-a] [-A disk] [-B disk] [-i ide] [-r monitor] [-b basic] [-F font] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -433,9 +471,10 @@ int main(int argc, char *argv[])
 	char *drive_a = NULL;
 	char *drive_b = NULL;
 	char *basic_path = NULL;
+	char *ide_path = NULL;
 	unsigned has_uart = 0;
 
-	while ((opt = getopt(argc, argv, "ab:d:fr:p:A:B:F:")) != -1) {
+	while ((opt = getopt(argc, argv, "ab:d:fi:pr::A:B:F:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_uart = 1;
@@ -448,6 +487,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'i':
+			ide_path = optarg;
 			break;
 		case 'r':
 			rom_path = optarg;
@@ -517,6 +559,18 @@ int main(int argc, char *argv[])
 			wd17xx_attach(fdc, 1, drive_b, 1, 40, 10, 256);
 			wd17xx_set_media_density(fdc, 1, DEN_SD);
 		}
+	}
+
+	if (ide_path) {
+		int ide_fd;
+		ide = ide_allocate("via2");
+		ide_fd = open(ide_path, O_RDWR);
+		if (ide_fd == -1) {
+			perror(ide_path);
+			exit(1);
+		}
+		ide_attach(ide, 0, ide_fd);
+		ide_reset_begin(ide);
 	}
 
 	kbd = asciikbd_create();
