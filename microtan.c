@@ -26,7 +26,10 @@
 #include <SDL2/SDL.h>
 
 #include "6502.h"
+#include "serialdevice.h"
+#include "ttycon.h"
 #include "6522.h"
+#include "6551.h"
 #include "asciikbd.h"
 
 #define CWIDTH 8
@@ -47,6 +50,7 @@ static unsigned basic;		/* BASIC (etc) ROM present at C000-E7FF */
 
 static struct asciikbd *kbd;
 static struct via6522 *via1, *via2;
+static struct m6551 *uart;
 
 static uint8_t fast;
 volatile int emulator_done;
@@ -58,6 +62,7 @@ static unsigned gfx_bit;
 #define TRACE_IO	0x000002
 #define TRACE_IRQ	0x000004
 #define TRACE_CPU	0x000008
+#define TRACE_6551	0x000010
 
 static int trace = 0;
 
@@ -89,7 +94,8 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 	if (addr >= 0xBC00 && addr <= 0xBFFF) {
 		if ((addr & 0xFFF0) == 0xBFC0)
 			return via_read(via1, addr & 0x0F);
-/* TODO 6551	if ((addr & 0xFFF0) == 0xBFD0) */
+		if (uart && (addr & 0xFFF0) == 0xBFD0)
+			return m6551_read(uart, addr & 0x03);
 		if ((addr & 0xFFF0) == 0xBFE0)
 			return via_read(via2, addr & 0x0F);
 		/* I/O space */
@@ -145,7 +151,8 @@ void write6502(uint16_t addr, uint8_t val)
 		return;
 	}
 	if ((addr & 0xFFF0) == 0xBFD0) {
-		/* TODO: 6551 */
+		if (uart)
+			m6551_write(uart, addr & 0x03, val);
 		return;
 	}
 	if ((addr & 0xFFF0) == 0xBFE0) {
@@ -249,6 +256,8 @@ static void irqnotify(void)
 		irq6502();
 	else if (via2 && via_irq_pending(via2))
 		irq6502();
+	else if (uart && m6551_irq_pending(uart))
+		irq6502();
 }
 
 static struct termios saved_term, term;
@@ -302,7 +311,7 @@ static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
 
 static void usage(void)
 {
-	fprintf(stderr, "utan: [-f] [-r monitor] [-b basic] [-F font] [-d debug]\n");
+	fprintf(stderr, "utan: [-f] [-a] [-r monitor] [-b basic] [-F font] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -314,9 +323,13 @@ int main(int argc, char *argv[])
 	char *rom_path = "microtan.rom";
 	char *font_path = "microtan.font";
 	char *basic_path = NULL;
+	unsigned has_uart = 0;
 
-	while ((opt = getopt(argc, argv, "b:d:fr:F:")) != -1) {
+	while ((opt = getopt(argc, argv, "ab:d:fr:F:")) != -1) {
 		switch (opt) {
+		case 'a':
+			has_uart = 1;
+			break;
 		case 'b':
 			basic_path = optarg;
 			break;
@@ -368,6 +381,12 @@ int main(int argc, char *argv[])
 	kbd = asciikbd_create();
 	via1 = via_create();
 	via2 = via_create();
+	if (has_uart) {
+		uart = m6551_create();
+		m6551_attach(uart, &console);
+		m6551_trace(uart, trace & TRACE_6551);
+	}
+
 
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
@@ -451,6 +470,8 @@ int main(int argc, char *argv[])
 		asciikbd_event(kbd);
 		utan_rasterize();
 		utan_render();
+		if (uart)
+			m6551_timer(uart);
 		/* Do 10ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
