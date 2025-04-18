@@ -55,6 +55,7 @@ static unsigned romsize;	/* System ROM size */
 static unsigned basic;		/* BASIC (etc) ROM present at C000-E7FF */
 static unsigned numpages;	/* Pages of high memory */
 static unsigned tandos;		/* TANDOS card present */
+static unsigned basic_top;	/* BASIC top of ROM space */
 
 static struct asciikbd *kbd;
 static struct via6522 *via1, *via2;
@@ -167,7 +168,7 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 	/* Tanex RAM : unpaged */
 	if (addr <= 0x2000)
 		return mem[addr];
-	if (basic && addr >= 0xC000 && addr < 0xE800)
+	if (basic && addr >= 0xC000 && addr < basic_top)
 		return mem[addr];
 	if (tandos) {
 		if (addr >= 0xA800 && addr < 0xB800)
@@ -233,7 +234,7 @@ void write6502(uint16_t addr, uint8_t val)
 			vgfx[addr & 0x01FF] = gfx_bit;
 		return;
 	}
-	if (basic && addr >= 0xC000 && addr < 0xE800)
+	if (basic && addr >= 0xC000 && addr < basic_top)
 		return;
 	if (addr >= 0xE800) {
 		if (addr >= 0xFFF0)
@@ -474,7 +475,7 @@ int main(int argc, char *argv[])
 	char *ide_path = NULL;
 	unsigned has_uart = 0;
 
-	while ((opt = getopt(argc, argv, "ab:d:fi:pr::A:B:F:")) != -1) {
+	while ((opt = getopt(argc, argv, "ab:d:fi:p:r:A:B:F:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_uart = 1;
@@ -535,11 +536,14 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (basic_path) {
-		if (romload(basic_path, mem + 0xC000, 0x2800) != 0x2800) {
+		basic_top = romload(basic_path, mem + 0xC000, 0x2800);
+		if (basic_top < 0x1000) {
 			fprintf(stderr, "microtan: invalid BASIC ROM\n");
 			exit(EXIT_FAILURE);
 		}
 		basic = 1;
+		basic_top = (basic_top + 0x7FF) & 0xF800;
+		basic_top += 0xC000;
 	}
 	make_blockfont();
 
