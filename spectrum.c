@@ -207,7 +207,8 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	static uint8_t rstate;
 	uint8_t r;
 
-	if (cpu_z80.M1) {
+	/* DivIDE+ modes other than 00 don't autopage */
+	if (cpu_z80.M1 && !(divplus_latch & 0xC0)) {
 		/* Immediate map */
 		if (divide == 1 && addr >= 0x3D00 && addr <= 0x3DFF)
 			divide_mapped = 1;
@@ -221,12 +222,14 @@ static uint8_t mem_read(int unused, uint16_t addr)
 	/* Look for ED with M1, followed directly by 4D and if so trigger
 	   the interrupt chain */
 	if (cpu_z80.M1) {
-		/* ROM paging logic */
-		if (divide && addr >= 0x1FF8 && addr <= 0x1FFF)
-			divide_mapped = 0;
-		if (divide && (addr == 0x0000 || addr == 0x0008 || addr == 0x0038 ||
-			addr == 0x0066 || addr == 0x04C6 || addr == 0x0562))
-				divide_mapped = 1;
+		if (!(divplus_latch & 0xC0)) {
+			/* ROM paging logic */
+			if (divide && addr >= 0x1FF8 && addr <= 0x1FFF)
+				divide_mapped = 0;
+			if (divide && (addr == 0x0000 || addr == 0x0008 || addr == 0x0038 ||
+				addr == 0x0066 || addr == 0x04C6 || addr == 0x0562))
+					divide_mapped = 1;
+		}
 		/* DD FD CB see the Z80 interrupt manual */
 		if (r == 0xDD || r == 0xFD || r == 0xCB) {
 			rstate = 2;
