@@ -998,3 +998,25 @@ void init6502(void)
 {
 	disassembler_init();
 }
+
+void load6502(uint8_t *save)
+{
+	pc = *save++;
+	pc |= (*save++) << 8;
+	status = *save++;
+	a = *save++;
+	x = *save++;
+	y = *save++;
+	sp = *save;
+}
+
+void save6502(uint8_t *save)
+{
+	*save++ = pc;
+	*save++ = pc >> 8;
+	*save++ = status;
+	*save++ = a;
+	*save++ = x;
+	*save++ = y;
+	*save = sp;
+}

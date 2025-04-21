@@ -1,6 +1,8 @@
 #ifndef __6502_H__
 #define __6502_H__
 
+#define UNDOCUMENTED
+
 extern void init6502(void);
 extern void reset6502(void);
 extern void nmi6502(void);
@@ -11,6 +13,9 @@ extern void hookexternal(void (*loopexternal)(void));
 extern uint16_t getPC(void);
 extern uint64_t getclockticks(void);
 extern void waitstates(uint32_t n);
+#define SAVE_SIZE 7
+extern void save6502(uint8_t *save);
+extern void load6502(uint8_t *save);
 
 //externally supplied functions
 extern uint8_t read6502(uint16_t address);
