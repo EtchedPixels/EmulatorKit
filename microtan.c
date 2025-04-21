@@ -58,6 +58,11 @@ static SDL_Renderer *render;
 static SDL_Texture *texture;
 static uint32_t texturebits[32 * CWIDTH * 16 * CHEIGHT];
 
+#define MACH_MICROTAN	1
+#define MACH_MICRON	2
+
+static unsigned machine = MACH_MICROTAN;
+
 static uint8_t mem[65536];
 static uint8_t paged[16][65536];/* Paged space by board slot */
 static uint8_t vgfx[512];	/* Extra bit for video */
@@ -214,7 +219,9 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 			gfx_bit = 1;
 			break;
 		case 0xBFF3:
-			return (asciikbd_read(kbd) & 0x7F) | (asciikbd_ready(kbd) ? 0x80 : 0x00);
+			if (machine == MACH_MICROTAN)
+				return (asciikbd_read(kbd) & 0x7F) | (asciikbd_ready(kbd) ? 0x80 : 0x00);
+			return 0x00;
 		}
 		return 0xFF;
 	}
@@ -291,7 +298,8 @@ void write6502(uint16_t addr, uint8_t val)
 	}
 	switch(addr) {
 	case 0xBFF0:
-		asciikbd_ack(kbd);
+		if (machine == MACH_MICROTAN)
+			asciikbd_ack(kbd);
 		break;
 	case 0xBFF1:
 		/* Delayed NMI - not implemented yet */
@@ -385,7 +393,7 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c, uint8_t gfx)
 		pixp += 31 * CWIDTH;
 	}
 }
-		
+
 static void utan_rasterize(void)
 {
 	unsigned int lines, cols;
@@ -400,7 +408,7 @@ static void utan_rasterize(void)
 static void utan_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = 32 * CWIDTH;
 	rect.h = 16 * CHEIGHT;
@@ -420,7 +428,7 @@ void recalc_interrupts(void)
 
 static void irqnotify(void)
 {
-	if (asciikbd_ready(kbd))
+	if (machine == MACH_MICROTAN && asciikbd_ready(kbd))
 		irq6502();
 	else if (via1 && via_irq_pending(via1))
 		irq6502();
@@ -481,6 +489,122 @@ static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
 	return size;
 }
 
+/* Expand the bitmap in the bottom of vgfx into the full table. Do it end
+   to start so we don't overwrite anything */
+static void bits2chunky(void)
+{
+	uint8_t *p = vgfx + 31;
+	uint8_t *t = vgfx + 511;
+	uint8_t c;
+	unsigned n;
+
+	while(p > vgfx) {
+		c = *p--;
+		for (n = 0; n < 8; n++) {
+			if (c & 0x80)
+				*t-- = 1;
+			else
+				*t-- = 0;
+		}
+	}
+}
+
+static void m65_block(int fd, uint8_t *p, unsigned size)
+{
+	if (read(fd, mem, 0x2000) != 0x2000 || read(fd, vgfx, 0x40) != 0x40) {
+		fprintf(stderr, "microtan: m65 file too short.\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
+static uint8_t m65_byte(int fd)
+{
+	uint8_t c;
+	m65_block(fd, &c, 1);
+	return c;
+}
+
+static uint16_t m65_word(int fd)
+{
+	uint16_t r =  m65_byte(fd);
+	r |= m65_byte(fd) << 8;
+	return r;
+}
+
+static void m65_regs(int fd)
+{
+	uint8_t buf[SAVE_SIZE];
+	m65_block(fd, buf, SAVE_SIZE);
+	load6502(buf);
+}
+
+static void load_m65(const char *path)
+{
+	int fd = open(path, O_RDONLY);
+	off_t size;
+	unsigned n;
+	unsigned version;
+	unsigned memory;
+
+	if (fd == -1) {
+		perror(path);
+		exit(EXIT_FAILURE);
+	}
+	size = lseek(fd, 0, SEEK_END);
+	if (size == -1) {
+		perror(path);
+		exit(EXIT_FAILURE);
+	}
+	if (size == 8263) {
+		/* Legacy snapshot format */
+		lseek(fd, 0, SEEK_SET);
+		m65_block(fd, mem, 0x2000);
+		m65_block(fd, vgfx, 0x40);
+		m65_regs(fd);
+		close(fd);
+		bits2chunky();
+		return;
+	}
+	/* M65 is little endian */
+	version = m65_word(fd);
+	memory = m65_word(fd);
+	/* Load main memory (.m65 has no proper bank support) */
+	if (memory <= 0x2000)
+		m65_block(fd, mem, memory);
+	else {
+		m65_block(fd, mem, 0x2000);
+		m65_block(fd, &paged[0][0], memory - 0x2000);
+	}
+	/* Load I/O */
+	m65_block(fd, mem + 0xBFC0, 0x30);
+	m65_block(fd, mem + 0xBC04, 1);
+	gfx_bit = m65_byte(fd);
+	/* Dummy for AY-3-8910. We will just overwrit vgfx again in a minute */
+	m65_block(fd, vgfx, 32);
+
+	/* V2 suports 4 banks of high res pages but we don't */
+	if (version > 1) {
+		/* Dummy load 32K */
+		m65_block(fd, &paged[1][0x8000], 0x2000);
+		m65_block(fd, &paged[2][0x8000], 0x2000);
+		m65_block(fd, &paged[3][0x8000], 0x2000);
+		m65_block(fd, &paged[4][0x8000], 0x2000);
+	}
+	m65_block(fd, vgfx, 0x40);
+	m65_regs(fd);
+	close(fd);
+
+	bits2chunky();
+
+	/* Now load up the devices as best we can */
+	for (n = 0xBFC0; n > 0xBFCF; n++)
+		write6502(n, mem[n]);
+	for (n = 0xBFD0; n > 0xBFD3; n++)
+		write6502(n, mem[n]);
+	for (n = 0xBFE0; n > 0xBFEF; n++)
+		write6502(n, mem[n]);
+}
+
 static void usage(void)
 {
 	fprintf(stderr, "utan: [-f] [-a] [-A disk] [-B disk] [-i ide] [-r monitor] [-b basic] [-F font] [-d debug]\n");
@@ -490,7 +614,7 @@ static void usage(void)
 int main(int argc, char *argv[])
 {
 	static struct timespec tc;
-	static int tstates = 377;	/* 750KHz ish. FIXME */
+	static int tstates = 750;	/* 750KHz */
 	int opt;
 	char *rom_path = "microtan.rom";
 	char *font_path = "microtan.font";
@@ -498,9 +622,10 @@ int main(int argc, char *argv[])
 	char *drive_b = NULL;
 	char *basic_path = NULL;
 	char *ide_path = NULL;
+	char *m65_path = NULL;
 	unsigned has_uart = 0;
 
-	while ((opt = getopt(argc, argv, "ab:d:fi:p:r:A:B:F:")) != -1) {
+	while ((opt = getopt(argc, argv, "ab:d:fi:mp:r:A:B:F:")) != -1) {
 		switch (opt) {
 		case 'a':
 			has_uart = 1;
@@ -516,6 +641,11 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			ide_path = optarg;
+			break;
+		case 'm':
+			/* Faster board without onboard video */
+			machine = MACH_MICRON;
+			tstates = 1000;	/* 1MHz - could be various options */
 			break;
 		case 'r':
 			rom_path = optarg;
@@ -540,7 +670,9 @@ int main(int argc, char *argv[])
 			usage();
 		}
 	}
-	if (optind < argc)
+	if (optind == argc - 1)
+		m65_path = argv[optind];
+	else if (optind < argc)
 		usage();
 
 	romsize = romload(rom_path, mem + 0xF000, 0x1000);
@@ -606,7 +738,8 @@ int main(int argc, char *argv[])
 		ide_reset_begin(ide);
 	}
 
-	kbd = asciikbd_create();
+	if (machine == MACH_MICROTAN)
+		kbd = asciikbd_create();
 	via1 = via_create();
 	via2 = via_create();
 	if (has_uart) {
@@ -617,45 +750,46 @@ int main(int argc, char *argv[])
 	rtc = mm58174_create();
 	mm58174_trace(rtc, trace & TRACE_RTC);
 
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "microtan: unable to initialize SDL: %s\n",
-			SDL_GetError());
-		exit(1);
+	if (machine == MACH_MICROTAN) {
+		atexit(SDL_Quit);
+		if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
+			fprintf(stderr, "microtan: unable to initialize SDL: %s\n",
+				SDL_GetError());
+			exit(1);
+		}
+		window = SDL_CreateWindow("Microtan",
+				SDL_WINDOWPOS_UNDEFINED,
+				SDL_WINDOWPOS_UNDEFINED,
+				32 * CWIDTH, 16 * CHEIGHT,
+				SDL_WINDOW_RESIZABLE);
+		if (window == NULL) {
+			fprintf(stderr, "microtan: unable to open window: %s\n",
+				SDL_GetError());
+			exit(1);
+		}
+		render = SDL_CreateRenderer(window, -1, 0);
+		if (render == NULL) {
+			fprintf(stderr, "microtan: unable to create renderer: %s\n",
+				SDL_GetError());
+			exit(1);
+		}
+		texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888,
+			SDL_TEXTUREACCESS_STREAMING,
+			32 * CWIDTH, 16 * CHEIGHT);
+		if (texture == NULL) {
+			fprintf(stderr, "microtan: unable to create texture: %s\n",
+				SDL_GetError());
+			exit(1);
+		}
+		SDL_SetRenderDrawColor(render, 0, 0, 0, 255);
+		SDL_RenderClear(render);
+		SDL_RenderPresent(render);
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+		SDL_RenderSetLogicalSize(render, 32 * CWIDTH,  16 * CHEIGHT);
 	}
-	window = SDL_CreateWindow("Microtan",
-			SDL_WINDOWPOS_UNDEFINED,
-			SDL_WINDOWPOS_UNDEFINED,
-			32 * CWIDTH, 16 * CHEIGHT,
-			SDL_WINDOW_RESIZABLE);
-	if (window == NULL) {
-		fprintf(stderr, "microtan: unable to open window: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
-	render = SDL_CreateRenderer(window, -1, 0);
-	if (render == NULL) {
-		fprintf(stderr, "microtan: unable to create renderer: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
-	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888,
-		SDL_TEXTUREACCESS_STREAMING,
-		32 * CWIDTH, 16 * CHEIGHT);
-	if (texture == NULL) {
-		fprintf(stderr, "microtan: unable to create texture: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
-	SDL_SetRenderDrawColor(render, 0, 0, 0, 255);
-	SDL_RenderClear(render);
-	SDL_RenderPresent(render);
-	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-	SDL_RenderSetLogicalSize(render, 32 * CWIDTH,  16 * CHEIGHT);
 
 	/* 10ms - it's a balance between nice behaviour and simulation
 	   smoothness */
-
 	tc.tv_sec = 0;
 	tc.tv_nsec = 10000000L;
 
@@ -680,7 +814,10 @@ int main(int argc, char *argv[])
 	init6502();
 	hookexternal(irqnotify);
 	reset6502();
-	
+
+	/* Has to be done after CPU init so we can set the registers */
+	if (m65_path)
+		load_m65(m65_path);
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host
@@ -695,13 +832,17 @@ int main(int argc, char *argv[])
 				via_tick(via2, tstates);
 			}
 		}
-		/* We want to run UI events before we rasterize */
-		asciikbd_event(kbd);
-		utan_rasterize();
-		utan_render();
+		if (machine == MACH_MICROTAN) {
+			/* We want to run UI events before we rasterize */
+			asciikbd_event(kbd);
+			utan_rasterize();
+			utan_render();
+		}
 		mm58174_tick(rtc);
 		if (uart)
 			m6551_timer(uart);
+		if (tandos)
+			wd17xx_tick(fdc, 10);
 		/* Do 10ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
