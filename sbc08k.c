@@ -12,7 +12,6 @@
  *	-	Emulate PIT better
  *	-	Option for 74S138 mode
  *	-	8/10MHz CPU select
- *	-	RAM expansion emulation
  *
  *
  *	Memory map (74S138) : not currently emulated
@@ -31,7 +30,7 @@
  *	08000-0FFFF RAM	U7
  *	10000-17FFF RAM	U6
  *	18000-1FFFF RAM	U5
- *	20000-DFFFF Free
+ *	20000-DFFFF Expansion
  *	E0000-EFFFF Tutor monitor (boot ROM)
  *	F0000-FEFFF Unused
  *	FF000-FF7FF PIT
@@ -59,7 +58,9 @@
 #include "duart.h"
 #include "68230.h"
 
-static uint8_t ram[1048576];	/* 20bit addres bus so just allocate for all of it */
+static uint8_t ram[1048576];		/* 20bit addres bus so just allocate
+					   for all of it */
+static unsigned ramtop = 0x20000;	/* 128K by default */
 /* 68681 */
 static struct duart *duart;
 /* 68230 */
@@ -213,7 +214,7 @@ int cpu_irq_ack(int level)
 {
 	if (!(irq_pending & (1 << level)))
 		return M68K_INT_ACK_SPURIOUS;
-	if (level == 2)
+	if (level == 7)
 		return m68230_timer_vector(pit);
 	if (level == 5)
 		return duart_vector(duart);
@@ -234,7 +235,7 @@ unsigned int do_cpu_read_byte(unsigned int address)
 		rcount++;
 		return ram[(address & 0x3FFFF) + 0xE0000];
 	}
-	if (address < 131072)
+	if (address < ramtop)
 		return ram[address];
 	/* ROM */
 	if (address >= 0xE0000 && address <= 0xEFFFF)
@@ -292,7 +293,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "WB %06X <- %02X\n", address, value);
 
-	if (address < 131072)	/* 128K modelled */
+	if (address < ramtop)
 		ram[address] = value;
 	else if (address >= 0xFF800 && address <= 0xFFFFF)
 		duart_write(duart, address >> 1, value);
@@ -371,7 +372,7 @@ void cpu_set_fc(int fc)
 
 void usage(void)
 {
-	fprintf(stderr, "sbc08k [-r rompath] [-f] [-d debug].\n");
+	fprintf(stderr, "sbc08k [-m ramsize (kB)] [-r rompath] [-f] [-d debug].\n");
 	exit(1);
 }
 
@@ -397,6 +398,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			romname = optarg;
+			break;
+		case 'm':
+			ramtop = 1024 * atol(optarg);
 			break;
 		default:
 			usage();
