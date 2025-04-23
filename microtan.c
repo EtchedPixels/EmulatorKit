@@ -203,6 +203,8 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 	if (addr >= 0x10000 - romsize)
 		return mem[addr];
 	if (addr >= 0xBC00 && addr <= 0xBFFF) {
+		if (debug)
+			return 0xFF;
 		if (tandos && (addr & 0xFFF0) == 0xBF90)
 			return tandos_read(addr);
 		if ((addr & 0xFFF0) == 0xBFC0)
@@ -607,7 +609,7 @@ static void load_m65(const char *path)
 
 static void usage(void)
 {
-	fprintf(stderr, "utan: [-f] [-a] [-A disk] [-B disk] [-i ide] [-r monitor] [-b basic] [-F font] [-d debug]\n");
+	fprintf(stderr, "microtan: [-f] [-a] [-m] [-A disk] [-B disk] [-i ide] [-r monitor] [-b basic] [-F font] [-d debug] [snapshot.m65]\n");
 	exit(EXIT_FAILURE);
 }
 
