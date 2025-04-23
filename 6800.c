@@ -881,7 +881,7 @@ static char *opmap[256] = {
     "CLRB",
 
     /* 0x60 */
-    "NEG x",
+    "NEG x,X",
     NULL,
     NULL,
     "COM x,X",
@@ -2622,7 +2622,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     case 0x62:	/* OIM direct (6303) and also BSET */
         if (cpu->type == CPU_6803) {
-            /* NEG x */
+            /* NEG x,X */
             tmp8 = m6800_do_read(cpu, data16);
             m6800_do_write(cpu, data16, m6800_maths8_noh(cpu, 0, tmp8, -tmp8 - CARRY));
             return clocks;
@@ -2636,7 +2636,7 @@ static int m6800_execute_one(struct m6800 *cpu)
         return clocks;
     case 0x72: /* OIM ,X (6303) and also BSET */
         if (cpu->type == CPU_6803) {
-            /* NEG x */
+            /* NEG x,X */
             tmp8 = m6800_do_read(cpu, data16);
             m6800_do_write(cpu, data16, m6800_maths8_noh(cpu, 0, tmp8, -tmp8 - CARRY));
             return clocks;
