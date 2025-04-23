@@ -7,8 +7,8 @@ BINS =  rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80 \
-	trcwm6809 swt6809 nybbles scmp2 sbc08k mini11
-
+	trcwm6809 swt6809 nybbles scmp2 sbc08k mini11 microtanic6808
+ 
 all: $(BINS)
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
@@ -297,6 +297,9 @@ max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 
 microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o
 	cc -g3 microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o -lSDL2 -o microtan
+
+microtanic6808: microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o
+	cc -g3 microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o -o microtanic6808
 
 sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
