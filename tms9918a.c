@@ -70,19 +70,20 @@ static void tms9918a_render_slice(struct tms9918a *vdp, int y, uint8_t *sprat, u
         if (i >= 0 && i <= 255) {
             if (bits & 0x8000U)
                 *pixptr++ = foreground;
+            else
+                pixptr++;
         }
         /* This pixel was already sprite written - collision */
         if (*colptr) {
             vdp->status |= 0x20;
             *colptr++ = 1;
         } else {
-            pixptr++;
             colptr++;
         }
         /* For magnified sprites write each pixel twice */
         step ^= mag;
         if (step == 1)
-            bits >>= 1;
+            bits <<= 1;
     }
 }
 
@@ -106,8 +107,8 @@ static void tms9918a_render_sprite(struct tms9918a *vdp, int y, uint8_t *sprat, 
         width = 8;
         bits = *spdat << 24;
     } else {
-        spdat += 2 * row;
-        bits = *spdat++ << 8;
+        spdat += row;
+        bits = *spdat << 8;
         bits |= spdat[16];
         width = 16;
     }
@@ -127,7 +128,7 @@ static void tms9918a_sprite_line(struct tms9918a *vdp, int y)
     unsigned int spheight = vdp->reg[1]& 0x02 ? 16 : 8;
     unsigned int mag = vdp->reg[1] & 0x01;
     unsigned int ns = 0;
-    unsigned int spshft = (spheight == 8) ? 3 : 5;
+    unsigned int spshft = 3;
 
     if (mag)
         spheight <<= 1;
@@ -138,7 +139,7 @@ static void tms9918a_sprite_line(struct tms9918a *vdp, int y)
     /* Walk the sprite table and queue any sprite on this line */
     for(i = 0; i < 32; i++) {
         if (*sprat == 0xD0)
-            return;
+            break;
         if (*sprat <= y && *sprat + spheight >= y) {
             ns++;
             /* Too many sprites: only 4 get handled */
