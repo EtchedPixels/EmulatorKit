@@ -1,4 +1,18 @@
-struct tms9918a;
+struct tms9918a {
+    uint8_t reg[8];	/* We just ignore invalid bits, you can't read them
+                           back so who cares */
+    uint8_t status;
+    uint8_t framebuffer[16384];	/* The memory behind the VDP */
+    uint32_t rasterbuffer[256 * 192]; /* Our output texture */
+    uint32_t *colourmap;
+    uint8_t colbuf[256 + 64];	/* For off edge collisions */
+    unsigned int latch;		/* The toggling latch for low/hi */
+    unsigned int read;		/* Mode */
+    uint16_t addr;		/* Address */
+    uint16_t memmask;		/* Address range */
+
+    int trace;
+};
 
 extern void tms9918a_rasterize(struct tms9918a *vdp);
 extern void tms9918a_write(struct tms9918a *vdp, uint8_t addr, uint8_t val);

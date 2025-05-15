@@ -47,13 +47,20 @@ void tms9918a_render(struct tms9918a_renderer *render)
 {
     SDL_Rect sr;
 
-    sr.x = 0;
-    sr.y = 0;
-    sr.w = 256;
-    sr.h = 192;
+    sr.x = 16;
+    sr.y = 12;
+    sr.w = 480;
+    sr.h = 360;
+
+    uint32_t background = render->vdp->colourmap[render->vdp->reg[7] & 0xf];
+    uint8_t a = background >> 24;
+    uint8_t r = background >> 16;
+    uint8_t g = background >> 8;
+    uint8_t b = background & 0xFF;
+    SDL_SetRenderDrawColor(render->render, r, g, b, a);
     SDL_UpdateTexture(render->texture, NULL, tms9918a_get_raster(render->vdp), 1024);
     SDL_RenderClear(render->render);
-    SDL_RenderCopy(render->render, render->texture, NULL, &sr);
+    SDL_RenderCopyEx(render->render, render->texture, NULL, &sr, 0, NULL, SDL_FLIP_NONE);
     SDL_RenderPresent(render->render);
 }
 
@@ -103,7 +110,7 @@ struct tms9918a_renderer *tms9918a_renderer_create(struct tms9918a *vdp)
         exit(1);
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-    SDL_RenderSetLogicalSize(render->render, 256, 192);
+    SDL_RenderSetLogicalSize(render->render, 512, 384);
 
     render->texture = SDL_CreateTexture(render->render,
                         SDL_PIXELFORMAT_ARGB8888,
