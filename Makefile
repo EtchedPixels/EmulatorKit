@@ -1,5 +1,5 @@
 
-CFLAGS = -Wall -pedantic -g3 -Werror
+CFLAGS = -Wall -g3 -Werror
 
 BINS =  rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 	rcbus-65c816 rcbus-6800 rcbus-68008 rcbus-6809 rcbus-68hc11 \
@@ -9,11 +9,12 @@ BINS =  rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80 \
 	trcwm6809 swt6809 nybbles scmp2 sbc08k mini11
 
-all: $(BINS)
-
-sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
+SDL2 = rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
-	sorceror z80all osi400 osi500 spectrum microtan
+	sorceror z80all osi400 osi500 spectrum microtan \
+	6502retro
+
+all: $(BINS) $(SDL2)
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -255,8 +256,11 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 z80retro: z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
-2063: 2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
+2063:          2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
 	cc -g3 2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
+
+6502retro:     6502retro.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o
+	cc -g3 6502retro.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o -lSDL2 -o 6502retro
 
 2063_sdl2: 2063.o 2063_sdlui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o
 	cc -g3 2063.o 2063_sdlui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
@@ -325,7 +329,7 @@ clean:
 	$(MAKE) --directory m68k clean && \
 	$(MAKE) --directory am9511 clean && \
 	$(MAKE) --directory ns32k clean && \
-	rm -f *.o *~ rc2014 rbcv2 $(BINS)
+	rm -f *.o *~ rc2014 rbcv2 $(BINS) $(SDL2)
 
 SRCS := $(subst ./,,$(shell find . -name '*.c'))
 DEPDIR := .deps

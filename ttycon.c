@@ -53,6 +53,8 @@ static uint8_t con_get(struct serial_device *dev)
 		return c;
 	if (c == 0x0A)
 		c = '\r';
+	if (c == 0x7F)
+		c = 0x08;
 	return c;
 }
 
