@@ -140,7 +140,7 @@ static void tms9918a_sprite_line(struct tms9918a *vdp, int y)
     for(i = 0; i < 32; i++) {
         if (*sprat == 0xD0)
             break;
-        if (*sprat <= y && *sprat + spheight >= y) {
+        if (*sprat <= y && *sprat + spheight > y) {
             ns++;
             /* Too many sprites: only 4 get handled */
             /* Q: do the full 32 get collision detected ? */
