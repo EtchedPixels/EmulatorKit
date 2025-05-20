@@ -10,3 +10,4 @@ extern void tms9918a_trace(struct tms9918a *vdp, int onoff);
 extern int tms9918a_irq_pending(struct tms9918a *vdp);
 extern uint32_t *tms9918a_get_raster(struct tms9918a *vdp);
 extern void tms9918a_set_colourmap(struct tms9918a *vdp, uint32_t *ctab);
+extern uint32_t tms9918a_get_background(struct tms9918a *vdp);
