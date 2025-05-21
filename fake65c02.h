@@ -1192,8 +1192,8 @@ uint32 step6502() {
     return clockticks6502;
 }
 
-void hookexternal(void *funcptr) {
-    if (funcptr != (void *)NULL) {
+void hookexternal(void (*funcptr)(void)) {
+    if (funcptr != NULL) {
         loopexternal = funcptr;
         callexternal = 1;
     } else callexternal = 0;

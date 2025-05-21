@@ -264,7 +264,6 @@ z80retro: z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.
 zeta-v2: zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a
 	cc -g3 zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a -o zeta-v2
 
-6502retro.o: CFLAGS=-Wall -g3 -Werror
 6502retro: 6502retro.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o
 	cc 6502retro.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o -lSDL2 -o 6502retro
 
