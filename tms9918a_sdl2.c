@@ -41,17 +41,23 @@ struct tms9918a_renderer {
     SDL_Texture *texture;
     SDL_Window *window;
 };
-    
 
 void tms9918a_render(struct tms9918a_renderer *render)
 {
     SDL_Rect sr;
 
-    sr.x = 0;
-    sr.y = 0;
+    sr.x = (320-256)/2;
+    sr.y = (240-192)/2;
     sr.w = 256;
     sr.h = 192;
     SDL_UpdateTexture(render->texture, NULL, tms9918a_get_raster(render->vdp), 1024);
+    uint32_t colour = tms9918a_get_background(render->vdp);
+    SDL_SetRenderDrawColor(render->render,
+                               (colour >> 16) & 0xFF, // red
+                               (colour >>  8) & 0xFF, // green
+                               (colour >>  0) & 0xFF, // blue
+                               (colour >> 24) & 0xFF  // alpha
+                           );
     SDL_RenderClear(render->render);
     SDL_RenderCopy(render->render, render->texture, NULL, &sr);
     SDL_RenderPresent(render->render);
@@ -91,7 +97,7 @@ struct tms9918a_renderer *tms9918a_renderer_create(struct tms9918a *vdp)
     render->window = SDL_CreateWindow("TMS9918A",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
-        512, 384,
+        640, 480,
         SDL_WINDOW_RESIZABLE);
     if (render->window == NULL) {
         fprintf(stderr, "Unable to create window: %s.\n", SDL_GetError());
@@ -103,7 +109,7 @@ struct tms9918a_renderer *tms9918a_renderer_create(struct tms9918a *vdp)
         exit(1);
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-    SDL_RenderSetLogicalSize(render->render, 256, 192);
+    SDL_RenderSetLogicalSize(render->render, 320, 240);
 
     render->texture = SDL_CreateTexture(render->render,
                         SDL_PIXELFORMAT_ARGB8888,

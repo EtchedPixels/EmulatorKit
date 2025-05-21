@@ -621,3 +621,8 @@ void tms9918a_set_colourmap(struct tms9918a *vdp, uint32_t *ctab)
 {
     vdp->colourmap = ctab;
 }
+
+uint32_t tms9918a_get_background(struct tms9918a *vdp)
+{
+    return vdp->colourmap[vdp->reg[7] & 0xF];
+}
