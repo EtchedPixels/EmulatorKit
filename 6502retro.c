@@ -401,7 +401,7 @@ int main(int argc, char *argv[])
         char *rompath = "6502retro.rom";
         char *sdpath = NULL;
         unsigned have_tms = 0;
-        static int tstates = 4000;      /* 4MHz */
+        static int tstates = 6667;      /* 4mhz / 60 / 10 */
 
         while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
                 switch (opt) {
@@ -477,11 +477,13 @@ int main(int argc, char *argv[])
            matched with that. The scheme here works fine except when the host
            is loaded though */
 
-        int desired_fps = 60;
-        int last_ticks = SDL_GetTicks();
-
-        /* We run 1000000 t-states per second */
+        uint64_t start, end;
+        float elapsedMS;
         while (!emulator_done) {
+                if (vdp) {
+                        start = SDL_GetPerformanceCounter();
+                }
+
                 int i;
                 for (i = 0; i < 10; i++) {
                         exec6502(tstates);
@@ -502,16 +504,12 @@ int main(int argc, char *argv[])
                 {
                         if (vdp)
                         {
-                                while (true)
-                                {
-                                        if ((SDL_GetTicks() - last_ticks) < (1000 / desired_fps)) {
-                                                continue;
-                                        }
-                                        last_ticks = SDL_GetTicks();
-                                        tms9918a_rasterize(vdp);
-                                        tms9918a_render(vdprend);
-                                        break;
-                                }
+                                tms9918a_rasterize(vdp);
+                                tms9918a_render(vdprend);
+
+                                end = SDL_GetPerformanceCounter();
+                                elapsedMS = (end -start) / (float)SDL_GetPerformanceFrequency() * 1000.0f;
+                                SDL_Delay((16.6667f - elapsedMS)>0 ? 16.6667f - elapsedMS : 0);
                         }
                         else
                         {
