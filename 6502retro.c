@@ -47,6 +47,12 @@
  *      -r ../6502-retro/6502-retro-boot/build/rom.raw \
  *      -S ../6502-retro/6502-retro-os/py_sfs_v2/6502-retro-sdcard.img \
  *      -T
+ * Read the EMULATOR.md markdown files in the following repos for information
+ * on how to make the rom and and sdcard images.
+ *
+ * - Rom repository: https://github.com/6502-retro/6502-retro-boot.git
+ * - OS repository: https://github.com/6502-retro/6502-retro-os.git
+ *
  */
 #include <SDL2/SDL_timer.h>
 #include <stdio.h>
