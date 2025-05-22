@@ -9,7 +9,7 @@ where bank is 0-7 matching the jumpers on the card
 
 ## RC2014 with CP/M
 
-rc2014 -a -r cpm.rom -e bank -i cfdisk.ide
+rc2014 -a -p -r cpm.rom -e bank -i cfdisk.ide
 
 Where bank is the jumpers on the card and and cfdisk.ide is a CP/M disk
 image in IDE emulator format.
