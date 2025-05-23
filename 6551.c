@@ -29,7 +29,9 @@ static void m6551_irq_compute(struct m6551 *m6551)
 	if ((m6551->status & 0x10) && (m6551->cmd & 0x0C) == 0x04)
 		m6551->status |= 0x80;
 
-	if ((m6551->status & 0x80) && (m6551->ctrl & 0x10))
+	//If the IRQB is asserted, and the transmit data regiter is empty, then
+	//set initial int for next go-round.
+	if ((m6551->status & 0x80) && (m6551->cmd & 0x10))
 		m6551->inint = 1;
 	else
 		m6551->inint = 0;
@@ -75,7 +77,7 @@ void m6551_timer(struct m6551 *m6551)
 uint8_t m6551_read(struct m6551 *m6551, uint16_t addr)
 {
 	if (m6551->trace)
-		fprintf(stderr, "m6551_read %d ", addr);
+		fprintf(stderr, "m6551_read %d\n", addr);
 	switch (addr & 3) {
 	case 0:
 		m6551->status &= ~0x0F;
@@ -130,9 +132,8 @@ void m6551_attach(struct m6551 *m6551, struct serial_device *dev)
 
 void m6551_reset(struct m6551 *m6551)
 {
-	memset(m6551, 0, sizeof(struct m6551));
-	m6551->cmd = 2;
-	m6551->status = 0x10;
+	m6551->cmd |= 0x1f;
+	m6551->status |= 4;
 	m6551_irq_compute(m6551);
 }
 
@@ -148,7 +149,7 @@ struct m6551 *m6551_create(void)
 		fprintf(stderr, "Out of memory.\n");
 		exit(1);
 	}
-	m6551_reset(m6551);
+	memset(m6551, 0, sizeof(struct m6551));
 	return m6551;
 }
 
