@@ -92,6 +92,7 @@ static uint8_t extreme;
 #define CPUBOARD_SC720		13		/* Low 32K bankswitched, high 32K fixed */
 #define CPUBOARD_SC707		14		/* SC114 type memory board but with ROM bankable using 0x20/0x28 */
 #define CPUBOARD_TP128		15		/* Tadeusz 128K 32K/32K banked memory */
+#define CPUBOARD_EASY512	16		/* 512K EasyZ80 with KIO */
 
 static uint8_t cpuboard = CPUBOARD_Z80;
 
@@ -781,6 +782,35 @@ static void mem_write_micro80w(uint16_t addr, uint8_t val)
 	}
 }
 
+static uint32_t ez512_base;
+static unsigned ez512_portc;
+
+static uint32_t ez512_xlat(uint16_t addr)
+{
+	uint32_t raddr;
+	if (addr >= 0x8000)
+		raddr = addr | 0x78000;
+	else
+		raddr =  addr | ez512_base;
+	return raddr + 0x10000;	/* low 64K of ramrom is the ROM */
+}
+
+static uint8_t mem_read_ez512(uint16_t addr)
+{
+	uint32_t paddr = ez512_xlat(addr);
+	if ((ez512_portc & 0x20) == 0)
+		return ramrom[paddr];
+	if ((ez512_portc & 0x80) == 0)
+		return ramrom[addr & 0xFFFF];
+	/* Warn on 0xA0 == 0 clash error ? */
+	return 0xFF;
+}
+
+static void mem_write_ez512(uint16_t addr, uint8_t val)
+{
+	uint32_t paddr = ez512_xlat(addr);
+	ramrom[paddr] = val;
+}
 
 uint8_t do_mem_read(uint16_t addr, int quiet)
 {
@@ -832,6 +862,9 @@ uint8_t do_mem_read(uint16_t addr, int quiet)
 		break;
 	case CPUBOARD_TP128:
 		r = mem_read_tp128(addr);
+		break;
+	case CPUBOARD_EASY512:
+		r = mem_read_ez512(addr);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -912,6 +945,9 @@ void mem_write(int unused, uint16_t addr, uint8_t val)
 		break;
 	case CPUBOARD_TP128:
 		mem_write_tp128(addr, val);
+		break;
+	case CPUBOARD_EASY512:
+		mem_write_ez512(addr, val);
 		break;
 	default:
 		fputs("invalid cpu type.\n", stderr);
@@ -2836,6 +2872,49 @@ static void io_write_tp128(uint16_t addr, uint8_t val)
 		io_write_2014(addr, val, 0);
 }
 
+/*
+ *	Low half of I/O space is the KIO
+ *	KIO is wired so that port C
+ *
+ *	0-2 bank select low
+ *	3 \RTSA
+ *	4 \RTSB
+ *	5 RAM read enable
+ *	6 bank select high
+ *	7 ROM read enable
+ */
+static uint8_t io_read_ez512(uint16_t addr)
+{
+	if (addr & 0x80)
+		return io_read_2014(addr);
+	addr &= 0x0F;
+	if (addr == 0x0C)
+		return ez512_portc;
+	return kio_read(addr);
+}
+
+static void io_write_ez512(uint16_t addr, uint8_t val)
+{
+	if (addr & 0x80) {
+		io_write_2014(addr, val, 0);
+		return;
+	}
+	addr &= 0x0F;
+	/* 0x0C is the KIO port C for the bank reg */
+	/* Until emulate the KIO port bits properly */
+	if (addr == 0x0C) {
+		if (trace & TRACE_512)
+			fprintf(stderr, "Port C: %02X to %02X ", ez512_portc, val);
+		ez512_portc = val;
+		ez512_base = (val & 7) << 15;
+		ez512_base |= (val & 0x40) ? 0x40000 : 0;
+		if (trace & TRACE_512)
+			fprintf(stderr, "base now %05X ", ez512_base);
+		
+	}
+	kio_write(addr, val);
+}
+
 void io_write(int unused, uint16_t addr, uint8_t val)
 {
 	switch (cpuboard) {
@@ -2885,6 +2964,9 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case CPUBOARD_TP128:
 		io_write_tp128(addr, val);
 		break;
+	case CPUBOARD_EASY512:
+		io_write_ez512(addr, val);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -2920,6 +3002,9 @@ uint8_t io_read(int unused, uint16_t addr)
 		return io_read_5(addr);
 	case CPUBOARD_MICRO80W:
 		return io_read_micro80w(addr);
+	case CPUBOARD_EASY512:
+		return io_read_ez512(addr);
+		break;
 	default:
 		fprintf(stderr, "bad cpuboard\n");
 		exit(1);
@@ -3260,10 +3345,26 @@ int main(int argc, char *argv[])
 				rom = 1;
 				romsize = 32768;
 				cpuboard = CPUBOARD_TP128;
+			} else if (strcmp(optarg, "easy512") == 0) {
+				switchrom = 0;
+				have_kio_ext = 1;
+				bank512 = 0;
+				rom = 1;
+				indev = INDEV_SIO;
+				sio2 = 1;
+				have_acia = 0;
+				tstate_steps = 1100;	/* 22MHz TODO */
+				cpuboard = CPUBOARD_EASY512;
+				/* FIXME: actually 0 and pulled up but need
+				   to finish KIO emulation to sort */
+				ez512_portc = 0x20;
+				have_im2 = 1;
+				indev = INDEV_SIO;
 			} else {
 				fputs(
-"rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, sc707, sc720\n"
-"z80sbc64, z80mb64, zrcc, tinyz80, pdog128, pdog512, micro80w, zrc, tp128.\n",
+"rc2014: supported cpu types z80, easyz80, sc108, sc114, sc121, sc707, sc720,\n"
+"z80sbc64, z80mb64, zrcc, tinyz80, pdog128, pdog512, micro80w, zrc, tp128,\n"
+"easy512.\n",
 						stderr);
 				exit(EXIT_FAILURE);
 			}
@@ -3345,7 +3446,8 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (rom && cpuboard != CPUBOARD_Z80SBC64 && cpuboard != CPUBOARD_ZRCC && cpuboard != CPUBOARD_ZRC) {
+	if (rom && cpuboard != CPUBOARD_Z80SBC64 && cpuboard != CPUBOARD_ZRCC 
+		&& cpuboard != CPUBOARD_ZRC) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {
 			perror(rompath);
@@ -3470,6 +3572,12 @@ int main(int argc, char *argv[])
 		sd_mosi = 0x02;
 		sd_port = 1;
 		sd_miso = 1;
+	}
+	if (cpuboard == CPUBOARD_EASY512) {
+		sd_clock = 0x10;
+		sd_mosi = 0x01;
+		sd_miso = 0x80;
+		sd_port = 1;
 	}
 	if (sdpath) {
 		if (!have_copro)
@@ -3656,7 +3764,7 @@ int main(int argc, char *argv[])
 					sbc64_cpld_timer();
 				poll_irq_nonim2();
 			}
-			if (have_ctc || have_kio) {
+			if (have_ctc || have_kio || have_kio_ext) {
 				if (cpuboard != CPUBOARD_MICRO80 && cpuboard != CPUBOARD_MICRO80W)
 					ctc_tick(tstate_steps * 10);
 				else	/* Micro80 it's not off the CPU clock  but
