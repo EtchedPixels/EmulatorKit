@@ -294,7 +294,7 @@ static void io_write(uint16_t addr, uint8_t val)
 
 uint8_t read65c816(uint32_t addr, uint8_t debug)
 {
-	uint8_t val;
+	uint8_t val = 0;
 
 	addr &= 0xFFFF;		/* 16 bit input */
 	if (addr < IO_PAGE) {

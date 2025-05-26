@@ -291,7 +291,7 @@ static einline unsigned ea_extended (void)
 
 static einline unsigned ea_indexed (unsigned *cycles)
 {
-	unsigned r, op, ea;
+	unsigned r, op, ea = 0;
 
 	/* post byte */
 
