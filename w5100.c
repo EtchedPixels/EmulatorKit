@@ -353,7 +353,7 @@ w5100_socket_open( nic_w5100_socket_t *socket_obj )
         description, socket_obj->id, errno, strerror(errno) );
       return;
     }
-    fcntl(socket_obj->fd, F_SETFL, FNDELAY);
+    fcntl(socket_obj->fd, F_SETFL, O_NONBLOCK);
 
     if( setsockopt( socket_obj->fd, SOL_SOCKET, SO_REUSEADDR, &one,
       sizeof(one) ) == -1 ) {
