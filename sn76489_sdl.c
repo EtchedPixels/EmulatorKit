@@ -17,16 +17,16 @@ SDL_AudioSpec spec = {
 	.userdata = NULL
 };
 
-struct SN76489SDL {
+struct sn76489 {
     SDL_AudioDeviceID dev;
     SNG *sng;
 };
 
 static SNG *sng;
 
-struct SN76489SDL *SN76489SDL_create(void)
+struct sn76489 *sn76489_create(void)
 {
-    struct SN76489SDL *sn = malloc(sizeof(struct SN76489SDL));
+    struct sn76489 *sn = malloc(sizeof(struct sn76489));
     if (sn == NULL)
     {
         fprintf(stderr, "Out of memory\n");
@@ -34,6 +34,7 @@ struct SN76489SDL *SN76489SDL_create(void)
     }
 
     sng = SNG_new(CPU_CLK, FREQUENCY);
+    SNG_set_quality(sng, 0xff);
     SNG_reset(sng);
 
     sn->sng = sng;
@@ -61,14 +62,19 @@ void play_buffer(void* userdata, unsigned char* stream, int len)
     }
 }
 
-void SN76489SDL_writeIO(struct SN76489SDL *sn, uint8_t val)
+uint8_t sn76489_readReady(struct sn76489 *sn)
+{
+    return sn->sng->ready;
+}
+
+void sn76489_writeIO(struct sn76489 *sn, uint8_t val)
 {
     SDL_LockAudioDevice(sn->dev);
     SNG_writeIO(sn->sng, val);
     SDL_UnlockAudioDevice(sn->dev);
 }
 
-void SN76489SDL_destroy(struct SN76489SDL *sn)
+void sn76489_destroy(struct sn76489 *sn)
 {
     SDL_CloseAudioDevice(sn->dev);
     SNG_delete(sn->sng);

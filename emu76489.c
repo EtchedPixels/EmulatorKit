@@ -42,22 +42,19 @@ internal_refresh (SNG * sng)
   }
 }
 
-void
-SNG_set_rate (SNG * sng, uint32_t r)
+void SNG_set_rate (SNG * sng, uint32_t r)
 {
   sng->rate = r ? r : 44100;
   internal_refresh (sng);
 }
 
-void
-SNG_set_quality (SNG * sng, uint32_t q)
+void SNG_set_quality (SNG * sng, uint32_t q)
 {
   sng->quality = q;
   internal_refresh (sng);
 }
 
-SNG *
-SNG_new (uint32_t c, uint32_t r)
+SNG * SNG_new (uint32_t c, uint32_t r)
 {
   SNG *sng;
 
@@ -72,8 +69,7 @@ SNG_new (uint32_t c, uint32_t r)
   return sng;
 }
 
-void
-SNG_reset (SNG * sng)
+void SNG_reset (SNG * sng)
 {
   int i;
 
@@ -98,20 +94,32 @@ SNG_reset (SNG * sng)
   sng->noise_fref = 0;
 
   sng->out = 0;
-  sng->stereo = 0xFF;
-
+  sng->ready = 1;
   sng->ch_out[0] = sng->ch_out[1] = sng->ch_out[2] = sng->ch_out[3] = 0;
 }
 
-void
-SNG_delete (SNG * sng)
+void SNG_delete (SNG * sng)
 {
   free (sng);
 }
 
-void
-SNG_writeIO (SNG * sng, uint32_t val)
+uint8_t readReady(SNG * sng)
 {
+  return sng->ready;
+}
+
+void SNG_writeIO (SNG * sng, uint32_t val)
+{
+  /*
+   * We emulat the ready flag here for completeness.  The original author of this library
+   * did not bother.  I'm not sure I should either.  But - I'm too much of a nerd.  So
+   * here it is.  We disable ready (by setting it to a 1) during the write function
+   * and enable it again at the end.  The original device seems to garuntee ready will
+   * toggle after a max of 32 cycles.  I'm _not_ doing that here.  I don't know how.  All
+   * I do here is assert ready at the bottom of this function.
+   * Feel free to never check the status of ready.  The emulator will still work.
+   */
+  sng->ready = 1;
   if (val & 0x80)
   {
     sng->adr = (val & 0x70) >> 4;
@@ -155,18 +163,18 @@ SNG_writeIO (SNG * sng, uint32_t val)
   {
     sng->freq[sng->adr >> 1] = ((val & 0x3F) << 4) | (sng->freq[sng->adr >> 1] & 0x0F);
   }
+  sng->ready = 0;
 }
 
 static inline int parity(int val) {
-	val^=val>>8;
-	val^=val>>4;
-	val^=val>>2;
-	val^=val>>1;
-	return val&1;
+  val^=val>>8;
+  val^=val>>4;
+  val^=val>>2;
+  val^=val>>1;
+  return val&1;
 }
 
-static inline void
-update_output (SNG * sng)
+static inline void update_output (SNG * sng)
 {
 
   int i;
@@ -224,15 +232,13 @@ update_output (SNG * sng)
 
 }
 
-static inline int16_t
-mix_output (SNG * sng) 
+static inline int16_t mix_output (SNG * sng) 
 {
   sng->out = sng->ch_out[0] + sng->ch_out[1] + sng->ch_out[2] + sng->ch_out[3];
   return (int16_t) sng->out;
 }
 
-int16_t
-SNG_calc (SNG * sng)
+int16_t SNG_calc (SNG * sng)
 {
   if (!sng->quality) {
     update_output(sng);
@@ -251,53 +257,3 @@ SNG_calc (SNG * sng)
   return mix_output(sng);
 }
 
-static inline void 
-mix_output_stereo (SNG * sng, int32_t out[2])
-{
-  int i;
-
-  out[0] = out[1] = 0;
-  if((sng->stereo>>4)&0x08) {
-    out[0] += sng->ch_out[3];
-  }
-  if(sng->stereo & 0x08) {
-    out[1] += sng->ch_out[3];
-  }
-
-  for (i = 0; i < 3; i++)
-  {
-    if ((sng->stereo >> (i+4)) & 0x01) {
-      out[0] += sng->ch_out[i];
-    }
-    if ((sng->stereo >> i) & 0x01) {
-      out[1] += sng->ch_out[i];
-    }
-  }
-
-}
-
-void
-SNG_calc_stereo (SNG *sng, int32_t out[2])
-{
-  if (!sng->quality) {
-    update_output(sng);
-    mix_output_stereo(sng,out);
-    return;
-  }
-
-  while (sng->realstep > sng->sngtime)
-  {
-    sng->sngtime += sng->sngstep;
-    update_output(sng);
-  }
-
-  sng->sngtime = sng->sngtime - sng->realstep;
-  mix_output_stereo(sng,out);
-  return;
-}
-
-void
-SNG_writeGGIO(SNG *sng, uint32_t val)
-{
-  sng->stereo = val;
-}

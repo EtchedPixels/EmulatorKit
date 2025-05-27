@@ -1,9 +1,12 @@
-#ifndef SN76489SDL_H
-#define SN76489SDL_H
+#ifndef sn76489_H
+#define sn76489_H
 
-struct SN76489SDL;
-extern struct SN76489SDL *SN76489SDL_create(void);
-extern void SN76489SDL_writeIO(struct SN76489SDL *sn, uint8_t val);
-extern void SN76489SDL_destroy(struct SN76489SDL *sn);
+#include <stdint.h>
+
+struct sn76489;
+extern struct sn76489 *sn76489_create(void);
+extern uint8_t sn76489_readReady(struct sn76489*); 
+extern void sn76489_writeIO(struct sn76489*, uint8_t);
+extern void sn76489_destroy(struct sn76489*);
 
 #endif
