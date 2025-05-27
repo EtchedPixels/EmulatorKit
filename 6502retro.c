@@ -78,6 +78,9 @@
 #include "sdcard.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
+#include "emu76489.h"
+#include "sn76489_sdl.h"
+
 
 #define TRACE_MEM       1
 #define TRACE_IRQ       2
@@ -104,6 +107,7 @@ static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct via6522 *via1;
 static struct m6551 *uart;
+static struct SN76489SDL *sn;
 
 volatile int emulator_done;
 static uint8_t fast = 0;
@@ -197,7 +201,12 @@ void write6502(uint16_t addr, uint8_t val)
                         pa |= ROM_SWITCH;
                         via_write(via1, 1, pa);
                 }
-                via_write(via1, addr & 0x0F, val);
+                else if (addr == 0xBF20)
+                {
+                        SN76489SDL_writeIO(sn, val);
+                }
+                else
+                        via_write(via1, addr & 0x0F, val);
                 return;
         }
         /*  TMS 9918a */
@@ -335,6 +344,7 @@ static void cleanup(int sig)
 static void exit_cleanup(void)
 {
         tcsetattr(0, TCSADRAIN, &saved_term);
+        SN76489SDL_destroy(sn);
         SDL_Quit();
 }
 
@@ -469,6 +479,9 @@ int main(int argc, char *argv[])
         m6551_trace(uart, trace & TRACE_6551);
         m6551_attach(uart, con);
 
+        // Add audio device
+        sn = SN76489SDL_create();
+
         hookexternal(irqnotify);
         reset6502();
 
@@ -517,7 +530,6 @@ int main(int argc, char *argv[])
                         }
                 }
         }
-
         exit(0);
 }
 
