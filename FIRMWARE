@@ -1,0 +1,229 @@
+Firmware For Emulators
+
+This is the rough working list. It's not fully checked and should not be
+relied upon, particularly for licensing and redistributability.
+
+rc2014 (z80):
+	Small setups: https://rc2014.co.uk/1716/basic-cp-m-romwbw-or-small-computer-monitor/
+		- Non-free, dubious copyright on BASIC
+	512/512K - RomWBW (https://github.com/wwarthen/RomWBW)
+		- Redistributable, mostly open source (some bundled non
+		  free historic components)
+
+	Some other variants have different requirements or a built in tiny
+	booter.
+
+rcbus-1802:
+	https://github.com/EtchedPixels/RC2014-ROM
+	Open Source
+	Generally user provided project ROMS though
+
+rcbus-6303:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/6303)
+	Open Source
+
+rcbus-6502:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/6502
+	Open Source
+
+rcbus-6509:
+	(work in progress. currently uses 6502 firmware)
+
+rcbus-65c816-mini:
+	Uses rcbus-6502 firmware
+
+rcbus-6800:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/6800
+	Open Source
+
+rcbus-68008:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/68000
+	Open Source
+
+rcbus-6809:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/6809
+	Open Source
+	http://dunfield.classiccmp.org//d6809/cubix.htm
+	ROM part Open Source, other bits mostly open but compiler is not
+
+rcbus-68hc11:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/68HC11
+	Open Source
+
+rcbus-801c88:
+	Experimental code only (nobody has written a PC BIOS for it yet)
+
+rcbus-8085:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/CPM85
+	Open Source
+
+rcbus-z8:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/Z8
+	Open Source
+
+rcbus-z180:
+	RomWBW (see above)
+	SCM (https://smallcomputercentral.com/)
+	Redistributable
+
+rbcv2:
+	RomWBW (see above)
+
+searle:
+	http://searle.wales/z80/SimpleZ80.html
+	Non-free, non-redistributable, downloadable, dubious copyrights
+
+	Fuzix as a bootable ROM/Disk image
+	Open Source
+
+linc80:
+	SCM (https://smallcomputercentral.com/)
+
+markiv:
+	RomWBW (see above)
+
+mbc2:
+	Emulates only Z80 side so no firmware as such needed
+
+	Fuzix as a bootable image
+	Open Source
+
+smallz80:
+	Firmware (http://stack180.com/index.html)
+	Non-free, non-redistributable, downloadable
+
+sbc2g:
+	Firmware (https://www.retrobrewcomputers.org/doku.php?id=builderpages:rhkoolstar:sbc-2g-512)
+	Non-free, non-redistributable, downloadable
+
+z80mc:
+	https://sunrise-ev.com/z80.htm
+	Non-free, non-redistributable, downloadable
+
+simple80:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/Simple80
+	Non-free, redistributable, downloadable
+
+flexbox:
+	Non-free. Needs a standard FLEX boot rom and FLEX disk images
+
+tiny68k:
+	https://www.retrobrewcomputers.org/doku.php?id=boards:sbc:tiny68k
+	Non-free, non-redistributable, downloadable
+
+s100-z80:
+	Pick your boot ROM. Various are open source
+
+scelbi:
+	No boot firmware required (no ROM)
+
+rb-mbc:
+	RomWBW (See above)
+
+rcbus-tms9995:
+	https://github.com/EtchedPixels/RC2014-ROM/tree/master/TMS9995
+	Open Source
+
+rhyophyre:
+	RomWBW (See above)
+
+pz1:
+	https://github.com/NollKollTroll?tab=repositories
+	Open Source
+
+68knano:
+	https://github.com/74hc595/68k-nano/tree/master/code
+
+	FUZIX also builds as the complete system ROM
+	Open Source
+
+littleboard:
+	FUZIX can build an open source ROM to boot Fuzix. The full littleboard
+	firmware and CP/M is non-free.
+
+mini68k:
+	https://www.retrobrewcomputers.org/doku.php?id=software:firmwareos:68000:68000
+	Open Source
+
+mb020:
+	A suitable boot ROM is included with Fuzix
+
+pico68:
+	A suitable boot ROM is included with Fuzix
+
+z80retro:
+	RomWBW (See above)
+	Original firmware also: https://github.com/peterw8102/Z80-Retro
+
+2063:
+	https://github.com/Z80-Retro/2063-Z80-cpm
+	Redistributable
+
+	There's also an ongoing RomWBW project for this
+
+z50bus-z80:
+	Small Computer Monitor (see above)
+
+trcwm6809:
+	https://github.com/trcwm/HD6309-Computer
+	Licensing unclear in part
+
+swt6809:
+	Nonfree (SWT boot firmware, operating systems etc)
+
+nybbles:
+	Nonfree (INS 807x BASIC)
+
+scmp2:
+	Nonfree (INS 806x BASIC).
+
+sbc0k:
+	Nonfree (but most people would write their own firmware anyway)
+
+mini11:
+	https://github.com/EtchedPixels/Mini11
+	Open Source
+
+microtanic6808:
+	TANDOS and monitor/boot ROMs are non-free
+
+nc100:
+	Non-free but Fuzix has a small stub booter for testing
+	Fuzix without the ROM firmware
+
+nc200:
+	Non-free
+
+n8:
+	RomWBW (See above)
+
+nascom:
+	Nonfree. Can use the CP/M boot ROM
+
+uk101:
+	Various firmwares exist, all non-free
+
+vz200/300:
+	Non-free
+
+max80:
+	Non-free
+
+sorceror:
+	Non-free
+
+z80all:
+	Tiny CPLD bootstrap is emulated
+
+osi400:
+	Non-free
+
+osi500:
+	Non-free
+
+spectrum:
+	Redistributable ROM images under their own terms
+
+6502retro:
+	https://github.com/6502-retro
+	Open Source
