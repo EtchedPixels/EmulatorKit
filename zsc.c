@@ -202,7 +202,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "zxc: [-f] [-t] [-i path] [-r path] [-d debug]\n");
+	fprintf(stderr, "zsc: [-f] [-t] [-i path] [-r path] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
