@@ -128,7 +128,7 @@ static void exit_cleanup(void)
 	tcsetattr(0, TCSADRAIN, &saved_term);
 }
 
-void terminal_init()
+void terminal_init(void)
 {
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;

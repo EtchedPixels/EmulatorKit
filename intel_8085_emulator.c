@@ -292,7 +292,7 @@ void i8085_push(uint16_t value) {
 	i8085_write(--reg_SP, (uint8_t)value);
 }
 
-uint16_t i8085_pop() {
+uint16_t i8085_pop(void) {
 	uint16_t temp;
 	temp = i8085_read(reg_SP++);
 	temp |= (uint16_t)i8085_read(reg_SP++) << 8;
@@ -314,7 +314,7 @@ void i8085_jump(uint16_t addr) {
 	reg_PC = addr;
 }
 
-void i8085_reset() {
+void i8085_reset(void) {
 	reg_PC = reg_SP = 0x0000;
 	//reg8[FLAGS] = 0x02;
 }
@@ -1275,7 +1275,7 @@ void i8085_load_symbols(const char *path)
 	char buf[64];
 	unsigned addr;
 	char type;
-	char name[16];
+	char name[17];
 	FILE *fp = fopen(path, "r");
 	if (fp == NULL) {
 		perror(path);

@@ -34,7 +34,7 @@ extern void i8085_write_reg8(reg_t reg, uint8_t value);
 extern uint16_t i8085_read_reg16(reg_t reg);
 extern void i8085_write_reg16(reg_t reg, uint16_t value);
 
-extern void i8085_reset();
+extern void i8085_reset(void);
 
 extern int i8085_exec(int cycles);
 
