@@ -168,7 +168,7 @@ static void sw_raster(struct scopewriter *sw, unsigned pos, uint8_t c)
     uint32_t *rptr = sw->raster + (pos << 3);
     unsigned int x,y;
     uint8_t bits;
-    uint32_t mod, deltamod;
+    uint32_t deltamod;
 
     for (y = 0; y < 16; y++) {
         for (x = 0; x < 8; x++)
@@ -188,13 +188,11 @@ static void sw_raster(struct scopewriter *sw, unsigned pos, uint8_t c)
     }
 
     for (x = 0; x < 8; x++) {
-        mod = 0x00000000;
         deltamod = 0x00000000;
         rptr = sw->raster + (pos << 3) + x + 31 * 256;
         for (y = 0; y < 32; y++) {
             if (((*rptr >> 8) & 0xFF) >= 0xCC)
                 deltamod += 0x00000200;
-            mod += deltamod;
             *rptr += deltamod;
             if (y == 16 + ((((pos << 3) + x) * 17) & 3))
                 deltamod += deltamod;
