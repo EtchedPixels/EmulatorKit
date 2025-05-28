@@ -243,12 +243,12 @@ uint32 clockticks6502 = 0;
 uint32 clockgoal6502 = 0;
 ushort oldpc, ea, reladdr, value, result;
 uint8 opcode, oldstatus, waiting6502 = 0;
-void reset6502(void);
-void nmi6502(void);
-void irq6502(void);
-void irq6502(void);
+void reset6502();
+void nmi6502();
+void irq6502();
+void irq6502();
 uint32 exec6502(uint32 tickcount);
-uint32 step6502(void);
+uint32 step6502();
 void hookexternal(void *funcptr);
 #else
 static ushort pc;
@@ -276,14 +276,14 @@ static void push_6502_8(uint8 pushval) {
     write6502(BASE_STACK + sp--, pushval);
 }
 
-static ushort pull_6502_16(void) {
+static ushort pull_6502_16() {
     ushort temp16;
     temp16 = read6502(BASE_STACK + ((sp + 1) & 0xFF)) | ((ushort)read6502(BASE_STACK + ((sp + 2) & 0xFF)) << 8);
     sp += 2;
     return(temp16);
 }
 
-static uint8 pull_6502_8(void) {
+static uint8 pull_6502_8() {
     return (read6502(BASE_STACK + ++sp));
 }
 
@@ -292,7 +292,7 @@ static ushort mem_6502_read16(ushort addr) {
             ((ushort)read6502(addr + 1) << 8));
 }
 
-void reset6502(void) {
+void reset6502() {
 	/*
 	    pc = (ushort)read6502(0xFFFC) | ((ushort)read6502(0xFFFD) << 8);
 	    a = 0;
@@ -312,46 +312,46 @@ void reset6502(void) {
 }
 
 
-static void (*addrtable[256])(void);
-static void (*optable[256])(void);
+static void (*addrtable[256])();
+static void (*optable[256])();
 static uint8 penaltyop, penaltyaddr;
 
 /*addressing mode functions, calculates effective addresses*/
-static void imp(void) { 
+static void imp() { 
 }
 
 /*addressing mode functions, calculates effective addresses*/
-static void acc(void) { 
+static void acc() { 
 }
 
 /*addressing mode functions, calculates effective addresses*/
-static void imm(void) { 
+static void imm() { 
     ea = pc++;
 }
 
-static void zp(void) { /*zero-page*/
+static void zp() { /*zero-page*/
     ea = (ushort)read6502((ushort)pc++);
 }
 
-static void zpx(void) { /*zero-page,X*/
+static void zpx() { /*zero-page,X*/
     ea = ((ushort)read6502((ushort)pc++) + (ushort)x) & 0xFF; /*zero-page wraparound*/
 }
 
-static void zpy(void) { /*zero-page,Y*/
+static void zpy() { /*zero-page,Y*/
     ea = ((ushort)read6502((ushort)pc++) + (ushort)y) & 0xFF; /*zero-page wraparound*/
 }
 
-static void rel(void) { /*relative for branch ops (8-bit immediate value, sign-extended)*/
+static void rel() { /*relative for branch ops (8-bit immediate value, sign-extended)*/
     reladdr = (ushort)read6502(pc++);
     if (reladdr & 0x80) reladdr |= 0xFF00;
 }
 
-static void abso(void) { /*absolute*/
+static void abso() { /*absolute*/
     ea = (ushort)read6502(pc) | ((ushort)read6502(pc+1) << 8);
     pc += 2;
 }
 
-static void absx(void) { /*absolute,X*/
+static void absx() { /*absolute,X*/
     ushort startpage;
     ea = ((ushort)read6502(pc) | ((ushort)read6502(pc+1) << 8));
     startpage = ea & 0xFF00;
@@ -364,7 +364,7 @@ static void absx(void) { /*absolute,X*/
     pc += 2;
 }
 
-static void absy(void) { /*absolute,Y*/
+static void absy() { /*absolute,Y*/
     ushort startpage;
     ea = ((ushort)read6502(pc) | ((ushort)read6502(pc+1) << 8));
     startpage = ea & 0xFF00;
@@ -377,7 +377,7 @@ static void absy(void) { /*absolute,Y*/
     pc += 2;
 }
 
-static void ind(void) { /*indirect*/
+static void ind() { /*indirect*/
     ushort eahelp, eahelp2;
     eahelp = (ushort)read6502(pc) | (ushort)((ushort)read6502(pc+1) << 8);
     /*Page boundary bug is absent on CMOS models.*/
@@ -386,13 +386,13 @@ static void ind(void) { /*indirect*/
     pc += 2;
 }
 
-static void indx(void) { /* (indirect,X)*/
+static void indx() { /* (indirect,X)*/
     ushort eahelp;
     eahelp = (ushort)(((ushort)read6502(pc++) + (ushort)x) & 0xFF); /*zero-page wraparound for table pointer*/
     ea = (ushort)read6502(eahelp & 0x00FF) | ((ushort)read6502((eahelp+1) & 0x00FF) << 8);
 }
 
-static void indy(void) { /* (indirect),Y*/
+static void indy() { /* (indirect),Y*/
     ushort eahelp, eahelp2, startpage;
     eahelp = (ushort)read6502(pc++);
     eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); /*zero-page wraparound*/
@@ -405,7 +405,7 @@ static void indy(void) { /* (indirect),Y*/
     }
 }
 
-static void zprel(void) { /* zero-page, relative for branch ops (8-bit immediate value, sign-extended)*/
+static void zprel() { /* zero-page, relative for branch ops (8-bit immediate value, sign-extended)*/
 	ea = (ushort)read6502(pc);
 	reladdr = (ushort)read6502(pc+1);
 	if (reladdr & 0x80) reladdr |= 0xFF00;
@@ -413,12 +413,12 @@ static void zprel(void) { /* zero-page, relative for branch ops (8-bit immediate
 	pc += 2;
 }
 
-static ushort getvalue(void) {
+static ushort getvalue() {
     if (addrtable[opcode] == acc) return((ushort)a);
     else return((ushort)read6502(ea));
 }
 
-//static ushort getvalue16(void) {
+//static ushort getvalue16() {
 //    return((ushort)read6502(ea) | ((ushort)read6502(ea+1) << 8));
 //}
 
@@ -429,7 +429,7 @@ static void putvalue(ushort saveval) {
 
 
 /*instruction handler functions*/
-static void adc(void) {
+static void adc() {
     penaltyop = 1;
     if (status & FLAG_DECIMAL) {
         ushort AL, A  /*, result_dec */;
@@ -458,7 +458,7 @@ static void adc(void) {
     saveaccum(result);
 }
 
-static void and(void) {
+static void and() {
     penaltyop = 1;
     value = getvalue();
     result = (ushort)a & value;
@@ -469,7 +469,7 @@ static void and(void) {
     saveaccum(result);
 }
 
-static void asl(void) {
+static void asl() {
     value = getvalue();
     result = value << 1;
 
@@ -480,7 +480,7 @@ static void asl(void) {
     putvalue(result);
 }
 
-static void bcc(void) {
+static void bcc() {
     if ((status & FLAG_CARRY) == 0) {
         oldpc = pc;
         pc += reladdr;
@@ -489,7 +489,7 @@ static void bcc(void) {
     }
 }
 
-static void bcs(void) {
+static void bcs() {
     if ((status & FLAG_CARRY) == FLAG_CARRY) {
         oldpc = pc;
         pc += reladdr;
@@ -498,7 +498,7 @@ static void bcs(void) {
     }
 }
 
-static void beq(void) {
+static void beq() {
     if ((status & FLAG_ZERO) == FLAG_ZERO) {
         oldpc = pc;
         pc += reladdr;
@@ -507,20 +507,20 @@ static void beq(void) {
     }
 }
 
-static void bit(void) {
+static void bit() {
     value = getvalue();
     result = (ushort)a & value;
     zerocalc(result);
     status = (status & 0x3F) | (uint8)(value & 0xC0);
 }
 
-static void bit_imm(void) {
+static void bit_imm() {
     value = getvalue();
     result = (ushort)a & value;
     zerocalc(result);
 }
 
-static void bmi(void) {
+static void bmi() {
     if ((status & FLAG_SIGN) == FLAG_SIGN) {
         oldpc = pc;
         pc += reladdr;
@@ -529,7 +529,7 @@ static void bmi(void) {
     }
 }
 
-static void bne(void) {
+static void bne() {
     if ((status & FLAG_ZERO) == 0) {
         oldpc = pc;
         pc += reladdr;
@@ -538,7 +538,7 @@ static void bne(void) {
     }
 }
 
-static void bpl(void) {
+static void bpl() {
     if ((status & FLAG_SIGN) == 0) {
         oldpc = pc;
         pc += reladdr;
@@ -547,7 +547,7 @@ static void bpl(void) {
     }
 }
 
-static void brk_6502(void) {
+static void brk_6502() {
     pc++;
     push_6502_16(pc);
     push_6502_8(status | FLAG_BREAK);
@@ -556,7 +556,7 @@ static void brk_6502(void) {
     pc = (ushort)read6502(0xFFFE) | ((ushort)read6502(0xFFFF) << 8);
 }
 
-static void bvc(void) {
+static void bvc() {
     if ((status & FLAG_OVERFLOW) == 0) {
         oldpc = pc;
         pc += reladdr;
@@ -565,7 +565,7 @@ static void bvc(void) {
     }
 }
 
-static void bvs(void) {
+static void bvs() {
     if ((status & FLAG_OVERFLOW) == FLAG_OVERFLOW) {
         oldpc = pc;
         pc += reladdr;
@@ -574,23 +574,23 @@ static void bvs(void) {
     }
 }
 
-static void clc(void) {
+static void clc() {
     clearcarry();
 }
 
-static void cld(void) {
+static void cld() {
     cleardecimal();
 }
 
-static void cli(void) {
+static void cli() {
     clearinterrupt();
 }
 
-static void clv(void) {
+static void clv() {
     clearoverflow();
 }
 
-static void cmp(void) {
+static void cmp() {
     penaltyop = 1;
     value = getvalue();
     result = (ushort)a - value;
@@ -602,7 +602,7 @@ static void cmp(void) {
     signcalc(result);
 }
 
-static void cpx(void) {
+static void cpx() {
     value = getvalue();
     result = (ushort)x - value;
    
@@ -613,7 +613,7 @@ static void cpx(void) {
     signcalc(result);
 }
 
-static void cpy(void) {
+static void cpy() {
     value = getvalue();
     result = (ushort)y - value;
    
@@ -624,7 +624,7 @@ static void cpy(void) {
     signcalc(result);
 }
 
-static void dec(void) {
+static void dec() {
     value = getvalue();
     result = value - 1;
    
@@ -634,21 +634,21 @@ static void dec(void) {
     putvalue(result);
 }
 
-static void dex(void) {
+static void dex() {
     x--;
    
     zerocalc(x);
     signcalc(x);
 }
 
-static void dey(void) {
+static void dey() {
     y--;
    
     zerocalc(y);
     signcalc(y);
 }
 
-static void eor(void) {
+static void eor() {
     penaltyop = 1;
     value = getvalue();
     result = (ushort)a ^ value;
@@ -659,7 +659,7 @@ static void eor(void) {
     saveaccum(result);
 }
 
-static void inc(void) {
+static void inc() {
     value = getvalue();
     result = value + 1;
    
@@ -669,31 +669,31 @@ static void inc(void) {
     putvalue(result);
 }
 
-static void inx(void) {
+static void inx() {
     x++;
    
     zerocalc(x);
     signcalc(x);
 }
 
-static void iny(void) {
+static void iny() {
     y++;
    
     zerocalc(y);
     signcalc(y);
 }
 
-static void jmp(void) {
+static void jmp() {
     pc = ea;
     /*if(opcode == 0x6c) clockticks6502++;*/
 }
 
-static void jsr(void) {
+static void jsr() {
     push_6502_16(pc - 1);
     pc = ea;
 }
 
-static void lda(void) {
+static void lda() {
     penaltyop = 1;
     value = getvalue();
     a = (uint8)(value & 0x00FF);
@@ -702,7 +702,7 @@ static void lda(void) {
     signcalc(a);
 }
 
-static void ldx(void) {
+static void ldx() {
     penaltyop = 1;
     value = getvalue();
     x = (uint8)(value & 0x00FF);
@@ -711,7 +711,7 @@ static void ldx(void) {
     signcalc(x);
 }
 
-static void ldy(void) {
+static void ldy() {
     penaltyop = 1;
     value = getvalue();
     y = (uint8)(value & 0x00FF);
@@ -720,7 +720,7 @@ static void ldy(void) {
     signcalc(y);
 }
 
-static void lsr(void) {
+static void lsr() {
     value = getvalue();
     result = value >> 1;
    
@@ -732,7 +732,7 @@ static void lsr(void) {
     putvalue(result);
 }
 
-static void nop(void) {
+static void nop() {
     switch (opcode) {
         case 0x1C:
         case 0x3C:
@@ -745,7 +745,7 @@ static void nop(void) {
     }
 }
 
-static void ora(void) {
+static void ora() {
     penaltyop = 1;
     value = getvalue();
     result = (ushort)a | value;
@@ -756,26 +756,26 @@ static void ora(void) {
     saveaccum(result);
 }
 
-static void pha(void) {
+static void pha() {
     push_6502_8(a);
 }
 
-static void php(void) {
+static void php() {
     push_6502_8(status | FLAG_BREAK);
 }
 
-static void pla(void) {
+static void pla() {
     a = pull_6502_8();
    
     zerocalc(a);
     signcalc(a);
 }
 
-static void plp(void) {
+static void plp() {
     status = pull_6502_8() | FLAG_CONSTANT;
 }
 
-static void rol(void) {
+static void rol() {
     value = getvalue();
     result = (value << 1) | (status & FLAG_CARRY);
    
@@ -786,7 +786,7 @@ static void rol(void) {
     putvalue(result);
 }
 
-static void ror(void) {
+static void ror() {
     value = getvalue();
     result = (value >> 1) | ((status & FLAG_CARRY) << 7);
    
@@ -798,18 +798,18 @@ static void ror(void) {
     putvalue(result);
 }
 
-static void rti(void) {
+static void rti() {
     status = pull_6502_8();
     value = pull_6502_16();
     pc = value;
 }
 
-static void rts(void) {
+static void rts() {
     value = pull_6502_16();
     pc = value + 1;
 }
 
-static void sbc(void) {
+static void sbc() {
     penaltyop = 1;
     if (status & FLAG_DECIMAL) {
     	ushort result_dec, A, AL, B, C;
@@ -840,63 +840,63 @@ static void sbc(void) {
     saveaccum(result);
 }
 
-static void sec(void) {
+static void sec() {
     setcarry();
 }
 
-static void sed(void) {
+static void sed() {
     setdecimal();
 }
 
-static void sei(void) {
+static void sei() {
     setinterrupt();
 }
 
-static void sta(void) {
+static void sta() {
     putvalue(a);
 }
 
-static void stx(void) {
+static void stx() {
     putvalue(x);
 }
 
-static void sty(void) {
+static void sty() {
     putvalue(y);
 }
 
-static void tax(void) {
+static void tax() {
     x = a;
    
     zerocalc(x);
     signcalc(x);
 }
 
-static void tay(void) {
+static void tay() {
     y = a;
    
     zerocalc(y);
     signcalc(y);
 }
 
-static void tsx(void) {
+static void tsx() {
     x = sp;
    
     zerocalc(x);
     signcalc(x);
 }
 
-static void txa(void) {
+static void txa() {
     a = x;
    
     zerocalc(a);
     signcalc(a);
 }
 
-static void txs(void) {
+static void txs() {
     sp = x;
 }
 
-static void tya(void) {
+static void tya() {
     a = y;
    
     zerocalc(a);
@@ -907,14 +907,14 @@ static void tya(void) {
 /*
 		CMOS ADDITIONS
 */
-static void ind0(void) {
+static void ind0() {
     ushort eahelp, eahelp2;
     eahelp = (ushort)read6502(pc++);
     eahelp2 = (eahelp & 0xFF00) | ((eahelp + 1) & 0x00FF); /*zero page wrap*/
     ea = (ushort)read6502(eahelp) | ((ushort)read6502(eahelp2) << 8);
 }
 
-static void ainx(void) { 		/* abs indexed bra*/
+static void ainx() { 		/* abs indexed bra*/
     ushort eahelp, eahelp2;
     eahelp = (ushort)read6502(pc) | (ushort)((ushort)read6502(pc+1) << 8);
     eahelp = (eahelp + (ushort)x) & 0xFFFF;
@@ -923,11 +923,11 @@ static void ainx(void) { 		/* abs indexed bra*/
     pc += 2;
 }
 
-static void stz(void){
+static void stz(){
 	putvalue(0);
 }
 
-static void bra(void) {
+static void bra() {
     oldpc = pc;
     pc += reladdr;
     if ((oldpc & 0xFF00) != (pc & 0xFF00)) clockticks6502 += 2; /*page boundary*/
@@ -935,22 +935,22 @@ static void bra(void) {
 }
 
 
-static void phx(void) {
+static void phx() {
     push_6502_8(x);
 }
 
-static void plx(void) {
+static void plx() {
     x = pull_6502_8();
    
     zerocalc(x);
     signcalc(x);
 }
 
-static void phy(void) {
+static void phy() {
     push_6502_8(y);
 }
 
-static void ply(void) {
+static void ply() {
     y = pull_6502_8();
   
     zerocalc(y);
@@ -958,7 +958,7 @@ static void ply(void) {
 }
 
 
-static void tsb(void) {
+static void tsb() {
     value = getvalue();
     result = (ushort)a & value;
     zerocalc(result);
@@ -966,7 +966,7 @@ static void tsb(void) {
     putvalue(result);
 }
 
-static void trb(void) {
+static void trb() {
     value = getvalue();
     result = (ushort)a & value;
     zerocalc(result);
@@ -974,12 +974,12 @@ static void trb(void) {
     putvalue(result);
 }
 
-static void db6502(void){
+static void db6502(){
 	pc--; /*This is how we wait until RESET.*/
 	return;
 }
 
-static void wai(void) {
+static void wai() {
 	if (~status & FLAG_INTERRUPT) waiting6502 = 1;
 }
 static void bbr(ushort bitmask)
@@ -991,14 +991,14 @@ static void bbr(ushort bitmask)
 		else clockticks6502++;
 	}
 }
-static void bbr0(void) {bbr(0x01);}
-static void bbr1(void) {bbr(0x02);}
-static void bbr2(void) {bbr(0x04);}
-static void bbr3(void) {bbr(0x08);}
-static void bbr4(void) {bbr(0x10);}
-static void bbr5(void) {bbr(0x20);}
-static void bbr6(void) {bbr(0x40);}
-static void bbr7(void) {bbr(0x80);}
+static void bbr0() {bbr(0x01);}
+static void bbr1() {bbr(0x02);}
+static void bbr2() {bbr(0x04);}
+static void bbr3() {bbr(0x08);}
+static void bbr4() {bbr(0x10);}
+static void bbr5() {bbr(0x20);}
+static void bbr6() {bbr(0x40);}
+static void bbr7() {bbr(0x80);}
 
 static void bbs(ushort bitmask)
 {
@@ -1009,33 +1009,33 @@ static void bbs(ushort bitmask)
 		else clockticks6502++;
 	}
 }
-static void bbs0(void) {bbs(0x01);}
-static void bbs1(void) {bbs(0x02);}
-static void bbs2(void) {bbs(0x04);}
-static void bbs3(void) {bbs(0x08);}
-static void bbs4(void) {bbs(0x10);}
-static void bbs5(void) {bbs(0x20);}
-static void bbs6(void) {bbs(0x40);}
-static void bbs7(void) {bbs(0x80);}
+static void bbs0() {bbs(0x01);}
+static void bbs1() {bbs(0x02);}
+static void bbs2() {bbs(0x04);}
+static void bbs3() {bbs(0x08);}
+static void bbs4() {bbs(0x10);}
+static void bbs5() {bbs(0x20);}
+static void bbs6() {bbs(0x40);}
+static void bbs7() {bbs(0x80);}
 
 
-static void smb0(void) { putvalue(getvalue() | 0x01); }
-static void smb1(void) { putvalue(getvalue() | 0x02); }
-static void smb2(void) { putvalue(getvalue() | 0x04); }
-static void smb3(void) { putvalue(getvalue() | 0x08); }
-static void smb4(void) { putvalue(getvalue() | 0x10); }
-static void smb5(void) { putvalue(getvalue() | 0x20); }
-static void smb6(void) { putvalue(getvalue() | 0x40); }
-static void smb7(void) { putvalue(getvalue() | 0x80); }
+static void smb0() { putvalue(getvalue() | 0x01); }
+static void smb1() { putvalue(getvalue() | 0x02); }
+static void smb2() { putvalue(getvalue() | 0x04); }
+static void smb3() { putvalue(getvalue() | 0x08); }
+static void smb4() { putvalue(getvalue() | 0x10); }
+static void smb5() { putvalue(getvalue() | 0x20); }
+static void smb6() { putvalue(getvalue() | 0x40); }
+static void smb7() { putvalue(getvalue() | 0x80); }
 
-static void rmb0(void) { putvalue(getvalue() & ~0x01); }
-static void rmb1(void) { putvalue(getvalue() & ~0x02); }
-static void rmb2(void) { putvalue(getvalue() & ~0x04); }
-static void rmb3(void) { putvalue(getvalue() & ~0x08); }
-static void rmb4(void) { putvalue(getvalue() & ~0x10); }
-static void rmb5(void) { putvalue(getvalue() & ~0x20); }
-static void rmb6(void) { putvalue(getvalue() & ~0x40); }
-static void rmb7(void) { putvalue(getvalue() & ~0x80); }
+static void rmb0() { putvalue(getvalue() & ~0x01); }
+static void rmb1() { putvalue(getvalue() & ~0x02); }
+static void rmb2() { putvalue(getvalue() & ~0x04); }
+static void rmb3() { putvalue(getvalue() & ~0x08); }
+static void rmb4() { putvalue(getvalue() & ~0x10); }
+static void rmb5() { putvalue(getvalue() & ~0x20); }
+static void rmb6() { putvalue(getvalue() & ~0x40); }
+static void rmb7() { putvalue(getvalue() & ~0x80); }
 
 /*undocumented instructions~~~~~~~~~~~~~~~~~~~~~~~~~*/
 /*
@@ -1049,7 +1049,7 @@ static void rmb7(void) { putvalue(getvalue() & ~0x80); }
 	#define rra nop
 */
 
-static void (*addrtable[256])(void) = {
+static void (*addrtable[256])() = {
 /*        |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  A  |  B  |  C  |  D  |  E  |  F  |     */
 /* 0 */     imp, indx,  imp,  imp,   zp,   zp,   zp,   zp,  imp,  imm,  acc,  imp, abso, abso, abso,zprel, /* 0 */
 /* 1 */     rel, indy, ind0,  imp,   zp,  zpx,  zpx,   zp,  imp, absy,  acc,  imp, abso, absx, absx,zprel, /* 1 */
@@ -1073,7 +1073,7 @@ static void (*addrtable[256])(void) = {
 	NOTE: the "db6502" instruction is *supposed* to be "wait until hardware reset"
 */
 
-static void (*optable[256])(void) = {
+static void (*optable[256])() = {
 /*        |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  A  |  B  |  C  |  D  |  E  |  F  |     */
 /* 0 */      brk_6502,  ora,  nop,  nop,  tsb,  ora,  asl, rmb0,  php,  ora,  asl,  nop,  tsb,  ora,  asl, bbr0, /* 0 */
 /* 1 */      bpl,  ora,  ora,  nop,  trb,  ora,  asl, rmb1,  clc,  ora,  inc,  nop,  trb,  ora,  asl, bbr1, /* 1 */
@@ -1114,7 +1114,7 @@ static const uint32 ticktable[256] = {
 };
 
 
-void nmi6502(void) {
+void nmi6502() {
     push_6502_16(pc);
     push_6502_8(status  & ~FLAG_BREAK);
     setinterrupt();
@@ -1123,7 +1123,7 @@ void nmi6502(void) {
     waiting6502 = 0;
 }
 
-void irq6502(void) {
+void irq6502() {
 	/*
 	    push_6502_16(pc);
 	    push_6502_8(status);
@@ -1143,7 +1143,7 @@ void irq6502(void) {
 }
 
 uint8 callexternal = 0;
-void (*loopexternal)(void);
+void (*loopexternal)();
 
 uint32 exec6502(uint32 tickcount) {
 	/*
@@ -1171,7 +1171,7 @@ uint32 exec6502(uint32 tickcount) {
 	return clockticks6502;
 }
 
-uint32 step6502(void) {
+uint32 step6502() {
 	if(waiting6502) return 1;
     opcode = read6502(pc++);
     status |= FLAG_CONSTANT;
