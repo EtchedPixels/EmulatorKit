@@ -281,6 +281,7 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	fdc->rd = 0;
 	fdc->wr = 0;
 	fdc->pos = 0;
+	fdc->intrq = 0;
 
 	switch (v & 0xF0 ) {
 	case 0x00:
@@ -288,13 +289,11 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->status |= TRACK0 | INDEX;
 		if (v & 8)
 			fdc->status |= HEADLOAD;
-		fdc->intrq = 1;
 		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
 		if (v & 0x08) {
 			if (fdc->side >= fdc->sides[fdc->drive]) {
 				fdc->status |= RECNFERR;
-				fdc->intrq = 1;
 				return;
 			}
 			wd17xx_check_density(fdc);
@@ -303,7 +302,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		   started */
 		break;
 	case 0x10:	/* seek */
-		fdc->intrq = 1;
 		if (fdc->track < fdc->buf[0])
 			fdc->stepdir = 1;
 		if (fdc->track > fdc->buf[0])
@@ -321,7 +319,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (v & 0x08) {
 			if (fdc->side >= fdc->sides[fdc->drive]) {
 				fdc->status |= SEEKERR;
-				fdc->intrq = 1;
 				return;
 			}
 			fdc->status |= HEADLOAD;
@@ -347,7 +344,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->status |= HEADLOAD;
 			wd17xx_check_density(fdc);
 		}
-		fdc->intrq = 1;
 		break;
 	case 0x40:	/* step in */
 	case 0x50:
@@ -365,7 +361,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->status |= HEADLOAD;
 			wd17xx_check_density(fdc);
 		}
-		fdc->intrq = 1;
 		fdc->stepdir = 1;
 		wd17xx_motor(fdc, motor);
 		break;
@@ -385,7 +380,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->status |= HEADLOAD;
 			wd17xx_check_density(fdc);
 		}
-		fdc->intrq = 1;
 		fdc->stepdir = -1;
 		wd17xx_motor(fdc, motor);
 		break;
@@ -393,17 +387,17 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (track >= fdc->tracks[fdc->drive] ||
 			fdc->sector - fdc->sector0[fdc->drive]
 				 >= fdc->spt[fdc->drive]) {
-			fprintf(stderr, "want track %d, max %d: want sector %d, spt %d s0 %d\n",
-				track, fdc->tracks[fdc->drive], fdc->sector, fdc->spt[fdc->drive],
-				fdc->sector0[fdc->drive]);
+			 if (fdc->trace)
+				fprintf(stderr, "want track %d, max %d: want sector %d, spt %d s0 %d\n",
+					track, fdc->tracks[fdc->drive], fdc->sector, fdc->spt[fdc->drive],
+					fdc->sector0[fdc->drive]);
 			fdc->status |= INDEX | RECNFERR;
-			fdc->intrq = 1;
 			return;
 		}
 		if (fdc->side >= fdc->sides[fdc->drive]) {
-			fprintf(stderr, "want side %d max %d\n", fdc->side, fdc->sides[fdc->drive]);
+			if (fdc->trace)
+				fprintf(stderr, "want side %d max %d\n", fdc->side, fdc->sides[fdc->drive]);
 			fdc->status |= INDEX | RECNFERR;
-			fdc->intrq = 1;
 			return;
 		}
 		wd17xx_side_control(fdc, v);
@@ -431,12 +425,10 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 			fdc->sector - fdc->sector0[fdc->drive]
 				>= fdc->spt[fdc->drive]) {
 			fdc->status |= RECNFERR;
-			fdc->intrq = 1;
 			return;
 		}
 		if (fdc->side >= fdc->sides[fdc->drive]) {
 			fdc->status |= RECNFERR;
-			fdc->intrq = 1;
 			return;
 		}
 		fdc->status |= DRQ;
@@ -450,7 +442,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		wd17xx_side_control(fdc, v);
 		if (fdc->side >= fdc->sides[fdc->drive]) {
 			fdc->status |= RECNFERR;
-			fdc->intrq = 1;
 			return;
 		}
 		fdc->status |= DRQ;
@@ -510,7 +501,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		fdc->status &= ~DRQ;
 		fdc->rd = 0;
 		fdc->wr = 0;
-		fdc->intrq = 1;
 		break;
 	}
 }
@@ -522,8 +512,10 @@ uint8_t wd17xx_status(struct wd17xx *fdc)
 	fdc->intrq = 0;
 	if (fdc->busy) {
 		fdc->busy--;
-		if (!fdc->busy)
+		if (!fdc->busy) {
 			fdc->status &= ~BUSY;
+			fdc->intrq = 1;
+		}
 	}
 	/* On the 1793 0x80 is high when the drive is not ready
 	   On the 1772 it means motor on so is inverted */
@@ -535,6 +527,13 @@ uint8_t wd17xx_status(struct wd17xx *fdc)
 
 uint8_t wd17xx_status_noclear(struct wd17xx *fdc)
 {
+	if (fdc->busy) {
+		fdc->busy--;
+		if (!fdc->busy) {
+			fdc->status &= ~BUSY;
+			fdc->intrq = 1;
+		}
+	}
 	return fdc->status | (fdc->motor ? 0x80 : 0x00);
 }
 
