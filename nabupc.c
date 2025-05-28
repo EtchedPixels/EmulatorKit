@@ -791,7 +791,7 @@ static void hcci_connect(const char *p)
 		hcci_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (hcci_fd != -1) {
 			if (connect(hcci_fd, res->ai_addr, res->ai_addrlen) != -1) {
-				fcntl(hcci_fd, F_SETFL, O_NONBLOCK);
+				fcntl(hcci_fd, F_SETFL, FNDELAY);
 				return;
 			}
 			perror("connect");

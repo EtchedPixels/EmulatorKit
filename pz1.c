@@ -294,7 +294,7 @@ static void io_write(uint16_t addr, uint8_t val)
 
 uint8_t read65c816(uint32_t addr, uint8_t debug)
 {
-	uint8_t val = 0;
+	uint8_t val;
 
 	addr &= 0xFFFF;		/* 16 bit input */
 	if (addr < IO_PAGE) {
@@ -310,12 +310,14 @@ uint8_t read65c816(uint32_t addr, uint8_t debug)
 					(uint8_t) val);
 		}
 		/* high reads are faulty */
-		else if (trace & TRACE_MEM) {
+		else {
 			val = 0xFF;
-			fprintf(stderr, "Discarded: R above 512KiB %04X[%02X] = %02X\n",
+			if (trace & TRACE_MEM) {
+				fprintf(stderr, "Discarded: R above 512KiB %04X[%02X] = %02X\n",
 					(uint16_t) addr,
 					(uint8_t) block,
 					(uint8_t) val);
+			}
 		}
 	} else if ((addr & 0xFF00) == IO_PAGE) {
 		/* 0xFE00-0xFEFF, IO read */

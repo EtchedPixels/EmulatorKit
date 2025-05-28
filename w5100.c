@@ -42,6 +42,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 
+#include "system.h"
 #include "w5100.h"
 
 typedef enum w5100_socket_mode {
@@ -353,7 +354,7 @@ w5100_socket_open( nic_w5100_socket_t *socket_obj )
         description, socket_obj->id, errno, strerror(errno) );
       return;
     }
-    fcntl(socket_obj->fd, F_SETFL, O_NONBLOCK);
+    fcntl(socket_obj->fd, F_SETFL, FNDELAY);
 
     if( setsockopt( socket_obj->fd, SOL_SOCKET, SO_REUSEADDR, &one,
       sizeof(one) ) == -1 ) {
