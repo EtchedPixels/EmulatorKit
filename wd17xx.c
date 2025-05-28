@@ -355,7 +355,6 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 		if (v & 0x08) {
 			if (fdc->side >= fdc->sides[fdc->drive]) {
 				fdc->status |= RECNFERR;
-				fdc->intrq = 1;
 				return;
 			}
 			fdc->status |= HEADLOAD;
@@ -527,11 +526,13 @@ uint8_t wd17xx_status(struct wd17xx *fdc)
 
 uint8_t wd17xx_status_noclear(struct wd17xx *fdc)
 {
+	fprintf(stderr, "fdc busy %u\n", fdc->busy);
 	if (fdc->busy) {
 		fdc->busy--;
 		if (!fdc->busy) {
 			fdc->status &= ~BUSY;
 			fdc->intrq = 1;
+			fprintf(stderr, "INTRQ goes high.\n");
 		}
 	}
 	return fdc->status | (fdc->motor ? 0x80 : 0x00);

@@ -26,15 +26,15 @@ static uint8_t waitport(struct wd17xx *fdc)
         st = 0;
         /* Real hardware waits until DRQ on transfers */
         if (wd17xx_intrq(fdc))
-            st |= 0x80;
-        if ((wd17xx_status_noclear(fdc) & 2) && lcmd >= 0x80)
             st |= 0x01;
+        if ((wd17xx_status_noclear(fdc) & 2) && lcmd >= 0x80)
+            st |= 0x80;
         fprintf(stderr, "waitport: %02X\n", st);
         if (st)
             break;
         wd17xx_tick(fdc, 1);
     }
-    st ^= 0x80;	/* Testing */
+    st ^= 0x01;	/* Testing */
     fprintf(stderr, "tbc: wait port %02X\n", st);
     return st;
 }
