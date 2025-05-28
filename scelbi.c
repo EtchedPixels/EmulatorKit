@@ -191,7 +191,6 @@ uint8_t io_read(struct i8008 *cpu, uint8_t port)
 	if (port == 4) {
 		if (asciikbd_ready(kbd)) {
 			v = asciikbd_read(kbd) | 0x80;
-			printf("kbd 0x%02x\n", v);
 			return v;
 		}
 		return 0;
