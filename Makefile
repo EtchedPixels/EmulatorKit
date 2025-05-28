@@ -213,8 +213,8 @@ s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
 s100-8080: s100-8080.o intel_8080_emulator.o mits1.o ide.o ttycon.o
 	cc -g3 s100-8080.o mits1.o ttycon.o ide.o intel_8080_emulator.o -o s100-8080
 
-poly88: poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o
-	cc -g3 poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o -o poly88 -lSDL2
+poly88: poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o
+	cc -g3 poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o -o poly88 -lSDL2
 
 mini11: mini11.o 68hc11.o sdcard.o 6522.o
 	cc -g3 mini11.o sdcard.o 6522.o 68hc11.o -o mini11

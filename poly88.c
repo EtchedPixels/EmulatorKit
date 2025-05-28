@@ -48,6 +48,8 @@
 #include "ide.h"
 #include "asciikbd.h"
 #include "nasfont.h"	/* Near enough correct as makes no difference */
+#include "wd17xx.h"
+#include "tarbell_fdc.h"
 
 static uint8_t rom[3072];
 static uint8_t highrom[4096];		/* High ROM off the I/O bus */
@@ -65,6 +67,7 @@ static unsigned emulator_done;
 
 static struct ide_controller *ide;
 static struct i8251 *uart;
+static struct wd17xx *fdc;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
@@ -72,6 +75,7 @@ static struct i8251 *uart;
 #define TRACE_SERIAL	8
 #define TRACE_IRQ	16
 #define TRACE_CPU	32
+#define TRACE_FDC	64
 
 static int trace = 0;
 
@@ -118,20 +122,20 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 	   this way ! */
 	if ((addr & 0xFC00) == vidbase)
 		return vram + (addr & 0x03FF);	/* Assume 1K fitted */
-	/* Upper ROM from an I/O card */		
+	/* Upper ROM from an I/O card */
 	if ((addr & 0xFC00) == 0xFC00) {
 		if (wr)
 			return NULL;
 		return highrom + (addr & 0x3FF);
 	}
 	/* External memory goes here */
-	if (addr < ramsize)	/* PHANTOM is off */
+	if (addr < ramsize || addr >= 0xF000)
 		return ram + addr;
 	if (wr)
 		return NULL;
 	return &idle_bus;
 }
-	
+
 uint8_t i8080_read(uint16_t addr)
 {
 	uint8_t r;
@@ -231,6 +235,8 @@ uint8_t i8080_inport(uint8_t addr)
 		return onboard_in(addr);
 	if ((addr & 0xFC) == (vidbase >> 8))
 		return video_in(addr);
+	if (fdc && addr >= 0xE8 && addr <= 0xEF)
+		return tbfdc_read(fdc, addr & 7);
 	if (ide && addr >= 0x30 && addr <= 0x37)
 		return ide_read8(ide, addr);
 	if (trace & TRACE_UNK)
@@ -246,6 +252,8 @@ void i8080_outport(uint8_t addr, uint8_t val)
 		onboard_out(addr, val);
 	else if ((addr & 0xFC) == (vidbase >> 8))
 		video_out(addr, val);
+	else if (fdc && addr >= 0xE8 && addr <= 0xEF)
+		tbfdc_write(fdc, addr & 7, val);
 	else if (ide && addr >= 0x30 && addr <= 0x37)
 		ide_write8(ide, addr, val);
 	else if (addr == 0xFD)
@@ -276,7 +284,7 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 		pixp += 63 * CWIDTH;
 	}
 }
-		
+
 static void poly_rasterize(void)
 {
 	unsigned int lines, cols;
@@ -291,7 +299,7 @@ static void poly_rasterize(void)
 static void poly_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = 64 * CWIDTH;
 	rect.h = 16 * CHEIGHT;
@@ -401,10 +409,17 @@ int main(int argc, char *argv[])
 	int opt;
 	int fd;
 	char *rompath = "poly88.rom";
+	char *drive_a = NULL, *drive_b = NULL;
 	char *idepath = NULL;
 
-	while ((opt = getopt(argc, argv, "d:F:fi:m:r:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:F:fi:m:r:")) != -1) {
 		switch (opt) {
+		case 'A':
+			drive_a = optarg;
+			break;
+		case 'B':
+			drive_b = optarg;
+			break;
 		case 'r':
 			rompath = optarg;
 			break;
@@ -438,6 +453,16 @@ int main(int argc, char *argv[])
 	}
 	close(fd);
 
+	if (drive_a || drive_b) {
+		fdc = tbfdc_create();
+		if (trace & TRACE_FDC)
+			wd17xx_trace(fdc, 1);
+		if (drive_a)
+			wd17xx_attach(fdc, 0, drive_a, 1, 80, 26, 128);
+		if (drive_b)
+			wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
+	}
+
 	/* TODO so for now make it look like bus idle */
 	memset(highrom, 0xFF, sizeof(highrom));
 
@@ -454,7 +479,7 @@ int main(int argc, char *argv[])
 		}
 		ide_attach(ide, 0, fd);
 	}
-		
+
 	atexit(SDL_Quit);
 	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
 		fprintf(stderr, "poly88: unable to initialize SDL: %s\n",
@@ -519,9 +544,8 @@ int main(int argc, char *argv[])
 	kbd = asciikbd_create();
 
 	i8080_reset();
-	if (trace & TRACE_CPU) {
+	if (trace & TRACE_CPU)
 		i8080_log = stderr;
-	}
 
 	/* We run 1843200 t-states per second */
 	while (!emulator_done) {
@@ -538,6 +562,8 @@ int main(int argc, char *argv[])
 		/* Do 20ms of I/O and delays */
 		if (!fast)
 			nanosleep(&tc, NULL);
+		if (fdc)
+			wd17xx_tick(fdc, 20);
 		rtc_int = 1;
 		poll_irq_event();
 	}
