@@ -1,5 +1,9 @@
 /*
  *	Simple S100 setup with an 8080 CPU
+ *
+ *	IMSAI style serial
+ *	Tarbell 8" floppy controller
+ *	Modern IDE controller
  */
 
 #include <stdio.h>
@@ -18,6 +22,8 @@
 #include "ttycon.h"
 #include "mits1.h"
 #include "ide.h"
+#include "wd17xx.h"
+#include "tarbell_fdc.h"
 
 static uint8_t rom[4096];
 static uint8_t ram[4096];
@@ -29,6 +35,7 @@ static unsigned emulator_done;
 
 struct mits1_uart *mu;
 static struct ide_controller *ide;
+static struct wd17xx *fdc;
 
 #define TRACE_MEM	1
 #define TRACE_IO	2
@@ -36,6 +43,7 @@ static struct ide_controller *ide;
 #define TRACE_SERIAL	8
 #define TRACE_IRQ	16
 #define TRACE_CPU	32
+#define TRACE_FDC	64
 
 static int trace = 0;
 
@@ -134,6 +142,8 @@ uint8_t i8080_inport(uint8_t addr)
 	}
 	if (ide && addr >= 0x30 && addr <= 0x37)
 		return ide_read8(ide, addr);
+	if (fdc && addr >= 0xF8 && addr <= 0xFC)
+		return tbfdc_read(fdc, addr);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -147,6 +157,8 @@ void i8080_outport(uint8_t addr, uint8_t val)
 		mits1_write(mu, addr & 1, val);
 	else if (ide && addr >= 0x30 && addr <= 0x37)
 		ide_write8(ide, addr, val);
+	else if (fdc && addr >= 0xF8 && addr <= 0xFC)
+		tbfdc_write(fdc, addr & 7, val);
 	else if (addr == 0xFD)
 		trace = val;
 	else if (trace & TRACE_UNK)
@@ -170,7 +182,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "s100-8080: [-f] [-r path] [-d debug] [-i ide]\n");
+	fprintf(stderr, "s100-8080: [-A disk] [-B disk] [-f] [-r path] [-d debug] [-i ide]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -182,9 +194,16 @@ int main(int argc, char *argv[])
 	int l;
 	char *rompath = "s100-8080.rom";
 	char *idepath = NULL;
+	char *drive_a = NULL, *drive_b = NULL;
 
-	while ((opt = getopt(argc, argv, "d:fi:r:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:fi:r:")) != -1) {
 		switch (opt) {
+		case 'A':
+			drive_a = optarg;
+			break;
+		case 'B':
+			drive_b = optarg;
+			break;
 		case 'r':
 			rompath = optarg;
 			break;
@@ -215,6 +234,16 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
+
+	if (drive_a || drive_b) {
+		fdc = tbfdc_create();
+		if (trace & TRACE_FDC)
+			wd17xx_trace(fdc, 1);
+		if (drive_a)
+			wd17xx_attach(fdc, 0, drive_a, 1, 80, 26, 128);
+		if (drive_b)
+			wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
+	}
 
 	if (idepath) {
 		ide = ide_allocate("cf0");
@@ -261,13 +290,15 @@ int main(int argc, char *argv[])
 	while (!emulator_done) {
 		int i;
 		for (i = 0; i < 10; i++) {
-			i8080_exec(500);
+			i8080_exec(2000);
 			mits1_timer(mu);
 			poll_irq_event();
 			/* We want to run UI events regularly it seems */
 //			ui_event();
 		}
 		/* Do 20ms of I/O and delays */
+		if (fdc)
+			wd17xx_tick(fdc, 20);
 		if (!fast)
 			nanosleep(&tc, NULL);
 		poll_irq_event();

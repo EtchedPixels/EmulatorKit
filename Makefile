@@ -207,11 +207,11 @@ markiv:	markiv.o z180_io.o ttycon.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis
 n8_sdl2: n8.o n8_sdlui.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
 	cc -g3 n8.o n8_sdlui.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a  -o n8_sdl2 -lSDL2
 
-s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
-	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80
+s100-z80:	s100-z80.o acia.o ppide.o ide.o tarbell_fdc.o wd17xx.o libz80/libz80.o
+	cc -g3 s100-z80.o acia.o ppide.o ide.o tarbell_fdc.o wd17xx.o libz80/libz80.o -o s100-z80
 
-s100-8080: s100-8080.o intel_8080_emulator.o mits1.o ide.o ttycon.o
-	cc -g3 s100-8080.o mits1.o ttycon.o ide.o intel_8080_emulator.o -o s100-8080
+s100-8080: s100-8080.o intel_8080_emulator.o mits1.o ide.o tarbell_fdc.o wd17xx.o ttycon.o
+	cc -g3 s100-8080.o mits1.o ttycon.o ide.o tarbell_fdc.o wd17xx.o intel_8080_emulator.o -o s100-8080
 
 poly88: poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o
 	cc -g3 poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o -o poly88 -lSDL2
