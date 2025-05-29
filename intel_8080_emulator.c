@@ -335,6 +335,9 @@ int i8080_exec(int cycles) {
 						i8080_disassemble(reg_PC));
 			reg_PC++;
 		}
+		/* if we are re-executing a hlt it'll set halted again */
+		halted = 0;
+
 		switch (opcode) {
 			case 0x3A: //LDA a - load A from memory
 				temp16 = (uint16_t)i8080_read(reg_PC) | ((uint16_t)i8080_read(reg_PC+1)<<8);
