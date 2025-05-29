@@ -672,7 +672,7 @@ static void priam_write_done(void)
 		/* Issue a command */
 		priam_status[0] = 0;
 		priam_status[1] = 0;
-
+		priam_bus |= 0x80;
 		if (trace & TRACE_PRIAM)
 			fprintf(stderr, "priam_cmd: %02X %02X %02X %02X %02X %02X\n",
 				priam_cmd[0], priam_cmd[1], priam_cmd[2], priam_cmd[3],
