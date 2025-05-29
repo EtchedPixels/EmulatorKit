@@ -399,7 +399,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "poly88: [-f] [-r path] [-m mem Kb] [-d debug] [-i ide]\n");
+	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-d debug] [-i ide]\n");
 	exit(EXIT_FAILURE);
 }
 
