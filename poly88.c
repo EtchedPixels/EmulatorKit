@@ -578,7 +578,7 @@ static void priam_read_done(void)
 		return;
 	}
 	/* Status so now go idle */
-	priam_bus = 0x40;
+	priam_bus = 0x00;
 	/* Wait for command */
 	priam_wptr = priam_cmd;
 	priam_txc = 6;
