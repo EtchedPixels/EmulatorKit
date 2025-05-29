@@ -1,5 +1,5 @@
 /*
- *	Poly88. Basic configuration to begin with.
+ *	Poly88: An early 8080 and S/100 system.
  *
  *	8080 at 1.8432MHz
  *	512 bytes of RAM
@@ -10,7 +10,7 @@
  *	of the Poly88 this mostly consisted of moving the video to F800
  *	(as became default anyway in the 4.0 monitor), and also some
  *	small changes to allow the paging out of the internal memory
- *	by accessing free sides of internal I/O ports).
+ *	using spare BRG bits.
  *
  *	The "official" Poly88 CP/M had an 8K RAM at moved from E000-FFFF
  *	to 0000-1FFF when the internal devices paged out, and there was even
@@ -18,14 +18,35 @@
  *	video/memory banks between 2000-DFFF and the keyboard I/O switched
  *	with it.
  *
- *	Currently however we emulate the more normal setup with RAM mapped
- *	in the low 62K.
+ *	Generally however CP/M was used with the BRG latch providing
+ *	PHANTOM and disabling the internal ROM and I/O when needed, whilst
+ *	keeping the video at F800.
+ *
+ *	The default emulation is of a non revision F board that has been
+ *	modded for CP/M with the BRG latch change for PHANTOM. The -t
+ *	option allows the selection of the System 88 style change where
+ *	instead the RAM at E000-FFFF remaps over the I/O space using a
+ *	different set of port toggles and the BRG bit controls which "user"
+ *	side of the machine (RAM bank, keyboard, video) is mapped.
+ *
+ *	For I/O we emulate the tarbell FDC, this is fine for CP/M but
+ *	the Poly88 DOS would require we emulated the original Polymorphic
+ *	single sided FDC, which is a complex beast.
  *
  *	TODO:
  *	- 8251 interrupt emulation
  *	- Tape load as serial dev plugin
- *	- Render the video screen properly
- *	- Keyboard
+ *	- Correct the few differing font symbols
+ *	- How did the keyboard interrupt work with two keyboards
+ *	- Support two keyboards
+ *
+ *	Mysteries:
+ *	- The Poly88 twin mode is untested with real software. It's not
+ *	  clear if the original software exists any more as it would have
+ *	  only been on a small number of machines.
+ *	- The hard disk controller is a complete unknown. It appears to have
+ *	  been a PRIAM "intelligent" controller and a simple interface card
+ *	  so quite possibly SASI.
  */
 
 #include <stdio.h>
@@ -58,12 +79,16 @@ static unsigned rom_size;
 /* The real font is 7 x 9 but we expand it all into words for
    convenience and to deal with the 10x15 block graphics */
 static uint16_t font[4096];
-static uint8_t ram[65536];		/* External RAM */
+static uint8_t ram[2][65536];		/* External RAM */
 static uint16_t ramsize = 63488;	/* Up to the video and ROM space */
 
 static unsigned int fast;
 static volatile int done;
 static unsigned emulator_done;
+
+
+static unsigned twinsys;	/* Twin system */
+static unsigned twin;		/* Twin side in use */
 
 static struct ide_controller *ide;
 static struct i8251 *uart;
@@ -87,22 +112,31 @@ static uint16_t vidbase = 0xF800; /* F800 and 8800 commonly used */
 static uint8_t brg_latch;
 static uint8_t sstep;		/* TODO : need to make ifetches visible
 				   from emulation */
+static unsigned cpmflipflop;
 static unsigned rtc_int;
-static uint8_t vram[1024];	/* 512byte or 1K video RAM */
+static uint8_t vram[2][1024];	/* 512byte or 1K video RAM */
 
 /* 7 x 9 for char matrix in a 10 x 15 field */
 #define CWIDTH 10
 #define CHEIGHT 15
 
-static SDL_Window *window;
-static SDL_Renderer *render;
-static SDL_Texture *texture;
-static uint32_t texturebits[64 * CWIDTH * 16 * CHEIGHT];
-static struct asciikbd *kbd;
+static SDL_Window *window[2];
+static SDL_Renderer *render[2];
+static SDL_Texture *texture[2];
+static uint32_t texturebits[2][64 * CWIDTH * 16 * CHEIGHT];
+static struct asciikbd *kbd[2];
 
 /* Simple setup to begin with */
 static uint8_t *mem_map(uint16_t addr, bool wr)
 {
+	/* On the twin system (and maybe some others) the "official" CP/M
+	   solution has the 8K shared RAM at E000 also appear at 0000 when
+	   the CP/M state is toggled. TODO: do we need to split this from
+	   twinsys into it's own mode */
+	if (twinsys && cpmflipflop) {
+		if (addr < 0x2000)
+			return &ram[0][addr + 0xE000];
+	}
 	if (!(brg_latch & 0x20)) {
 		if ((addr & 0xF000) == iobase) {
 			addr &= 0x0FFF;
@@ -121,16 +155,19 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 	   it is paged with internal I/O, twin system two videos are paged
 	   this way ! */
 	if ((addr & 0xFC00) == vidbase)
-		return vram + (addr & 0x03FF);	/* Assume 1K fitted */
+		return &vram[twin][addr & 0x03FF];	/* Assume 1K fitted */
 	/* Upper ROM from an I/O card */
 	if ((addr & 0xFC00) == 0xFC00) {
 		if (wr)
 			return NULL;
 		return highrom + (addr & 0x3FF);
 	}
+	/* Twin system */
+	if (twinsys && addr >= 0xE000)
+		return &ram[0][addr];
 	/* External memory goes here */
 	if (addr < ramsize || addr >= 0xF000)
-		return ram + addr;
+		return &ram[twin][addr];
 	if (wr)
 		return NULL;
 	return &idle_bus;
@@ -169,7 +206,7 @@ uint8_t i8080_get_vector(void)
 	/* No single step yet - RST 7 */
 	if (rtc_int)
 		return 0xF7;	/* RST 6 */
-	if (asciikbd_ready(kbd))
+	if (asciikbd_ready(kbd[twin]))
 		return 0xEF;	/* RST 5 */
 	/* TODO i8251 interrupt support to do RST 4 */
 	return 0xFF;		/* Beats me */
@@ -179,7 +216,7 @@ uint8_t i8080_get_vector(void)
 void recalc_interrupts(void)
 {
 	/* No single step yet. TODO add 8251 int support */
-	live_irq = asciikbd_ready(kbd) | rtc_int;
+	live_irq = asciikbd_ready(kbd[twin]) | rtc_int;
 	if (live_irq)
 		i8080_set_int(INT_IRQ);
 	else
@@ -196,7 +233,10 @@ static uint8_t onboard_in(uint8_t addr)
 {
 	if (addr < 4)
 		return i8251_read(uart, addr & 1);
-	/* TODO side effects on the other ports */
+	if (addr >= 8 && addr < 0x0C)
+		cpmflipflop = 0;
+	if (addr >= 0x0C)
+		cpmflipflop = 1;
 	return 0xFF;
 }
 
@@ -204,9 +244,14 @@ static void onboard_out(uint8_t addr, uint8_t val)
 {
 	if (addr < 4)
 		i8251_write(uart, addr & 1, val);
-	else if (addr < 8)
+	else if (addr < 8) { 
 		brg_latch = val;
-	else if (addr < 0x0C) {
+		if (twinsys)
+			twin = (brg_latch & 0x20) ? 1: 0;
+		/* FIXME: the other latch effects change too - no RAM
+		   over low memory in twin mode that's driven by the
+		   CP/M ports */
+	} else if (addr < 0x0C) {
 		rtc_int = 0;
 		recalc_interrupts();
 	} else
@@ -218,13 +263,229 @@ static uint8_t video_in(uint8_t addr)
 {
 	if (addr & 1)
 		return 0xFF;	/* TODO: decode option on some boards */
-	asciikbd_ack(kbd);
+	asciikbd_ack(kbd[twin]);
 	recalc_interrupts();
-	return asciikbd_read(kbd);
+	return asciikbd_read(kbd[twin]);
 }
 
 static void video_out(uint8_t addr, uint8_t val)
 {
+}
+
+/*
+ *	First guesses at the Priam controller: untested
+ *
+ *	It seems to be sort of SASI but without much of the bus logic
+ *	skipped. This should be sufficient code to start poking around
+ *	with Exec and the HD driver to see what else is going on.
+ */
+ 
+static uint8_t priam_bus;
+static uint8_t priam_cmd[6];
+static uint8_t priam_status[2];
+static uint8_t priam_data[256];
+static uint8_t *priam_rptr;
+static uint8_t *priam_wptr;
+static unsigned priam_rxc;
+static unsigned priam_txc;
+static int priam_fd;
+
+/*
+ *	A read of a block of data has finished. Right now that has
+ *	to be
+ */
+static void priam_read_done(void)
+{
+	/* Read command in progress ? */
+	if ((priam_bus & 0x08) && priam_cmd[0] == 0x08) {
+		/* Count through blocks */
+		if (priam_cmd[4]) {
+			priam_cmd[4]--;
+			if (read(priam_fd, priam_data, 256) == 256) {
+				priam_rptr = priam_data;
+				priam_rxc = 256;
+				return;
+			}
+			priam_status[0] = 0x02;
+			/* TODO: sense data */
+		} else {
+			priam_status[0] = 0x00;
+			priam_status[1] = 0x00;
+		}
+		/* Status so set up for status read */
+		priam_bus &= ~0x08;
+		priam_rptr = priam_status;
+		priam_rxc = 2;
+		return;
+	}
+	/* Status so now go idle */
+	priam_bus = 0;
+	/* Wait for command */
+	priam_wptr = priam_cmd;
+	priam_txc = 6;
+}
+
+/* A SASI READ command was issued */
+/* TODO: check disk size properly esp for write */
+static void priam_do_read(void)
+{
+	unsigned block;
+
+	block = (priam_cmd[1] & 0x0F) << 16;
+	block |= priam_cmd[2] << 8;
+	block |= priam_cmd[3];
+
+	if (lseek(priam_fd, block * 256, 0) == -1 ||
+		read(priam_fd, priam_data, 256) != 256) {
+		priam_status[0] = 0x02;
+		priam_status[1] = 0x00;
+		priam_bus &= ~0x08;
+		priam_rptr = priam_status;
+		priam_rxc = 2;
+	} else {
+		priam_rptr = priam_data;
+		priam_rxc = 256;
+		priam_bus |= 0x08;
+		priam_cmd[4]--;
+	}
+}
+
+/* A disk write of a block has completed writing. Push it to disk and
+   see what to do next */
+static void priam_write_block(void)
+{
+	/* Count through blocks */
+	if (priam_cmd[4]) {
+		priam_cmd[4]--;
+		if (write(priam_fd, priam_data, 256) == 256) {
+			priam_wptr = priam_data;
+			priam_txc = 256;
+			return;
+		}
+		priam_status[0] = 0x02;
+		/* TODO: sense data */
+	} else {
+		priam_status[0] = 0x00;
+		priam_status[1] = 0x00;
+	}
+	/* Status so set up for status read */
+	priam_bus &= ~0x08;
+	priam_rptr = priam_status;
+	priam_rxc = 2;
+}
+
+/* Begin a SASI WRITE command: TODO check disk size */
+static void priam_write_begin(void)
+{
+	unsigned block;
+
+	block = (priam_cmd[1] & 0x0F) << 16;
+	block |= priam_cmd[2] << 8;
+	block |= priam_cmd[3];
+
+	if (lseek(priam_fd, block * 256, 0) == -1) {
+		priam_status[0] = 0x02;
+		priam_status[1] = 0x00;
+		priam_bus &= ~0x08;
+		priam_rptr = priam_status;
+		priam_rxc = 2;
+	} else {
+		priam_wptr = priam_data;
+		priam_txc = 256;
+		priam_bus |= 0x08;
+	}
+}
+
+/* We've finished writing the expected block. That might be a command or
+   SASI write data */	
+static void priam_write_done(void)
+{
+	/* Six bytes written to the command buffer */
+	if (priam_wptr == priam_cmd + 6) {
+		/* Issue a command */
+		priam_status[0] = 0;
+		priam_status[1] = 0;
+
+		fprintf(stderr, "priam_cmd: %02X %02X %02X %02X %02X %02X\n",
+			priam_cmd[0], priam_cmd[1], priam_cmd[2], priam_cmd[3],
+			priam_cmd[4], priam_cmd[5]);
+		/* TODO: sense etc */
+		switch(priam_cmd[0]) {
+		case 0x00: /* TUR */
+		case 0x01: /* REZERO */
+			break;
+		case 0x08: /* READ */
+			priam_do_read();
+			return;
+		case 0x0A: /* WRITE */
+			priam_write_begin();
+			return;
+		case 0xE0:	/* Diagnostics */
+		case 0xE4:
+			break;
+		default:
+			priam_status[0] = 0x02;
+			break;
+		}
+		return;
+	}
+	/* Data block */
+	if (priam_cmd[0]  == 0x10 && (priam_bus & 0x08)) {
+		priam_write_block();	/* Updates status etc itself */
+		return;
+	} else {
+		/* Fudge up an error code - may need to implement sense */
+		priam_status[0] = 0x02;	/* Sense available */
+		priam_status[1] = 0x00;
+	} 
+	priam_rptr = priam_status;
+	priam_rxc = 2;
+	priam_bus &= ~0x08;
+}
+	
+static uint8_t priam_read(uint8_t addr)
+{
+	uint8_t r;
+
+	switch(addr) {
+	case 0:
+		return priam_bus;
+	case 1:
+		if (priam_rxc) {
+			priam_rxc--;
+			r = *priam_rptr++;
+			if (priam_rxc == 0)
+				priam_read_done();
+			return r;
+		}
+		return 0xFF;	/* >?? */
+	}
+	return 0xFF;
+}
+
+static void priam_write(uint8_t addr, uint8_t val)
+{	
+	switch(addr) {
+	case 0:
+		/* Write bus: only known case is write 1 if bus 0x80 */
+		break;
+	case 1:
+		/* Write data */
+		if (priam_txc) {
+			priam_txc--;
+			*priam_wptr++ = val;
+			if (priam_txc == 0)
+				priam_write_done();
+		}
+		break;
+	case 3:
+		/* Reset ? Write of 0 done initially */
+		priam_bus = 0x00;
+		priam_rxc = 6;	/* Command block wait */
+		priam_wptr = priam_cmd;
+		priam_txc = 0;
+		break;
+	}
 }
 
 uint8_t i8080_inport(uint8_t addr)
@@ -237,8 +498,10 @@ uint8_t i8080_inport(uint8_t addr)
 		return video_in(addr);
 	if (fdc && addr >= 0xE8 && addr <= 0xEF)
 		return tbfdc_read(fdc, addr & 7);
-	if (ide && addr >= 0x30 && addr <= 0x37)
+	if (ide && addr >= 0xC0 && addr <= 0xC7)
 		return ide_read8(ide, addr);
+	if (addr >= 0x34 && addr <= 0x37)
+		return priam_read(addr & 3);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -254,7 +517,9 @@ void i8080_outport(uint8_t addr, uint8_t val)
 		video_out(addr, val);
 	else if (fdc && addr >= 0xE8 && addr <= 0xEF)
 		tbfdc_write(fdc, addr & 7, val);
-	else if (ide && addr >= 0x30 && addr <= 0x37)
+	else if (addr >= 0x34 && addr <= 0x37)
+		priam_write(addr & 3, val);
+	else if (ide && addr >= 0xC0 && addr <= 0xC7)
 		ide_write8(ide, addr, val);
 	else if (addr == 0xFD)
 		trace = val;
@@ -264,13 +529,13 @@ void i8080_outport(uint8_t addr, uint8_t val)
 	poll_irq_event();
 }
 
-static void raster_char(unsigned int y, unsigned int x, uint8_t c)
+static void raster_char(unsigned int unit, unsigned int y, unsigned int x, uint8_t c)
 {
 	uint16_t *fp = &font[16 * c];
 	uint32_t *pixp;
 	unsigned int rows, pixels;
 
-	pixp = texturebits + x * CWIDTH + 64 * CWIDTH * y * CHEIGHT;
+	pixp = texturebits[unit] + x * CWIDTH + 64 * CWIDTH * y * CHEIGHT;
 	for (rows = 0; rows < CHEIGHT; rows++) {
 		uint16_t bits = *fp++;
 		for (pixels = 0; pixels < CWIDTH; pixels++) {
@@ -285,18 +550,18 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 	}
 }
 
-static void poly_rasterize(void)
+static void poly_rasterize(unsigned unit)
 {
 	unsigned int lines, cols;
-	uint8_t *ptr = vram;
+	uint8_t *ptr = vram[unit];
 
 	for (lines = 0; lines < 16; lines ++) {
 		for (cols = 0; cols < 64; cols ++)
-			raster_char(lines, cols, *ptr++);
+			raster_char(unit, lines, cols, *ptr++);
 	}
 }
 
-static void poly_render(void)
+static void poly_render(unsigned unit)
 {
 	SDL_Rect rect;
 
@@ -304,10 +569,10 @@ static void poly_render(void)
 	rect.w = 64 * CWIDTH;
 	rect.h = 16 * CHEIGHT;
 
-	SDL_UpdateTexture(texture, NULL, texturebits, 64 * CWIDTH * 4);
-	SDL_RenderClear(render);
-	SDL_RenderCopy(render, texture, NULL, &rect);
-	SDL_RenderPresent(render);
+	SDL_UpdateTexture(texture[unit], NULL, texturebits[unit], 64 * CWIDTH * 4);
+	SDL_RenderClear(render[unit]);
+	SDL_RenderCopy(render[unit], texture[unit], NULL, &rect);
+	SDL_RenderPresent(render[unit]);
 }
 
 static void make_graphics(void)
@@ -399,7 +664,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-d debug] [-i ide]\n");
+	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-i ide] [-t]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -411,8 +676,9 @@ int main(int argc, char *argv[])
 	char *rompath = "poly88.rom";
 	char *drive_a = NULL, *drive_b = NULL;
 	char *idepath = NULL;
+	unsigned n;
 
-	while ((opt = getopt(argc, argv, "A:B:d:F:fi:m:r:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:F:fi:m:r:tv:")) != -1) {
 		switch (opt) {
 		case 'A':
 			drive_a = optarg;
@@ -433,7 +699,14 @@ int main(int argc, char *argv[])
 			idepath = optarg;
 			break;
 		case 'm':
-			ramsize = 1024 * atol(optarg);
+			ramsize = 1024 * atoi(optarg);
+			break;
+		case 't':
+			twinsys = 1;
+			break;
+		case 'v':
+			vidbase = strtoul(optarg, NULL, 0) & 0xFFC0;
+			break;
 		default:
 			usage();
 		}
@@ -486,35 +759,37 @@ int main(int argc, char *argv[])
 			SDL_GetError());
 		exit(1);
 	}
-	window = SDL_CreateWindow("Poly88",
+	for (n = 0; n <= twinsys; n++) {
+		window[n] = SDL_CreateWindow("Poly88",
 			SDL_WINDOWPOS_UNDEFINED,
 			SDL_WINDOWPOS_UNDEFINED,
 			64 * CWIDTH, 16 * CHEIGHT,
 			SDL_WINDOW_RESIZABLE);
-	if (window == NULL) {
-		fprintf(stderr, "poly88: unable to open window: %s\n",
+		if (window[n] == NULL) {
+			fprintf(stderr, "poly88: unable to open window: %s\n",
 			SDL_GetError());
-		exit(1);
+			exit(1);
+		}
+		render[n] = SDL_CreateRenderer(window[n], -1, 0);
+		if (render[n] == NULL) {
+			fprintf(stderr, "poly88: unable to create renderer: %s\n",
+				SDL_GetError());
+			exit(1);
+		}
+		texture[n] = SDL_CreateTexture(render[n], SDL_PIXELFORMAT_ARGB8888,
+			SDL_TEXTUREACCESS_STREAMING,
+			64 * CWIDTH, 16 * CHEIGHT);
+		if (texture[n] == NULL) {
+			fprintf(stderr, "poly88: unable to create texture: %s\n",
+				SDL_GetError());
+			exit(1);
+		}
+		SDL_SetRenderDrawColor(render[n], 0, 0, 0, 255);
+		SDL_RenderClear(render[n]);
+		SDL_RenderPresent(render[n]);
+		SDL_RenderSetLogicalSize(render[n], 64 * CWIDTH,  16 * CHEIGHT);
 	}
-	render = SDL_CreateRenderer(window, -1, 0);
-	if (render == NULL) {
-		fprintf(stderr, "poly88: unable to create renderer: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
-	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888,
-		SDL_TEXTUREACCESS_STREAMING,
-		64 * CWIDTH, 16 * CHEIGHT);
-	if (texture == NULL) {
-		fprintf(stderr, "poly88: unable to create texture: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
-	SDL_SetRenderDrawColor(render, 0, 0, 0, 255);
-	SDL_RenderClear(render);
-	SDL_RenderPresent(render);
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-	SDL_RenderSetLogicalSize(render, 64 * CWIDTH,  16 * CHEIGHT);
 
 	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
@@ -541,7 +816,9 @@ int main(int argc, char *argv[])
 		i8251_trace(uart, 1);
 	i8251_attach(uart, &console);
 
-	kbd = asciikbd_create();
+	kbd[0] = asciikbd_create();
+	if (twinsys)
+		kbd[1] = asciikbd_create();
 
 	i8080_reset();
 	if (trace & TRACE_CPU)
@@ -555,9 +832,15 @@ int main(int argc, char *argv[])
 			i8251_timer(uart);
 			poll_irq_event();
 			/* We want to run UI events regularly it seems */
-			poly_rasterize();
-			poly_render();
-			asciikbd_event(kbd);
+			poly_rasterize(0);
+			poly_render(0);
+			asciikbd_event(kbd[0]);
+			if (twinsys) {
+				poly_rasterize(1);
+				poly_render(1);
+				/* FIXME */
+/* Not yet possible without fixing our SDL layer asciikbd_event(kbd[1]); */
+			}
 		}
 		/* Do 20ms of I/O and delays */
 		if (!fast)
