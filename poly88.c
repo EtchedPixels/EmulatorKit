@@ -273,6 +273,231 @@ static void video_out(uint8_t addr, uint8_t val)
 }
 
 /*
+ *	Polymorphic FDC. Actually a 6852 and an 8255 but we avoid
+ *	emulating the 6852 mostly in particular
+ *
+ *	Very minimal emulation
+ */
+
+static unsigned poly_sec;
+static unsigned poly_track;
+static unsigned poly_byte;	/* Track through bytes as we read/write */
+static unsigned poly_secint;	/* Sector change */
+static unsigned poly_ppia;
+static unsigned poly_ppic;
+static unsigned poly_ppictrl;
+static uint8_t fdbuf[256];
+static int poly_fd[2] = { -1, -1 };
+static int poly_drive = -1;
+
+
+static void poly_tick(void)
+{
+	if (poly_ppic & 8) {	/* Only if motor is on */
+		poly_sec++;
+		if (poly_sec == 10)
+			poly_sec = 0;
+		poly_byte = 0;
+		poly_secint = 3;
+		fprintf(stderr, "--sec %u\n", poly_sec);
+	}
+}
+
+/* Figure out what is coming back from the drive */
+/* Read side we don't see the 10 sync up 0 bytes */
+static uint8_t poly_rbyte(void)
+{
+	static uint16_t poly_cs;
+	off_t off;
+
+	if (poly_drive == -1)
+		return 0xFF;
+
+	if (poly_byte == 0) {
+		poly_cs = 0;
+		poly_byte++;
+		off = (poly_track * 10 + poly_sec) * 256;
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "polyfd%u: reading offset %lu\n",
+				poly_drive, (long)off);
+		if (lseek(poly_fd[poly_drive], off, 0) < 0 ||
+			read(poly_fd[poly_drive], fdbuf, 256) != 256) {
+			fprintf(stderr, "polyfd: I/O error reading %02X:%1X\n",
+				poly_track, poly_sec);
+			return 0xFF; /* Force an error */
+		} else
+			return poly_sec | 0x80;
+	}
+	if (poly_byte == 1) {
+		poly_byte++;
+		return poly_track;
+	}
+	if (poly_byte == 258) {
+		poly_byte++;
+		return ~poly_cs;
+	}
+	if (poly_byte == 259)
+		return ~(poly_cs >> 8);
+
+	/* It's the 256 data bytes */
+	if (poly_byte & 1)
+		poly_cs += fdbuf[poly_byte - 2] << 8;
+	else
+		poly_cs += fdbuf[poly_byte - 2];
+	return fdbuf[poly_byte++ - 2];
+}
+
+static void poly_wbyte(uint8_t v)
+{
+	if (poly_drive == -1)
+		return;
+
+	/* 10 zeros, 2 sync, sec, track , and checksum we ignore */
+	if (poly_byte < 14 || poly_byte > 269) {
+		if (++poly_byte == 272) {
+			off_t off = (poly_track * 10 + poly_sec) * 256;
+			if (lseek(poly_fd[poly_drive], off, 0) < 0 ||
+				write(poly_fd[poly_drive], fdbuf, 256) != 256) {
+				fprintf(stderr, "polyfd: I/O error writing %02X:%1X\n",
+					poly_track, poly_sec);
+			}
+		}
+		return;
+	}
+	/* Data */
+	fdbuf[poly_byte++ - 14] = v;
+}
+
+static void poly_step(void)
+{
+	if (!(poly_ppic & 0x40)) {
+		if (poly_track > 0)
+			poly_track--;
+	} else {
+		if (poly_track < 39)
+			poly_track++;
+	}
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "polyfd: track now %d\n", poly_track);
+}
+
+static uint8_t poly_6852_ready(void)
+{
+	uint8_t r = 0;
+
+	if (poly_drive >= 0 && (poly_ppic & 0x08)) {
+		if ((poly_ppic & 0x20 ) && poly_byte < 260)
+			r |= 1;	/* Read stream */
+		else if (poly_ppic & 0x10)
+			r |= 2; /* Write stream */
+	}
+	return r;
+}
+
+static uint8_t do_polyfd_read(uint8_t addr)
+{
+	uint8_t r;
+
+	switch(addr) {
+	case 0x00:
+		return poly_6852_ready();
+	case 0x01:
+		return poly_rbyte();
+	case 0x08:
+		return poly_ppia;
+	case 0x09:
+		/* WP is 0x20 TODO */
+		r = poly_sec;
+		if (poly_track == 0)
+			r |= 0x10;
+		return r;
+	case 0x0A:
+		r = (poly_ppic & 0xFC) | poly_secint;
+		poly_secint = 0;
+		return r;
+	case 0x0B:
+		return poly_ppictrl;
+	}
+	return 0xFF;
+}
+
+static uint8_t polyfd_read(uint8_t addr)
+{
+	uint8_t r = do_polyfd_read(addr);
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "polyfd_read: %02X <- %02X\n",
+			addr + 0x20, r);
+	return r;
+}
+
+static void polyfd_write(uint8_t addr, uint8_t val)
+{
+	uint8_t old_ppic = poly_ppic;
+	uint8_t delta;
+	uint8_t bit;
+
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "polyfd_write: %02X -> %02X\n",
+			addr + 0x20, val);
+
+	switch(addr) {
+	case 0x00:
+		break;
+	case 0x01:
+		poly_wbyte(val);
+		break;
+	case 0x08:
+		poly_ppia = val;
+		break;
+	case 0x09:
+		break;
+	case 0x0A:
+		poly_ppic &= 3;
+		poly_ppic |= val & ~0xFC;
+		break;
+	case 0x0B:
+		if (val & 0x80) {
+			poly_ppictrl = val;
+			break;
+		}
+		bit = 1 << ((val >> 1) & 0x07);
+		if (val & 1)
+			poly_ppic |= bit;
+		else
+			poly_ppic &= ~bit;
+		break;
+	}
+	delta = poly_ppic ^ old_ppic;
+	if (delta & old_ppic & 0x80)
+		poly_step();
+	switch(poly_ppia & 3) {
+	case 0:
+	case 3:
+		poly_drive = -1;
+		break;
+	case 1:
+		poly_drive = 0;
+		break;
+	case 2:
+		poly_drive = 1;
+		break;
+	}
+	if (trace & TRACE_FDC) {
+		if (delta & 0x08)
+			fprintf(stderr, "polyfd: motor %s\n",
+				(poly_ppic & 0x08) ? "on":"off");
+	}
+}
+
+static void polyfd_attach(unsigned drive, const char *path)
+{
+	poly_fd[drive] = open(path, O_RDWR);
+	if (poly_fd[drive] == -1)
+		perror(path);
+	fprintf(stderr, "polyfd drive %u fd %d path %s\n", drive, poly_fd[drive], path);
+}
+
+/*
  *	First guesses at the Priam controller: untested
  *
  *	It seems to be sort of SASI but without much of the bus logic
@@ -397,7 +622,7 @@ static void priam_write_begin(void)
 }
 
 /* We've finished writing the expected block. That might be a command or
-   SASI write data */	
+   SASI write data */
 static void priam_write_done(void)
 {
 	/* Six bytes written to the command buffer */
@@ -442,7 +667,7 @@ static void priam_write_done(void)
 	priam_rxc = 2;
 	priam_bus &= ~0x08;
 }
-	
+
 static uint8_t priam_read(uint8_t addr)
 {
 	uint8_t r;
@@ -464,7 +689,7 @@ static uint8_t priam_read(uint8_t addr)
 }
 
 static void priam_write(uint8_t addr, uint8_t val)
-{	
+{
 	switch(addr) {
 	case 0:
 		/* Write bus: only known case is write 1 if bus 0x80 */
@@ -496,12 +721,14 @@ uint8_t i8080_inport(uint8_t addr)
 		return onboard_in(addr);
 	if ((addr & 0xFC) == (vidbase >> 8))
 		return video_in(addr);
-	if (fdc && addr >= 0xE8 && addr <= 0xEF)
-		return tbfdc_read(fdc, addr & 7);
-	if (ide && addr >= 0xC0 && addr <= 0xC7)
-		return ide_read8(ide, addr);
+	if (addr >= 0x20 && addr <= 0x2F)
+		return polyfd_read(addr & 0x0F);
 	if (addr >= 0x34 && addr <= 0x37)
 		return priam_read(addr & 3);
+	if (ide && addr >= 0xC0 && addr <= 0xC7)
+		return ide_read8(ide, addr);
+	if (fdc && addr >= 0xE8 && addr <= 0xEF)
+		return tbfdc_read(fdc, addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -515,12 +742,14 @@ void i8080_outport(uint8_t addr, uint8_t val)
 		onboard_out(addr, val);
 	else if ((addr & 0xFC) == (vidbase >> 8))
 		video_out(addr, val);
-	else if (fdc && addr >= 0xE8 && addr <= 0xEF)
-		tbfdc_write(fdc, addr & 7, val);
+	else if (addr >= 0x20 && addr <= 0x2F)
+		polyfd_write(addr & 0x0F, val);
 	else if (addr >= 0x34 && addr <= 0x37)
 		priam_write(addr & 3, val);
 	else if (ide && addr >= 0xC0 && addr <= 0xC7)
 		ide_write8(ide, addr, val);
+	else if (fdc && addr >= 0xE8 && addr <= 0xEF)
+		tbfdc_write(fdc, addr & 7, val);
 	else if (addr == 0xFD)
 		trace = val;
 	else if (trace & TRACE_UNK)
@@ -664,7 +893,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-i ide] [-t]\n");
+	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-i ide] [-p] [-t]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -677,8 +906,9 @@ int main(int argc, char *argv[])
 	char *drive_a = NULL, *drive_b = NULL;
 	char *idepath = NULL;
 	unsigned n;
+	unsigned polyfdc = 0;
 
-	while ((opt = getopt(argc, argv, "A:B:d:F:fi:m:r:tv:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:F:fi:m:pr:tv:")) != -1) {
 		switch (opt) {
 		case 'A':
 			drive_a = optarg;
@@ -700,6 +930,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'm':
 			ramsize = 1024 * atoi(optarg);
+			break;
+		case 'p':
+			polyfdc = 1;
 			break;
 		case 't':
 			twinsys = 1;
@@ -726,14 +959,21 @@ int main(int argc, char *argv[])
 	}
 	close(fd);
 
-	if (drive_a || drive_b) {
-		fdc = tbfdc_create();
-		if (trace & TRACE_FDC)
-			wd17xx_trace(fdc, 1);
+	if (polyfdc) {
 		if (drive_a)
-			wd17xx_attach(fdc, 0, drive_a, 1, 80, 26, 128);
+			polyfd_attach(0, drive_a);
 		if (drive_b)
-			wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
+			polyfd_attach(1, drive_b);
+	} else {
+		if (drive_a || drive_b) {
+			fdc = tbfdc_create();
+			if (trace & TRACE_FDC)
+				wd17xx_trace(fdc, 1);
+			if (drive_a)
+				wd17xx_attach(fdc, 0, drive_a, 1, 80, 26, 128);
+			if (drive_b)
+				wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
+		}
 	}
 
 	/* TODO so for now make it look like bus idle */
@@ -847,6 +1087,7 @@ int main(int argc, char *argv[])
 			nanosleep(&tc, NULL);
 		if (fdc)
 			wd17xx_tick(fdc, 20);
+		poly_tick();
 		rtc_int = 1;
 		poll_irq_event();
 	}
