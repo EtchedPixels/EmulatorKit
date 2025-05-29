@@ -101,6 +101,7 @@ static struct wd17xx *fdc;
 #define TRACE_IRQ	16
 #define TRACE_CPU	32
 #define TRACE_FDC	64
+#define TRACE_PRIAM	128
 
 static int trace = 0;
 
@@ -137,7 +138,7 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 		if (addr < 0x2000)
 			return &ram[0][addr + 0xE000];
 	}
-	if (!(brg_latch & 0x20)) {
+	if (twinsys || !(brg_latch & 0x20)) {
 		if ((addr & 0xF000) == iobase) {
 			addr &= 0x0FFF;
 			if (addr < 0x0C00) {
@@ -156,6 +157,13 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 	   this way ! */
 	if ((addr & 0xFC00) == vidbase)
 		return &vram[twin][addr & 0x03FF];	/* Assume 1K fitted */
+	/* On the clasic set up there is no RAM between 1000-2000 as it's
+	   used for video and other I/O */
+	if (twinsys && addr < 0x2000) {
+		if (wr)
+			return NULL;
+		return &idle_bus;
+	}
 	/* Upper ROM from an I/O card */
 	if ((addr & 0xFC00) == 0xFC00) {
 		if (wr)
@@ -200,8 +208,16 @@ void i8080_write(uint16_t addr, uint8_t val)
 		*p = val;
 }
 
-/* For now just hand back RST 7 */
+static unsigned poly_irq(void);
+
+static uint8_t irqvec;
+
 uint8_t i8080_get_vector(void)
+{
+	return irqvec;
+}
+
+static uint8_t calc_vector(void)
 {
 	/* No single step yet - RST 7 */
 	if (rtc_int)
@@ -209,6 +225,8 @@ uint8_t i8080_get_vector(void)
 	if (asciikbd_ready(kbd[twin]))
 		return 0xEF;	/* RST 5 */
 	/* TODO i8251 interrupt support to do RST 4 */
+	if (poly_irq())
+		return 0xD7;	/* RST 2 */
 	return 0xFF;		/* Beats me */
 }
 
@@ -216,10 +234,11 @@ uint8_t i8080_get_vector(void)
 void recalc_interrupts(void)
 {
 	/* No single step yet. TODO add 8251 int support */
-	live_irq = asciikbd_ready(kbd[twin]) | rtc_int;
-	if (live_irq)
+	live_irq = asciikbd_ready(kbd[twin]) | rtc_int | poly_irq();
+	if (live_irq) {
 		i8080_set_int(INT_IRQ);
-	else
+		irqvec = calc_vector();
+	} else
 		i8080_clear_int(INT_IRQ);
 }
 
@@ -290,6 +309,16 @@ static uint8_t fdbuf[256];
 static int poly_fd[2] = { -1, -1 };
 static int poly_drive = -1;
 
+static unsigned poly_irq(void)
+{
+	/* No sector int pending */
+	if ((poly_secint & 1) == 0)
+		return 0;
+	/* int isn't enabled anyway */
+	if ((poly_ppic & 4) == 0)
+		return 0;
+	return 1;
+}
 
 static void poly_tick(void)
 {
@@ -299,7 +328,8 @@ static void poly_tick(void)
 			poly_sec = 0;
 		poly_byte = 0;
 		poly_secint = 3;
-		fprintf(stderr, "--sec %u\n", poly_sec);
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "polyfd: sec %u\n", poly_sec);
 	}
 }
 
@@ -410,11 +440,12 @@ static uint8_t do_polyfd_read(uint8_t addr)
 		r = poly_sec;
 		if (poly_track == 0)
 			r |= 0x10;
+		poly_secint = 0;
+		poll_irq_event();
+		/* DS sets 0x80 TODO */
 		return r;
 	case 0x0A:
-		r = (poly_ppic & 0xFC) | poly_secint;
-		poly_secint = 0;
-		return r;
+		return (poly_ppic & 0xFC) | poly_secint;
 	case 0x0B:
 		return poly_ppictrl;
 	}
@@ -465,6 +496,7 @@ static void polyfd_write(uint8_t addr, uint8_t val)
 			poly_ppic |= bit;
 		else
 			poly_ppic &= ~bit;
+		poll_irq_event();
 		break;
 	}
 	delta = poly_ppic ^ old_ppic;
@@ -513,7 +545,7 @@ static uint8_t *priam_rptr;
 static uint8_t *priam_wptr;
 static unsigned priam_rxc;
 static unsigned priam_txc;
-static int priam_fd;
+static int priam_fd = -1;
 
 /*
  *	A read of a block of data has finished. Right now that has
@@ -522,7 +554,7 @@ static int priam_fd;
 static void priam_read_done(void)
 {
 	/* Read command in progress ? */
-	if ((priam_bus & 0x08) && priam_cmd[0] == 0x08) {
+	if (!(priam_bus & 0x08) && priam_cmd[0] == 0x08) {
 		/* Count through blocks */
 		if (priam_cmd[4]) {
 			priam_cmd[4]--;
@@ -532,19 +564,21 @@ static void priam_read_done(void)
 				return;
 			}
 			priam_status[0] = 0x02;
+			priam_bus |= 0x08;
 			/* TODO: sense data */
 		} else {
+			fprintf(stderr, "priam: read completed go to status\n");
 			priam_status[0] = 0x00;
 			priam_status[1] = 0x00;
 		}
 		/* Status so set up for status read */
-		priam_bus &= ~0x08;
+		priam_bus |= 0x08;
 		priam_rptr = priam_status;
 		priam_rxc = 2;
 		return;
 	}
 	/* Status so now go idle */
-	priam_bus = 0;
+	priam_bus = 0x40;
 	/* Wait for command */
 	priam_wptr = priam_cmd;
 	priam_txc = 6;
@@ -560,17 +594,22 @@ static void priam_do_read(void)
 	block |= priam_cmd[2] << 8;
 	block |= priam_cmd[3];
 
+	if (trace & TRACE_PRIAM)
+		fprintf(stderr, "priam: reading block %u\n", block);
+
 	if (lseek(priam_fd, block * 256, 0) == -1 ||
 		read(priam_fd, priam_data, 256) != 256) {
 		priam_status[0] = 0x02;
 		priam_status[1] = 0x00;
-		priam_bus &= ~0x08;
+		priam_bus |= 0x08;
 		priam_rptr = priam_status;
 		priam_rxc = 2;
+		fprintf(stderr, "priam read failed\n");
 	} else {
 		priam_rptr = priam_data;
 		priam_rxc = 256;
-		priam_bus |= 0x08;
+		priam_bus &= ~0x08;
+		fprintf(stderr, "priam read begins (%u blocks)\n", priam_cmd[4]);
 		priam_cmd[4]--;
 	}
 }
@@ -594,7 +633,7 @@ static void priam_write_block(void)
 		priam_status[1] = 0x00;
 	}
 	/* Status so set up for status read */
-	priam_bus &= ~0x08;
+	priam_bus |= 0x08;
 	priam_rptr = priam_status;
 	priam_rxc = 2;
 }
@@ -608,16 +647,19 @@ static void priam_write_begin(void)
 	block |= priam_cmd[2] << 8;
 	block |= priam_cmd[3];
 
+	if (trace & TRACE_PRIAM)
+		fprintf(stderr, "priam: writingg block %u\n", block);
+
 	if (lseek(priam_fd, block * 256, 0) == -1) {
 		priam_status[0] = 0x02;
 		priam_status[1] = 0x00;
-		priam_bus &= ~0x08;
+		priam_bus |= ~0x08;
 		priam_rptr = priam_status;
 		priam_rxc = 2;
 	} else {
 		priam_wptr = priam_data;
 		priam_txc = 256;
-		priam_bus |= 0x08;
+		priam_bus &= ~0x08;
 	}
 }
 
@@ -631,9 +673,10 @@ static void priam_write_done(void)
 		priam_status[0] = 0;
 		priam_status[1] = 0;
 
-		fprintf(stderr, "priam_cmd: %02X %02X %02X %02X %02X %02X\n",
-			priam_cmd[0], priam_cmd[1], priam_cmd[2], priam_cmd[3],
-			priam_cmd[4], priam_cmd[5]);
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam_cmd: %02X %02X %02X %02X %02X %02X\n",
+				priam_cmd[0], priam_cmd[1], priam_cmd[2], priam_cmd[3],
+				priam_cmd[4], priam_cmd[5]);
 		/* TODO: sense etc */
 		switch(priam_cmd[0]) {
 		case 0x00: /* TUR */
@@ -652,6 +695,9 @@ static void priam_write_done(void)
 			priam_status[0] = 0x02;
 			break;
 		}
+		priam_rptr = priam_status;
+		priam_rxc = 2;
+		priam_bus |= 0x08;
 		return;
 	}
 	/* Data block */
@@ -665,24 +711,33 @@ static void priam_write_done(void)
 	} 
 	priam_rptr = priam_status;
 	priam_rxc = 2;
-	priam_bus &= ~0x08;
+	priam_bus |= 0x08;
 }
 
 static uint8_t priam_read(uint8_t addr)
 {
 	uint8_t r;
 
+	if (priam_fd == -1)
+		return 0xFF;
+
 	switch(addr) {
 	case 0:
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam: read bus state %02X\n", priam_bus);
 		return priam_bus;
 	case 1:
 		if (priam_rxc) {
 			priam_rxc--;
 			r = *priam_rptr++;
+			if (trace & TRACE_PRIAM)
+				fprintf(stderr, "priam: read data %u\n", r);
 			if (priam_rxc == 0)
 				priam_read_done();
 			return r;
 		}
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam read data: no data\n");
 		return 0xFF;	/* >?? */
 	}
 	return 0xFF;
@@ -692,9 +747,14 @@ static void priam_write(uint8_t addr, uint8_t val)
 {
 	switch(addr) {
 	case 0:
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam: write bus %u\n", val);
 		/* Write bus: only known case is write 1 if bus 0x80 */
+		priam_bus |= 0x40;	/* Until we figure this out */
 		break;
 	case 1:
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam: write data %u (txc %u)\n", val, priam_txc);
 		/* Write data */
 		if (priam_txc) {
 			priam_txc--;
@@ -704,12 +764,23 @@ static void priam_write(uint8_t addr, uint8_t val)
 		}
 		break;
 	case 3:
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam: write reset %u\n", val);
 		/* Reset ? Write of 0 done initially */
 		priam_bus = 0x00;
-		priam_rxc = 6;	/* Command block wait */
+		priam_txc = 6;	/* Command block wait */
 		priam_wptr = priam_cmd;
-		priam_txc = 0;
+		priam_rxc = 0;
 		break;
+	}
+}
+
+static void priam_attach(const char *path)
+{
+	priam_fd = open(path, O_RDWR);
+	if (priam_fd == -1) {
+		perror(path);
+		exit(1);
 	}
 }
 
@@ -893,7 +964,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-i ide] [-p] [-t]\n");
+	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-h hd] [-i ide] [-p] [-t]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -904,11 +975,12 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "poly88.rom";
 	char *drive_a = NULL, *drive_b = NULL;
+	char *priampath = NULL;
 	char *idepath = NULL;
 	unsigned n;
 	unsigned polyfdc = 0;
 
-	while ((opt = getopt(argc, argv, "A:B:d:F:fi:m:pr:tv:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:d:F:fh:i:m:pr:tv:")) != -1) {
 		switch (opt) {
 		case 'A':
 			drive_a = optarg;
@@ -924,6 +996,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'h':
+			priampath = optarg;
 			break;
 		case 'i':
 			idepath = optarg;
@@ -975,6 +1050,9 @@ int main(int argc, char *argv[])
 				wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
 		}
 	}
+
+	if (priampath)
+		priam_attach(priampath);
 
 	/* TODO so for now make it look like bus idle */
 	memset(highrom, 0xFF, sizeof(highrom));
@@ -1071,16 +1149,16 @@ int main(int argc, char *argv[])
 			i8080_exec(256);
 			i8251_timer(uart);
 			poll_irq_event();
-			/* We want to run UI events regularly it seems */
-			poly_rasterize(0);
-			poly_render(0);
-			asciikbd_event(kbd[0]);
-			if (twinsys) {
-				poly_rasterize(1);
-				poly_render(1);
-				/* FIXME */
+		}
+		/* We want to run UI events regularly it seems */
+		poly_rasterize(0);
+		poly_render(0);
+		asciikbd_event(kbd[0]);
+		if (twinsys) {
+			poly_rasterize(1);
+			poly_render(1);
+			/* FIXME */
 /* Not yet possible without fixing our SDL layer asciikbd_event(kbd[1]); */
-			}
 		}
 		/* Do 20ms of I/O and delays */
 		if (!fast)
