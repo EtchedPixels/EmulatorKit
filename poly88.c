@@ -535,12 +535,34 @@ static void polyfd_attach(unsigned drive, const char *path)
  *	It seems to be sort of SASI but without much of the bus logic
  *	skipped. This should be sufficient code to start poking around
  *	with Exec and the HD driver to see what else is going on.
+ *
+ *	Currently the known bits are
+ *
+ *	Write to 0x37 with 0 causes a reset
+ *	Read from 0x34 is the bus state
+ *	Write of 1 to 0x34 appears to do a bus selection in hardware (
+ *	or the device is using SASI commands but not bus selection)
+ *
+ *	Read/write via 0x35 seem to do data transfers and ack generation
+ *	on write req/ack on read maybe
+ *
+ *	0x34:
+ *	7:	Device is selected BSY ?
+ *	6:	waited on for bus read - REQ ?
+ *	5:	never checked except expected 0 post reset
+ *	4:	never checked except expected 0 post reset
+ *	3:	C/D
+ *	2:	}
+ *	1:	}	driver masks out
+ *	0;	}
  */
  
 static uint8_t priam_bus;
 static uint8_t priam_cmd[6];
 static uint8_t priam_status[2];
 static uint8_t priam_data[256];
+/* For now just hand back illegal request with no block address */
+static uint8_t priam_sense[4] = { 0x05, 0x00, 0x00, 0x00 };
 static uint8_t *priam_rptr;
 static uint8_t *priam_wptr;
 static unsigned priam_rxc;
@@ -574,6 +596,15 @@ static void priam_read_done(void)
 		/* Status so set up for status read */
 		priam_bus |= 0x08;
 		priam_rptr = priam_status;
+		priam_rxc = 2;
+		return;
+	}
+	/* Sense completing ? */
+	if (priam_rptr >= priam_sense && priam_rptr <= priam_sense + 4) {
+		priam_bus |= 0x08;
+		priam_rptr = priam_status;
+		priam_status[0] = 0x00;
+		priam_status[1] = 0x00;
 		priam_rxc = 2;
 		return;
 	}
@@ -626,6 +657,7 @@ static void priam_write_block(void)
 			priam_txc = 256;
 			return;
 		}
+		perror("priam_write_block");
 		priam_status[0] = 0x02;
 		/* TODO: sense data */
 	} else {
@@ -648,7 +680,7 @@ static void priam_write_begin(void)
 	block |= priam_cmd[3];
 
 	if (trace & TRACE_PRIAM)
-		fprintf(stderr, "priam: writingg block %u\n", block);
+		fprintf(stderr, "priam: writing block %u\n", block);
 
 	if (lseek(priam_fd, block * 256, 0) == -1) {
 		priam_status[0] = 0x02;
@@ -682,12 +714,19 @@ static void priam_write_done(void)
 		case 0x00: /* TUR */
 		case 0x01: /* REZERO */
 			break;
+		case 0x03: /* REQUEST SENSE */
+			priam_rptr = priam_sense;
+			priam_rxc = 4;
+			return;
 		case 0x08: /* READ */
 			priam_do_read();
 			return;
 		case 0x0A: /* WRITE */
 			priam_write_begin();
 			return;
+		case 0x04:	/* FORMAT UNIT */
+		case 0x06:	/* FORMAT TRACK */
+		case 0x0C:	/* REQUEST DRIVE TYPE */
 		case 0xE0:	/* Diagnostics */
 		case 0xE4:
 			break;
@@ -701,7 +740,7 @@ static void priam_write_done(void)
 		return;
 	}
 	/* Data block */
-	if (priam_cmd[0]  == 0x10 && (priam_bus & 0x08)) {
+	if (priam_cmd[0]  == 0x0A && !(priam_bus & 0x08)) {
 		priam_write_block();	/* Updates status etc itself */
 		return;
 	} else {
