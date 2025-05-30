@@ -724,7 +724,7 @@ static void polydd_attach(unsigned unit, const char *path)
 
 
 static uint8_t priam_reg[6];
-static uint8_t priam_status = 0x01;
+static uint8_t priam_status = 0x03;
 static uint8_t priam_tsr;
 static uint8_t priam_cmd;
 static uint8_t priam_data[256];
@@ -835,7 +835,7 @@ static void priam_begin(uint8_t v)
 	switch(v) {
 	case 0x00:
 		/* Completion request */
-		priam_status = 0x01;	/* Check */
+		priam_status = 0x03;	/* Check */
 		break;
 	case 0x03:
 		/* Read buffer */
@@ -948,11 +948,9 @@ static void priam_begin(uint8_t v)
 		break;
 	}
 	/* Figure out status bits */
-	if (priam_status & 0x80)
-		return;
 	if (priam_rxct || priam_txct)
 		priam_status |= 0x0C;	/* DRQ, busy */
-	if (priam_rxct)
+	if (!priam_txct)
 		priam_status |= 0x02;	/* Direction */
 	if (priam_rxct == 0 && priam_txct == 0) {
 		/* Command finished as we don't emulate time yet */
