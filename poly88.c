@@ -305,6 +305,7 @@ static unsigned poly_secint;	/* Sector change */
 static unsigned poly_ppia;
 static unsigned poly_ppic;
 static unsigned poly_ppictrl;
+static unsigned poly_sync;	/* Is the 6852 synchronized */
 static uint8_t fdbuf[256];
 static int poly_fd[2] = { -1, -1 };
 static int poly_drive = -1;
@@ -328,8 +329,12 @@ static void poly_tick(void)
 			poly_sec = 0;
 		poly_byte = 0;
 		poly_secint = 3;
+		/* The 6852 synchronizes to the bits on the media, or if
+		   it was in sync falls out of sync at the frame end */
+		if (poly_sync == 2)
+			poly_sync--;
 		if (trace & TRACE_FDC)
-			fprintf(stderr, "polyfd: sec %u\n", poly_sec);
+			fprintf(stderr, "polyfd: sec %u sync now %u\n", poly_sec, poly_sync);
 	}
 }
 
@@ -384,6 +389,8 @@ static void poly_wbyte(uint8_t v)
 
 	/* 10 zeros, 2 sync, sec, track , and checksum we ignore */
 	if (poly_byte < 14 || poly_byte > 269) {
+		if (trace & TRACE_FDC)
+			fprintf(stderr, "polyfd: sec %d @%d: ignoring %02X\n", poly_sec, poly_byte, v);
 		if (++poly_byte == 272) {
 			off_t off = (poly_track * 10 + poly_sec) * 256;
 			if (lseek(poly_fd[poly_drive], off, 0) < 0 ||
@@ -395,6 +402,8 @@ static void poly_wbyte(uint8_t v)
 		return;
 	}
 	/* Data */
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "polyfd: sec %d @%d: copy %02X\n", poly_sec, poly_byte, v);
 	fdbuf[poly_byte++ - 14] = v;
 }
 
@@ -415,12 +424,18 @@ static uint8_t poly_6852_ready(void)
 {
 	uint8_t r = 0;
 
-	if (poly_drive >= 0 && (poly_ppic & 0x08)) {
-		if ((poly_ppic & 0x20 ) && poly_byte < 260)
-			r |= 1;	/* Read stream */
-		else if (poly_ppic & 0x10)
-			r |= 2; /* Write stream */
-	}
+	/* No drive selected */
+	if (poly_drive == -1)
+		return 0;
+	/* Motor not running */
+	if (!(poly_ppic & 0x08))
+		return 0;
+	/* Read stream enabled and bytes left */
+	if ((poly_ppic & 0x20) && poly_byte < 260)
+		r |= 1;	/* Read stream */
+	/* Write stream enabled and in sync */
+	if ((poly_ppic & 0x10) && poly_sync == 1)
+		r |= 2; /* Write stream */
 	return r;
 }
 
@@ -473,6 +488,11 @@ static void polyfd_write(uint8_t addr, uint8_t val)
 
 	switch(addr) {
 	case 0x00:
+		if (val == 0xC0) {	/* IDLE */
+			poly_sync = 2;
+			if (trace & TRACE_FDC)
+				fprintf(stderr, "polyfd: looking for sector start sync\n");
+		}
 		break;
 	case 0x01:
 		poly_wbyte(val);
@@ -526,7 +546,8 @@ static void polyfd_attach(unsigned drive, const char *path)
 	poly_fd[drive] = open(path, O_RDWR);
 	if (poly_fd[drive] == -1)
 		perror(path);
-	fprintf(stderr, "polyfd drive %u fd %d path %s\n", drive, poly_fd[drive], path);
+	if (trace & TRACE_FDC)
+		fprintf(stderr, "polyfd drive %u fd %d path %s\n", drive, poly_fd[drive], path);
 }
 
 /*
@@ -589,7 +610,8 @@ static void priam_read_done(void)
 			priam_bus |= 0x08;
 			/* TODO: sense data */
 		} else {
-			fprintf(stderr, "priam: read completed go to status\n");
+			if (trace & TRACE_PRIAM)
+				fprintf(stderr, "priam: read completed go to status\n");
 			priam_status[0] = 0x00;
 			priam_status[1] = 0x00;
 		}
@@ -635,12 +657,14 @@ static void priam_do_read(void)
 		priam_bus |= 0x08;
 		priam_rptr = priam_status;
 		priam_rxc = 2;
-		fprintf(stderr, "priam read failed\n");
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam read failed\n");
 	} else {
 		priam_rptr = priam_data;
 		priam_rxc = 256;
 		priam_bus &= ~0x08;
-		fprintf(stderr, "priam read begins (%u blocks)\n", priam_cmd[4]);
+		if (trace & TRACE_PRIAM)
+			fprintf(stderr, "priam read begins (%u blocks)\n", priam_cmd[4]);
 		priam_cmd[4]--;
 	}
 }
