@@ -272,7 +272,7 @@ static void onboard_out(uint8_t addr, uint8_t val)
 {
 	if (addr < 4)
 		i8251_write(uart, addr & 1, val);
-	else if (addr < 8) { 
+	else if (addr < 8) {
 		brg_latch = val;
 		if (twinsys)
 			twin = (brg_latch & 0x20) ? 1: 0;
@@ -632,7 +632,7 @@ static void polydd_action(void)
 		return;
 	}
 	block = polydd_ctrl[0x00] | (polydd_ctrl[0x01] << 8);
-	
+
 	/* We've been told to do something */
 	switch(polydd_ctrl[0x06]) {
 	case 0:	/* Write */
@@ -677,7 +677,328 @@ static void polydd_attach(unsigned unit, const char *path)
 }
 
 /*
- *	First guesses at the Priam controller
+ *	PRIAM hard disk controller
+ *	0x38-0x3F
+ *
+ *	0x38	Status
+ *	0x39	Data R/W
+ *	0x3A	Status	R	Param 0 W
+ *		0: data bus enable
+ *		1: read/write 1 = input (only valid if drq)
+ *		2: drq
+ *		3: busy
+ *		6: cont completion
+ *		7: rejected
+ *	0x3B	Result 0 R	Param 1 W
+ *	0x3C	Result 1 R	Param 2 W
+ *	0x3D	Result 2 R	Param 3 W
+ *	0x3E	Result 3 R	Param 4 W
+ *	0x3F	Result 4 R	Param 5 W  (presumably - not observed)
+ *
+ *	There is good documentation for this fortunately.
+ *
+ *	http://bitsavers.informatik.uni-stuttgart.de/pdf/priam/Peritek_PRM-Q_Programming_Jan81.pdf
+ *	http://bitsavers.informatik.uni-stuttgart.de/pdf/priam/SMART_Interface_Product_Specification_Sep80.pdf
+ *
+ *	We only care about a tiny subset
+ *
+ *	command
+ *	0x50 (write data, with retries)
+ *	0x53 (read data, with retries)
+ *
+ *	For these
+ *	param0: drive 0-3
+ *	param1: head << 3 | cyl upper nybble
+ *	param2: cyl low
+ *	param3: sector
+ *	param4: count
+ *
+ *	results: rr1 as param1
+ *		 rr2: as param2
+ *		 rr3: as param3
+ *		 rr4: as param4
+ *
+ *	The actual PRIAM interface is extremely complex and powerful
+ *	so we just fake the bits that are actually used for now.
+ */
+
+
+static uint8_t priam_reg[6];
+static uint8_t priam_status = 0x01;
+static uint8_t priam_tsr;
+static uint8_t priam_cmd;
+static uint8_t priam_data[256];
+static uint8_t *priam_rxptr;
+static uint8_t *priam_txptr;
+static unsigned priam_rxct;
+static unsigned priam_txct;
+static int priam_fd[4];
+
+static int priam_seek(void)
+{
+	unsigned c = ((priam_reg[1] & 0x0F) << 8) | priam_reg[2];
+	unsigned h = priam_reg[1] >> 4;
+	unsigned s = priam_reg[3];
+	unsigned block = (c * 4 + h) * 16 + s;
+
+	if (lseek(priam_fd[priam_reg[0] & 3], block * 256, 0) < 0) {
+		perror("priam_seek");
+		return -1;
+	}
+	return 0;
+}
+
+static void priam_data_out(uint8_t v)
+{
+	if (priam_txct) {
+		*priam_txptr++ = v;
+		priam_txct--;
+		if (priam_txct == 0) {
+			priam_status |= 0x40;
+			priam_status &= ~0x0E;
+			if (priam_cmd == 0x42 || priam_cmd == 0x52) {
+				if (priam_seek() < 0)
+					priam_tsr |= 0x12;
+				else if (write(priam_fd[priam_reg[0]], priam_data, 256) != 256)
+					priam_tsr |= 0x13;
+				else {
+					priam_reg[4]--;
+					priam_reg[3]++;
+					if (priam_reg[4]) {
+						priam_txct = 256;
+						priam_txptr = priam_data;
+					} else {
+						priam_status |= 0x40;
+						priam_status &= ~0x0E;
+					}
+				}
+			}
+		}
+	}
+}
+
+static uint8_t priam_data_in(void)
+{
+	if (priam_rxct) {
+		uint8_t r = *priam_rxptr++;
+		priam_rxct--;
+		if (priam_rxct == 0) {
+			switch(priam_cmd) {
+			case 0x03:
+				/* Read buffer */
+				priam_status |= 0x40;
+				priam_status &= ~0x0E;
+				break;
+			case 0x43:
+			case 0x53:
+				/* Disk read */
+				priam_reg[4]--;
+				priam_reg[3]++;
+				priam_tsr = priam_reg[0] << 6;
+				if (priam_reg[4]) {
+					if (priam_seek() < 0)
+						priam_tsr = 0x12;
+					else if (read(priam_fd[priam_reg[0] & 3], priam_data, 256) != 256)
+						priam_tsr |= 0x30;
+					else {
+						priam_rxct = 256;
+						priam_rxptr = priam_data;
+						break;
+					}
+				}
+				priam_status |= 0x40;
+				priam_status &= ~0x0E;
+				break;
+			}
+		}
+		return r;
+	}
+	return 0xFF;
+}
+
+static void priam_begin(uint8_t v)
+{
+	priam_cmd = v;
+	priam_rxct = priam_txct = 0;
+	priam_rxptr = priam_txptr = priam_data;
+	priam_reg[0] &= 3;
+	priam_tsr = priam_reg[0] << 6;
+
+
+	if (priam_fd[priam_reg[0]] == -1 && v != 0x80) {
+		priam_tsr |= 0x22;
+		priam_status |= 0x40;
+		priam_status &= ~0x0E;
+		return;
+	}
+
+	switch(v) {
+	case 0x00:
+		/* Completion request */
+		priam_status = 0x01;	/* Check */
+		break;
+	case 0x03:
+		/* Read buffer */
+		priam_rxct = 256;
+		break;
+	case 0x04:
+		/* Write buffer */
+		priam_txct = 256;
+		break;
+	case 0x80:
+		/* Read drive status */
+	case 0x82:
+		/* Sequence up wait */
+	case 0x83:
+		/* Sequence up return */
+		if (priam_fd[priam_reg[3]])
+			priam_reg[1] = 0x03;
+		else
+			priam_reg[1] = 0x00;
+		break;
+	case 0x81:
+		/* Sequence down (park) */
+		break;
+	case 0x85:
+		/* Get parameters */
+		priam_reg[2] = 0x10;	/* Sectors per track */
+		priam_reg[1] = 0x42;	/* 4 heads 512 cylinders */
+		priam_reg[0] = 0x00;	/* low of cylinders */
+	case 0x40:
+		/* Restore */
+		priam_reg[1] = 0x00;
+		priam_reg[2] = 0x00;
+		break;
+	case 0x41:
+		/* Seek */
+	case 0x51:
+		/* Seek with retry */
+		break;
+	case 0x42:
+		/* Write data */
+	case 0x52:
+		/* Write data with retry */
+		priam_txptr = priam_data;
+		priam_txct = 256;
+		break;
+	case 0x43:
+		/* Read data */
+	case 0x53:
+		/* Read data with retry */
+		if (priam_seek() < 0) {
+			priam_tsr |= 0x12;	/* Seek fault */
+			break;
+		}
+		if (read(priam_fd[priam_reg[0]], priam_data, 256) != 256) {
+			priam_tsr |= 0x30;	/* Sector not found */
+			break;
+		}
+		priam_rxptr = priam_data;
+		priam_rxct = 256;
+		break;
+	case 0x45:
+		/* Write ID */
+	case 0x55:
+		/* Write ID with retry */
+	case 0x46:
+		/* Read ID */
+	case 0x56:
+		/* Read ID with retry */
+	case 0x47:
+		/* Read ID immediate */
+	case 0x57:
+		/* Read ID immediate with retry */
+	case 0x48:
+		/* Verify ID */
+	case 0x49:
+		/* Read defect field */
+	case 0x59:
+		/* Read defect field with retry */
+	case 0x4A:
+		/* Write defect field */
+	case 0x5A:
+		/* Write defect field with retry */
+	case 0xA0:
+		/* Format disk */
+	case 0xA1:
+		/* Format cylinder */
+	case 0xA2:
+		/* Format track */
+	case 0xA3:
+		/* Verify disc */
+	case 0xA4:
+		/* Verify cylinder */
+	case 0xA5:
+		/* Verify track */
+	case 0xA8:
+		/* Format disk with defect maping */
+	case 0xA9:
+		/* Specify bad track */
+	case 0xAA:
+		/* Specify bad sector */
+	default:
+		/* Bad command */
+		priam_status |= 0x80;	/* Rejected */
+		priam_tsr |= 0x31;
+		break;
+	case 0x44:
+		/* Verify */
+		/* TODO: should leave buffer holding data in case a
+		   read buffer is done */
+		break;
+	}
+	/* Figure out status bits */
+	if (priam_status & 0x80)
+		return;
+	if (priam_rxct || priam_txct)
+		priam_status |= 0x0C;	/* DRQ, busy */
+	if (priam_rxct)
+		priam_status |= 0x02;	/* Direction */
+	if (priam_rxct == 0 && priam_txct == 0) {
+		/* Command finished as we don't emulate time yet */
+		priam_status |= 0x40;
+		/* Not busy, no DRQ */
+		priam_status &= ~0x0E;
+	}
+}
+
+static void priam_write(uint8_t addr, uint8_t v)
+{
+	/* 2-6 are param 0-4 */
+	if (addr > 1)
+		priam_reg[addr - 2] = v;
+	else if (addr == 1)
+		priam_data_out(v);
+	else
+		priam_begin(v);
+}
+
+static uint8_t priam_read(uint8_t addr)
+{
+	/* 3-6 are result 0-3 */
+	if (addr > 2)
+		return priam_reg[addr - 3];
+	if (addr == 1)
+		return priam_data_in();
+	if (addr == 2)
+		return priam_tsr;
+	return priam_status;
+}
+
+static void priam_attach(unsigned unit, const char *path)
+{
+	if (path) {
+		priam_fd[unit] = open(path, O_RDWR);
+		if (priam_fd[unit] == -1) {
+			perror(path);
+			exit(1);
+		}
+	}
+}
+
+
+/*
+ *	First guesses at the later disk controller
  *
  *	It seems to be sort of SASI but without much of the bus logic
  *	skipped. This should be sufficient code to start poking around
@@ -703,176 +1024,176 @@ static void polydd_attach(unsigned unit, const char *path)
  *	1:	}	driver masks out
  *	0;	}
  */
- 
-static uint8_t priam_bus;
-static uint8_t priam_cmd[6];
-static uint8_t priam_status[2];
-static uint8_t priam_data[256];
+
+static uint8_t sasi_bus;
+static uint8_t sasi_cmd[6];
+static uint8_t sasi_status[2];
+static uint8_t sasi_data[256];
 /* For now just hand back illegal request with no block address */
-static uint8_t priam_sense[4] = { 0x05, 0x00, 0x00, 0x00 };
-static uint8_t *priam_rptr;
-static uint8_t *priam_wptr;
-static unsigned priam_rxc;
-static unsigned priam_txc;
-static int priam_fd = -1;
+static uint8_t sasi_sense[4] = { 0x05, 0x00, 0x00, 0x00 };
+static uint8_t *sasi_rptr;
+static uint8_t *sasi_wptr;
+static unsigned sasi_rxc;
+static unsigned sasi_txc;
+static int sasi_fd = -1;
 
 /*
  *	A read of a block of data has finished. Right now that has
  *	to be
  */
-static void priam_read_done(void)
+static void sasi_read_done(void)
 {
 	/* Read command in progress ? */
-	if (!(priam_bus & 0x08) && priam_cmd[0] == 0x08) {
+	if (!(sasi_bus & 0x08) && sasi_cmd[0] == 0x08) {
 		/* Count through blocks */
-		if (priam_cmd[4]) {
-			priam_cmd[4]--;
-			if (read(priam_fd, priam_data, 256) == 256) {
-				priam_rptr = priam_data;
-				priam_rxc = 256;
+		if (sasi_cmd[4]) {
+			sasi_cmd[4]--;
+			if (read(sasi_fd, sasi_data, 256) == 256) {
+				sasi_rptr = sasi_data;
+				sasi_rxc = 256;
 				return;
 			}
-			priam_status[0] = 0x02;
-			priam_bus |= 0x08;
+			sasi_status[0] = 0x02;
+			sasi_bus |= 0x08;
 			/* TODO: sense data */
 		} else {
 			if (trace & TRACE_PRIAM)
-				fprintf(stderr, "priam: read completed go to status\n");
-			priam_status[0] = 0x00;
-			priam_status[1] = 0x00;
+				fprintf(stderr, "sasi: read completed go to status\n");
+			sasi_status[0] = 0x00;
+			sasi_status[1] = 0x00;
 		}
 		/* Status so set up for status read */
-		priam_bus |= 0x08;
-		priam_rptr = priam_status;
-		priam_rxc = 2;
+		sasi_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
 		return;
 	}
 	/* Sense completing ? */
-	if (priam_rptr >= priam_sense && priam_rptr <= priam_sense + 4) {
-		priam_bus |= 0x08;
-		priam_rptr = priam_status;
-		priam_status[0] = 0x00;
-		priam_status[1] = 0x00;
-		priam_rxc = 2;
+	if (sasi_rptr >= sasi_sense && sasi_rptr <= sasi_sense + 4) {
+		sasi_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_status[0] = 0x00;
+		sasi_status[1] = 0x00;
+		sasi_rxc = 2;
 		return;
 	}
 	/* Status so now go idle */
-	priam_bus = 0x00;
+	sasi_bus = 0x00;
 	/* Wait for command */
-	priam_wptr = priam_cmd;
-	priam_txc = 6;
+	sasi_wptr = sasi_cmd;
+	sasi_txc = 6;
 }
 
 /* A SASI READ command was issued */
 /* TODO: check disk size properly esp for write */
-static void priam_do_read(void)
+static void sasi_do_read(void)
 {
 	unsigned block;
 
-	block = (priam_cmd[1] & 0x0F) << 16;
-	block |= priam_cmd[2] << 8;
-	block |= priam_cmd[3];
+	block = (sasi_cmd[1] & 0x0F) << 16;
+	block |= sasi_cmd[2] << 8;
+	block |= sasi_cmd[3];
 
 	if (trace & TRACE_PRIAM)
-		fprintf(stderr, "priam: reading block %u\n", block);
+		fprintf(stderr, "sasi: reading block %u\n", block);
 
-	if (lseek(priam_fd, block * 256, 0) == -1 ||
-		read(priam_fd, priam_data, 256) != 256) {
-		priam_status[0] = 0x02;
-		priam_status[1] = 0x00;
-		priam_bus |= 0x08;
-		priam_rptr = priam_status;
-		priam_rxc = 2;
+	if (lseek(sasi_fd, block * 256, 0) == -1 ||
+		read(sasi_fd, sasi_data, 256) != 256) {
+		sasi_status[0] = 0x02;
+		sasi_status[1] = 0x00;
+		sasi_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam read failed\n");
+			fprintf(stderr, "sasi read failed\n");
 	} else {
-		priam_rptr = priam_data;
-		priam_rxc = 256;
-		priam_bus &= ~0x08;
+		sasi_rptr = sasi_data;
+		sasi_rxc = 256;
+		sasi_bus &= ~0x08;
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam read begins (%u blocks)\n", priam_cmd[4]);
-		priam_cmd[4]--;
+			fprintf(stderr, "sasi read begins (%u blocks)\n", sasi_cmd[4]);
+		sasi_cmd[4]--;
 	}
 }
 
 /* A disk write of a block has completed writing. Push it to disk and
    see what to do next */
-static void priam_write_block(void)
+static void sasi_write_block(void)
 {
 	/* Count through blocks */
-	if (priam_cmd[4]) {
-		priam_cmd[4]--;
-		if (write(priam_fd, priam_data, 256) == 256) {
-			priam_wptr = priam_data;
-			priam_txc = 256;
+	if (sasi_cmd[4]) {
+		sasi_cmd[4]--;
+		if (write(sasi_fd, sasi_data, 256) == 256) {
+			sasi_wptr = sasi_data;
+			sasi_txc = 256;
 			return;
 		}
-		perror("priam_write_block");
-		priam_status[0] = 0x02;
+		perror("sasi_write_block");
+		sasi_status[0] = 0x02;
 		/* TODO: sense data */
 	} else {
-		priam_status[0] = 0x00;
-		priam_status[1] = 0x00;
+		sasi_status[0] = 0x00;
+		sasi_status[1] = 0x00;
 	}
 	/* Status so set up for status read */
-	priam_bus |= 0x08;
-	priam_rptr = priam_status;
-	priam_rxc = 2;
+	sasi_bus |= 0x08;
+	sasi_rptr = sasi_status;
+	sasi_rxc = 2;
 }
 
 /* Begin a SASI WRITE command: TODO check disk size */
-static void priam_write_begin(void)
+static void sasi_write_begin(void)
 {
 	unsigned block;
 
-	block = (priam_cmd[1] & 0x0F) << 16;
-	block |= priam_cmd[2] << 8;
-	block |= priam_cmd[3];
+	block = (sasi_cmd[1] & 0x0F) << 16;
+	block |= sasi_cmd[2] << 8;
+	block |= sasi_cmd[3];
 
 	if (trace & TRACE_PRIAM)
-		fprintf(stderr, "priam: writing block %u\n", block);
+		fprintf(stderr, "sasi: writing block %u\n", block);
 
-	if (lseek(priam_fd, block * 256, 0) == -1) {
-		priam_status[0] = 0x02;
-		priam_status[1] = 0x00;
-		priam_bus |= ~0x08;
-		priam_rptr = priam_status;
-		priam_rxc = 2;
+	if (lseek(sasi_fd, block * 256, 0) == -1) {
+		sasi_status[0] = 0x02;
+		sasi_status[1] = 0x00;
+		sasi_bus |= ~0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
 	} else {
-		priam_wptr = priam_data;
-		priam_txc = 256;
-		priam_bus &= ~0x08;
+		sasi_wptr = sasi_data;
+		sasi_txc = 256;
+		sasi_bus &= ~0x08;
 	}
 }
 
 /* We've finished writing the expected block. That might be a command or
    SASI write data */
-static void priam_write_done(void)
+static void sasi_write_done(void)
 {
 	/* Six bytes written to the command buffer */
-	if (priam_wptr == priam_cmd + 6) {
+	if (sasi_wptr == sasi_cmd + 6) {
 		/* Issue a command */
-		priam_status[0] = 0;
-		priam_status[1] = 0;
-		priam_bus |= 0x80;
+		sasi_status[0] = 0;
+		sasi_status[1] = 0;
+		sasi_bus |= 0x80;
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam_cmd: %02X %02X %02X %02X %02X %02X\n",
-				priam_cmd[0], priam_cmd[1], priam_cmd[2], priam_cmd[3],
-				priam_cmd[4], priam_cmd[5]);
+			fprintf(stderr, "sasi_cmd: %02X %02X %02X %02X %02X %02X\n",
+				sasi_cmd[0], sasi_cmd[1], sasi_cmd[2], sasi_cmd[3],
+				sasi_cmd[4], sasi_cmd[5]);
 		/* TODO: sense etc */
-		switch(priam_cmd[0]) {
+		switch(sasi_cmd[0]) {
 		case 0x00: /* TUR */
 		case 0x01: /* REZERO */
 			break;
 		case 0x03: /* REQUEST SENSE */
-			priam_rptr = priam_sense;
-			priam_rxc = 4;
+			sasi_rptr = sasi_sense;
+			sasi_rxc = 4;
 			return;
 		case 0x08: /* READ */
-			priam_do_read();
+			sasi_do_read();
 			return;
 		case 0x0A: /* WRITE */
-			priam_write_begin();
+			sasi_write_begin();
 			return;
 		case 0x04:	/* FORMAT UNIT */
 		case 0x06:	/* FORMAT TRACK */
@@ -881,93 +1202,93 @@ static void priam_write_done(void)
 		case 0xE4:
 			break;
 		default:
-			priam_status[0] = 0x02;
+			sasi_status[0] = 0x02;
 			break;
 		}
-		priam_rptr = priam_status;
-		priam_rxc = 2;
-		priam_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
+		sasi_bus |= 0x08;
 		return;
 	}
 	/* Data block */
-	if (priam_cmd[0]  == 0x0A && !(priam_bus & 0x08)) {
-		priam_write_block();	/* Updates status etc itself */
+	if (sasi_cmd[0]  == 0x0A && !(sasi_bus & 0x08)) {
+		sasi_write_block();	/* Updates status etc itself */
 		return;
 	} else {
 		/* Fudge up an error code - may need to implement sense */
-		priam_status[0] = 0x02;	/* Sense available */
-		priam_status[1] = 0x00;
-	} 
-	priam_rptr = priam_status;
-	priam_rxc = 2;
-	priam_bus |= 0x08;
+		sasi_status[0] = 0x02;	/* Sense available */
+		sasi_status[1] = 0x00;
+	}
+	sasi_rptr = sasi_status;
+	sasi_rxc = 2;
+	sasi_bus |= 0x08;
 }
 
-static uint8_t priam_read(uint8_t addr)
+static uint8_t sasi_read(uint8_t addr)
 {
 	uint8_t r;
 
-	if (priam_fd == -1)
+	if (sasi_fd == -1)
 		return 0xFF;
 
 	switch(addr) {
 	case 0:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: read bus state %02X\n", priam_bus);
-		return priam_bus;
+			fprintf(stderr, "sasi: read bus state %02X\n", sasi_bus);
+		return sasi_bus;
 	case 1:
-		if (priam_rxc) {
-			priam_rxc--;
-			r = *priam_rptr++;
+		if (sasi_rxc) {
+			sasi_rxc--;
+			r = *sasi_rptr++;
 			if (trace & TRACE_PRIAM)
-				fprintf(stderr, "priam: read data %u\n", r);
-			if (priam_rxc == 0)
-				priam_read_done();
+				fprintf(stderr, "sasi: read data %u\n", r);
+			if (sasi_rxc == 0)
+				sasi_read_done();
 			return r;
 		}
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam read data: no data\n");
+			fprintf(stderr, "sasi read data: no data\n");
 		return 0xFF;	/* >?? */
 	}
 	return 0xFF;
 }
 
-static void priam_write(uint8_t addr, uint8_t val)
+static void sasi_write(uint8_t addr, uint8_t val)
 {
 	switch(addr) {
 	case 0:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: write bus %u\n", val);
+			fprintf(stderr, "sasi: write bus %u\n", val);
 		/* Write bus: only known case is write 1 if bus 0x80 */
-		priam_bus |= 0x40;	/* Until we figure this out */
+		sasi_bus |= 0x40;	/* Until we figure this out */
 		break;
 	case 1:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: write data %u (txc %u)\n", val, priam_txc);
+			fprintf(stderr, "sasi: write data %u (txc %u)\n", val, sasi_txc);
 		/* Write data */
-		if (priam_txc) {
-			priam_txc--;
-			*priam_wptr++ = val;
-			if (priam_txc == 0)
-				priam_write_done();
+		if (sasi_txc) {
+			sasi_txc--;
+			*sasi_wptr++ = val;
+			if (sasi_txc == 0)
+				sasi_write_done();
 		}
 		break;
 	case 3:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: write reset %u\n", val);
+			fprintf(stderr, "sasi: write reset %u\n", val);
 		/* Reset ? Write of 0 done initially */
-		priam_bus = 0x00;
-		priam_txc = 6;	/* Command block wait */
-		priam_wptr = priam_cmd;
-		priam_rxc = 0;
+		sasi_bus = 0x00;
+		sasi_txc = 6;	/* Command block wait */
+		sasi_wptr = sasi_cmd;
+		sasi_rxc = 0;
 		break;
 	}
 }
 
-static void priam_attach(const char *path)
+static void sasi_attach(const char *path)
 {
-	priam_fd = open(path, O_RDWR);
-	if (priam_fd == -1) {
+	sasi_fd = open(path, O_RDWR);
+	if (sasi_fd == -1) {
 		perror(path);
 		exit(1);
 	}
@@ -984,6 +1305,8 @@ uint8_t i8080_inport(uint8_t addr)
 	if (addr >= 0x20 && addr <= 0x2F)
 		return polyfd_read(addr & 0x0F);
 	if (addr >= 0x34 && addr <= 0x37)
+		return sasi_read(addr & 3);
+	if (addr >= 0x38 && addr <= 0x3F)
 		return priam_read(addr & 3);
 	if (ide && addr >= 0xC0 && addr <= 0xC7)
 		return ide_read8(ide, addr);
@@ -1005,7 +1328,9 @@ void i8080_outport(uint8_t addr, uint8_t val)
 	else if (addr >= 0x20 && addr <= 0x2F)
 		polyfd_write(addr & 0x0F, val);
 	else if (addr >= 0x34 && addr <= 0x37)
-		priam_write(addr & 3, val);
+		sasi_write(addr & 3, val);
+	else if (addr >= 0x38 && addr <= 0x3F)
+		priam_write(addr & 7, val);
 	else if (ide && addr >= 0xC0 && addr <= 0xC7)
 		ide_write8(ide, addr, val);
 	else if (fdc && addr >= 0xE8 && addr <= 0xEF)
@@ -1153,7 +1478,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "poly88: [-A|B|C|D disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-h hd] [-i ide] [-p] [-t]\n");
+	fprintf(stderr, "poly88: [-A|B|C|D disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-h hd] [-s sasi] [-i ide] [-p] [-t]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1165,13 +1490,14 @@ int main(int argc, char *argv[])
 	char *rompath = "poly88.rom";
 	char *drive_a = NULL, *drive_b = NULL;
 	char *drive_c = NULL, *drive_d = NULL;
-	char *priampath = NULL;
+	char *sasipath = NULL;
+	char *hdpath = NULL;
 	char *idepath = NULL;
 	unsigned n;
 	unsigned polyfdc = 0;
 	unsigned tarbell = 0;
 
-	while ((opt = getopt(argc, argv, "A:B:C:D:d:F:fh:i:m:pr:tTv:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:C:D:d:F:fh:i:m:pr:s:tTv:")) != -1) {
 		switch (opt) {
 		case 'A':
 			drive_a = optarg;
@@ -1195,7 +1521,7 @@ int main(int argc, char *argv[])
 			fast = 1;
 			break;
 		case 'h':
-			priampath = optarg;
+			hdpath = optarg;
 			break;
 		case 'i':
 			idepath = optarg;
@@ -1205,6 +1531,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'p':
 			polyfdc = 1;
+			break;
+		case 's':
+			sasipath = optarg;
 			break;
 		case 'T':
 			twinsys = 1;
@@ -1256,8 +1585,10 @@ int main(int argc, char *argv[])
 		polydd_attach(3, drive_d);
 	}
 
-	if (priampath)
-		priam_attach(priampath);
+	if (sasipath)
+		sasi_attach(sasipath);
+
+	priam_attach(0, hdpath);
 
 	/* TODO so for now make it look like bus idle */
 	memset(highrom, 0xFF, sizeof(highrom));
