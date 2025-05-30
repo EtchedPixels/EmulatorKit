@@ -117,6 +117,9 @@ static unsigned cpmflipflop;
 static unsigned rtc_int;
 static uint8_t vram[2][1024];	/* 512byte or 1K video RAM */
 
+static uint8_t polydd_ctrl[16];	/* DPRAM on the smart dd controller */
+static uint8_t polydd_ram[2048];
+
 /* 7 x 9 for char matrix in a 10 x 15 field */
 #define CWIDTH 10
 #define CHEIGHT 15
@@ -151,6 +154,12 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 			}
 			return iram + (addr & 0x01FF);
 		}
+	}
+	if (twinsys) {
+		if (addr >= 0x1000 && addr <= 0x17FF)
+			return polydd_ram + (addr & 0x07FF);
+		if (addr >= 0x1FE0 && addr <= 0x1FEF)
+			return polydd_ctrl + (addr & 0x0F);
 	}
 	/* TODO: base system brg latch doesn't affect video. Later setups
 	   it is paged with internal I/O, twin system two videos are paged
@@ -551,7 +560,124 @@ static void polyfd_attach(unsigned drive, const char *path)
 }
 
 /*
- *	First guesses at the Priam controller: untested
+ *	Poly88 double density control. Memory mapped
+ *	0x1000-0x17FF	transfer buffer (2K)
+ *	0x1FE0	sector number (word)
+ *	0x1FE2  memory address for transfer
+ *	0x1FE4	disk (4-7)
+ *	0x1FE5	sectors to transfer (1-8)
+ *	0x1FE6	controller command
+ *		0 write
+ *		1 read
+ *		2 initialize
+ *		4 buffer command
+ *		5 disk size (handled in driver)
+ *	0x1FE7	status (write FF to start I/O)
+ *		Once written poll over 660us and see if it's not FF
+ *		When it stops being FF copy the status and clear if nonzero
+ *	0x1FEE  0x40 = single sided
+ *	0x1FEF autodetect (writeable to 0 if controller) FF if idle bus
+ *	0x1FF0-1FFF left clear for North Star FPU option
+ */
+
+/* Fake the behaviour of the disk side CPU */
+
+static int polydd_fd[4] = { -1, -1, -1. -1 };
+
+static void polydd_xfer_in(uint8_t *tmpbuf)
+{
+	unsigned addr = polydd_ctrl[0x02] | (polydd_ctrl[0x03] << 8);
+	unsigned n;
+	addr &= 0x7FF;	/* 2K */
+	if (addr <= 0x0700) {	/* Will 256 bytes fit ? */
+		memcpy(tmpbuf, polydd_ram + addr, 256);
+		polydd_ctrl[0x03]++;	/* Move on 256 */
+		/* Does the firmware wrap this - unknown */
+	}
+	/* Partial blocks needed */
+	n = 0x0800 - addr;
+	memcpy(tmpbuf, polydd_ram + addr, n);
+	memcpy(tmpbuf + n, polydd_ram, 256 - n);
+	polydd_ctrl[0x03]++;
+}
+
+static void polydd_xfer_out(uint8_t *tmpbuf)
+{
+	unsigned addr = polydd_ctrl[0x02] | (polydd_ctrl[0x03] << 8);
+	unsigned n;
+	addr &= 0x7FF;	/* 2K */
+	if (addr <= 0x0700) {	/* Will 256 bytes fit ? */
+		memcpy(polydd_ram + addr, tmpbuf, 256);
+		polydd_ctrl[0x03]++;	/* Move on 256 */
+		/* Does the firmware wrap this - unknown */
+	}
+	/* Partial blocks needed */
+	n = 0x0800 - addr;
+	memcpy(polydd_ram + addr, tmpbuf, n);
+	memcpy(polydd_ram, tmpbuf + n, 256 - n);
+	polydd_ctrl[0x03]++;
+}
+
+static void polydd_action(void)
+{
+	int drive;
+	unsigned block;
+	uint8_t tmpbuf[256];
+	unsigned ct = polydd_ctrl[0x05];
+	if (polydd_ctrl[0x07] != 0xFF)
+		return;
+	drive = polydd_ctrl[0x04] - 4;
+	if (drive < 0 || drive > 3) {
+		polydd_ctrl[0x07] = 0x01;
+		return;
+	}
+	block = polydd_ctrl[0x00] | (polydd_ctrl[0x01] << 8);
+	
+	/* We've been told to do something */
+	switch(polydd_ctrl[0x06]) {
+	case 0:	/* Write */
+		if (lseek(polydd_fd[drive], block * 256, 0) < 0)
+			break;
+		while(ct--) {
+			polydd_xfer_out(tmpbuf);
+			if (write(polydd_fd[drive], tmpbuf, 256) != 256)
+				break;
+		}
+		polydd_ctrl[0x07] = 0x00;
+		return;
+	case 1:	/* Read */
+		if (lseek(polydd_fd[drive], block * 256, 0) < 0)
+			break;
+		while(ct--) {
+			if (read(polydd_fd[drive], tmpbuf, 256) != 256)
+				break;
+			polydd_xfer_in(tmpbuf);
+		}
+		polydd_ctrl[0x07] = 0x00;
+		return;
+	case 2:
+		polydd_ctrl[0x07] = 0x00;	/* Initialize just works right */
+		return;
+	case 4:;
+		/* "buffer command"  - unknown */
+	}
+	polydd_ctrl[0x07] = 0x01;	/* TODO: figure out error codes */
+				/* Driver seems to juse use 0/NZ */
+}
+
+static void polydd_attach(unsigned unit, const char *path)
+{
+	if (path) {
+		polydd_fd[unit] = open(path, O_RDWR);
+		if (polydd_fd[unit] == -1) {
+			perror(path);
+			exit(1);
+		}
+	}
+}
+
+/*
+ *	First guesses at the Priam controller
  *
  *	It seems to be sort of SASI but without much of the bus logic
  *	skipped. This should be sufficient code to start poking around
@@ -1027,7 +1153,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-h hd] [-i ide] [-p] [-t]\n");
+	fprintf(stderr, "poly88: [-A|B|C|D disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-h hd] [-i ide] [-p] [-t]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1038,17 +1164,25 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "poly88.rom";
 	char *drive_a = NULL, *drive_b = NULL;
+	char *drive_c = NULL, *drive_d = NULL;
 	char *priampath = NULL;
 	char *idepath = NULL;
 	unsigned n;
 	unsigned polyfdc = 0;
+	unsigned tarbell = 0;
 
-	while ((opt = getopt(argc, argv, "A:B:d:F:fh:i:m:pr:tv:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:C:D:d:F:fh:i:m:pr:tTv:")) != -1) {
 		switch (opt) {
 		case 'A':
 			drive_a = optarg;
 			break;
 		case 'B':
+			drive_b = optarg;
+			break;
+		case 'C':
+			drive_a = optarg;
+			break;
+		case 'D':
 			drive_b = optarg;
 			break;
 		case 'r':
@@ -1072,8 +1206,11 @@ int main(int argc, char *argv[])
 		case 'p':
 			polyfdc = 1;
 			break;
-		case 't':
+		case 'T':
 			twinsys = 1;
+			break;
+		case 't':
+			tarbell = 1;
 			break;
 		case 'v':
 			vidbase = strtoul(optarg, NULL, 0) & 0xFFC0;
@@ -1098,11 +1235,11 @@ int main(int argc, char *argv[])
 	close(fd);
 
 	if (polyfdc) {
-		if (drive_a)
-			polyfd_attach(0, drive_a);
-		if (drive_b)
-			polyfd_attach(1, drive_b);
-	} else {
+		polyfd_attach(0, drive_a);
+		polyfd_attach(1, drive_b);
+		polydd_attach(0, drive_c);
+		polydd_attach(1, drive_d);
+	} else if (tarbell) {
 		if (drive_a || drive_b) {
 			fdc = tbfdc_create();
 			if (trace & TRACE_FDC)
@@ -1112,6 +1249,11 @@ int main(int argc, char *argv[])
 			if (drive_b)
 				wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
 		}
+	} else {
+		polydd_attach(0, drive_a);
+		polydd_attach(1, drive_b);
+		polydd_attach(2, drive_c);
+		polydd_attach(3, drive_d);
 	}
 
 	if (priampath)
@@ -1212,6 +1354,7 @@ int main(int argc, char *argv[])
 			i8080_exec(256);
 			i8251_timer(uart);
 			poll_irq_event();
+			polydd_action();
 		}
 		/* We want to run UI events regularly it seems */
 		poly_rasterize(0);
