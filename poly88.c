@@ -29,24 +29,14 @@
  *	different set of port toggles and the BRG bit controls which "user"
  *	side of the machine (RAM bank, keyboard, video) is mapped.
  *
- *	For I/O we emulate the tarbell FDC, this is fine for CP/M but
- *	the Poly88 DOS would require we emulated the original Polymorphic
- *	single sided FDC, which is a complex beast.
- *
  *	TODO:
  *	- 8251 interrupt emulation
  *	- Tape load as serial dev plugin
  *	- Correct the few differing font symbols
  *	- How did the keyboard interrupt work with two keyboards
  *	- Support two keyboards
- *
- *	Mysteries:
- *	- The Poly88 twin mode is untested with real software. It's not
- *	  clear if the original software exists any more as it would have
- *	  only been on a small number of machines.
- *	- The hard disk controller is a complete unknown. It appears to have
- *	  been a PRIAM "intelligent" controller and a simple interface card
- *	  so quite possibly SASI.
+ *	- The Poly88 twin mode is untested with real software.
+ *	- What is the SASI controller story
  */
 
 #include <stdio.h>
@@ -120,6 +110,8 @@ static uint8_t vram[2][1024];	/* 512byte or 1K video RAM */
 static uint8_t polyms_ctrl[16];	/* DPRAM on the smart dd controller */
 static uint8_t polyms_ram[2048];
 
+static uint8_t pdd_ram[768];	/* Shared memory for DD 5.25" driver */
+
 /* 7 x 9 for char matrix in a 10 x 15 field */
 #define CWIDTH 10
 #define CHEIGHT 15
@@ -160,6 +152,8 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 			return polyms_ram + (addr & 0x07FF);
 		if (addr >= 0x1FE0 && addr <= 0x1FEF)
 			return polyms_ctrl + (addr & 0x0F);
+		if (addr >= 0x1C00 && addr < 0x1FE0)
+			return pdd_ram + (addr & 0x03FF);
 	}
 	/* TODO: base system brg latch doesn't affect video. Later setups
 	   it is paged with internal I/O, twin system two videos are paged
@@ -727,9 +721,100 @@ static void polyms_attach(unsigned unit, const char *path)
  *	1C0C	Seek error counter
  *	1CFE	Page 0 (256 data and checksum) ?
  *	1DFF	Page 1 ditto
+ *
+ *	When the F8 command is executed the CPU has written the
+ *	sector addres, drive number and pages to transfer. It's selected
+ *	the page to use. This does not start the I/O instead a write command
+ *
+ *	The real hardware is very asynchronous. The write of the first sector
+ *	reports 0xCF (working), and the host writes the next page into
+ *	the other buffer whilst the controller is writing the first. Similar
+ *	in reverse when reading.
+ *
+ *	TODO: properly track sector counting
+ *
+ *	Returned error codes are added to 0x100 to give the OS error
  */
 
-/* TODO */
+static int pdd_fd[4] = { -1, - 1, -1, -1 };
+static unsigned pdd_pages;
+static unsigned pdd_pageoff[2] = { 0x00FE, 0x1FF };
+
+static void polydd_seek(void)
+{
+	unsigned sec = pdd_ram[0] | (pdd_ram[1] << 8);
+	unsigned drive = pdd_ram[2] & 3;
+
+	if (pdd_fd[drive] == -1) {
+		pdd_ram[4] = 0x06;	/* No disk in drive */
+		return;
+	}
+
+	if (lseek(pdd_fd[drive], 256 * sec, 0) < 0) {
+		perror("polydd");
+		pdd_ram[4] = 0x0B;	/* Seek error */
+		return;
+	}
+}
+
+/* Add the checksum byte */
+static void pdd_csum(void)
+{
+	unsigned i;
+	unsigned page = pdd_ram[5] & 1;
+	uint8_t *p = pdd_ram + pdd_pageoff[page];
+	uint8_t n = 0;
+
+	for (i = 0; i < 256; i++)
+		n += *p++;
+	*p = ~n;
+}
+
+static void polydd_action(void)
+{
+	unsigned page = pdd_ram[5] & 1;
+	unsigned drive = pdd_ram[2] & 3;
+
+	if (pdd_ram[4] >= 0xD0 && pdd_ram[4] <= 0xFC) {
+		/* We've ben asked to do something */
+		switch(pdd_ram[4]) {
+		case 0xF8:	/* Begin write sequence */
+		case 0xF9:	/* Begin read sequence */
+			pdd_pages = pdd_ram[3];
+			pdd_ram[4] = 0;	/* Done */
+			polydd_seek();
+			break;
+		case 0xFA:	/* Media size (TODO) report 1.2MB for now */
+			pdd_ram[0] = 0xC0;
+			pdd_ram[1] = 0x12;
+			pdd_ram[4] = 0;
+			break;
+		case 0xFB:	/* Write sector */
+			/* The page has been loaded, so begin the write */
+			if (write(pdd_fd[drive], pdd_ram + pdd_pageoff[page], 256) != 256) {
+				pdd_ram[4] = 0x08;	/* Data transfer error */
+				break;
+			}
+			pdd_pages--;
+			pdd_ram[4] = 0;	/* Done */
+			/* TODO: send working and send DONE shortly after */
+			break;
+		case 0xFC:	/* Read sector */
+			if (read(pdd_fd[drive], pdd_ram + pdd_pageoff[page], 256) != 256) {
+				pdd_ram[4] = 0x02;	/* Hard error / preamble bad */
+				break;
+			}
+			pdd_pages--;
+			pdd_csum();
+			pdd_ram[4] = 0;
+			break;
+		case 0xFE:	/* Reset */
+			pdd_ram[4] = 0;
+			break;
+		default:
+		}
+	}
+}
 
 /*
  *	PRIAM hard disk controller
@@ -1739,6 +1824,7 @@ int main(int argc, char *argv[])
 			i8251_timer(uart);
 			poll_irq_event();
 			polyms_action();
+			polydd_action();
 		}
 		/* We want to run UI events regularly it seems */
 		poly_rasterize(0);
