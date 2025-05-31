@@ -117,8 +117,8 @@ static unsigned cpmflipflop;
 static unsigned rtc_int;
 static uint8_t vram[2][1024];	/* 512byte or 1K video RAM */
 
-static uint8_t polydd_ctrl[16];	/* DPRAM on the smart dd controller */
-static uint8_t polydd_ram[2048];
+static uint8_t polyms_ctrl[16];	/* DPRAM on the smart dd controller */
+static uint8_t polyms_ram[2048];
 
 /* 7 x 9 for char matrix in a 10 x 15 field */
 #define CWIDTH 10
@@ -157,9 +157,9 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 	}
 	if (twinsys) {
 		if (addr >= 0x1000 && addr <= 0x17FF)
-			return polydd_ram + (addr & 0x07FF);
+			return polyms_ram + (addr & 0x07FF);
 		if (addr >= 0x1FE0 && addr <= 0x1FEF)
-			return polydd_ctrl + (addr & 0x0F);
+			return polyms_ctrl + (addr & 0x0F);
 	}
 	/* TODO: base system brg latch doesn't affect video. Later setups
 	   it is paged with internal I/O, twin system two videos are paged
@@ -569,12 +569,26 @@ static void polyfd_attach(unsigned drive, const char *path)
  *	0x1FE6	controller command
  *		0 write
  *		1 read
- *		2 initialize
+ *		2 initialize (writes preambles to all of disk and then does
+ *		  a media pattern test)
+ *		3 read cache (unclear)
  *		4 buffer command
  *		5 disk size (handled in driver)
  *	0x1FE7	status (write FF to start I/O)
  *		Once written poll over 660us and see if it's not FF
  *		When it stops being FF copy the status and clear if nonzero
+ *		0 OK
+ *		1 Bad Parameters
+ *		2 Preamble bad
+ *		3 CRC error
+ *		4 Verify error
+ *		5 Write protected
+ *		6 Not ready
+ *		(Diagnostics)
+ *		80 - checksum error on root
+ *		81 - SDLC self test
+ *		82-89 Memory error
+ *		8A - Data loop back test failure
  *	0x1FEE  0x40 = single sided
  *	0x1FEF autodetect (writeable to 0 if controller) FF if idle bus
  *	0x1FF0-1FFF left clear for North Star FPU option
@@ -582,99 +596,140 @@ static void polyfd_attach(unsigned drive, const char *path)
 
 /* Fake the behaviour of the disk side CPU */
 
-static int polydd_fd[4] = { -1, -1, -1. -1 };
+static int polyms_fd[4] = { -1, -1, -1. -1 };
 
-static void polydd_xfer_in(uint8_t *tmpbuf)
+static void polyms_xfer_in(uint8_t *tmpbuf)
 {
-	unsigned addr = polydd_ctrl[0x02] | (polydd_ctrl[0x03] << 8);
+	unsigned addr = polyms_ctrl[0x02] | (polyms_ctrl[0x03] << 8);
 	unsigned n;
 	addr &= 0x7FF;	/* 2K */
 	if (addr <= 0x0700) {	/* Will 256 bytes fit ? */
-		memcpy(tmpbuf, polydd_ram + addr, 256);
-		polydd_ctrl[0x03]++;	/* Move on 256 */
+		memcpy(tmpbuf, polyms_ram + addr, 256);
+		polyms_ctrl[0x03]++;	/* Move on 256 */
 		/* Does the firmware wrap this - unknown */
 	}
 	/* Partial blocks needed */
 	n = 0x0800 - addr;
-	memcpy(tmpbuf, polydd_ram + addr, n);
-	memcpy(tmpbuf + n, polydd_ram, 256 - n);
-	polydd_ctrl[0x03]++;
+	memcpy(tmpbuf, polyms_ram + addr, n);
+	memcpy(tmpbuf + n, polyms_ram, 256 - n);
+	polyms_ctrl[0x03]++;
 }
 
-static void polydd_xfer_out(uint8_t *tmpbuf)
+static void polyms_xfer_out(uint8_t *tmpbuf)
 {
-	unsigned addr = polydd_ctrl[0x02] | (polydd_ctrl[0x03] << 8);
+	unsigned addr = polyms_ctrl[0x02] | (polyms_ctrl[0x03] << 8);
 	unsigned n;
 	addr &= 0x7FF;	/* 2K */
 	if (addr <= 0x0700) {	/* Will 256 bytes fit ? */
-		memcpy(polydd_ram + addr, tmpbuf, 256);
-		polydd_ctrl[0x03]++;	/* Move on 256 */
+		memcpy(polyms_ram + addr, tmpbuf, 256);
+		polyms_ctrl[0x03]++;	/* Move on 256 */
 		/* Does the firmware wrap this - unknown */
 	}
 	/* Partial blocks needed */
 	n = 0x0800 - addr;
-	memcpy(polydd_ram + addr, tmpbuf, n);
-	memcpy(polydd_ram, tmpbuf + n, 256 - n);
-	polydd_ctrl[0x03]++;
+	memcpy(polyms_ram + addr, tmpbuf, n);
+	memcpy(polyms_ram, tmpbuf + n, 256 - n);
+	polyms_ctrl[0x03]++;
 }
 
-static void polydd_action(void)
+static void polyms_action(void)
 {
 	int drive;
 	unsigned block;
 	uint8_t tmpbuf[256];
-	unsigned ct = polydd_ctrl[0x05];
-	if (polydd_ctrl[0x07] != 0xFF)
+	unsigned ct = polyms_ctrl[0x05];
+	if (polyms_ctrl[0x07] != 0xFF)
 		return;
-	drive = polydd_ctrl[0x04] - 4;
+	drive = polyms_ctrl[0x04] - 4;
 	if (drive < 0 || drive > 3) {
-		polydd_ctrl[0x07] = 0x01;
+		polyms_ctrl[0x07] = 0x01;
 		return;
 	}
-	block = polydd_ctrl[0x00] | (polydd_ctrl[0x01] << 8);
+	block = polyms_ctrl[0x00] | (polyms_ctrl[0x01] << 8);
 
 	/* We've been told to do something */
-	switch(polydd_ctrl[0x06]) {
+	switch(polyms_ctrl[0x06]) {
 	case 0:	/* Write */
-		if (lseek(polydd_fd[drive], block * 256, 0) < 0)
+		if (lseek(polyms_fd[drive], block * 256, 0) < 0) {
+			polyms_ctrl[0x07] = 2;
 			break;
-		while(ct--) {
-			polydd_xfer_out(tmpbuf);
-			if (write(polydd_fd[drive], tmpbuf, 256) != 256)
-				break;
 		}
-		polydd_ctrl[0x07] = 0x00;
+		while(ct--) {
+			polyms_xfer_out(tmpbuf);
+			if (write(polyms_fd[drive], tmpbuf, 256) != 256) {
+				polyms_ctrl[0x07] = 0x04;
+				return;
+			}
+		}
+		polyms_ctrl[0x07] = 0x00;
 		return;
 	case 1:	/* Read */
-		if (lseek(polydd_fd[drive], block * 256, 0) < 0)
-			break;
-		while(ct--) {
-			if (read(polydd_fd[drive], tmpbuf, 256) != 256)
-				break;
-			polydd_xfer_in(tmpbuf);
+		if (lseek(polyms_fd[drive], block * 256, 0) < 0) {
+			polyms_ctrl[0x07] = 0x02;
+			return;
 		}
-		polydd_ctrl[0x07] = 0x00;
+		while(ct--) {
+			if (read(polyms_fd[drive], tmpbuf, 256) != 256) {
+				polyms_ctrl[0x07] = 0x03;
+				return;
+			}
+			polyms_xfer_in(tmpbuf);
+		}
+		polyms_ctrl[0x07] = 0x00;
 		return;
 	case 2:
-		polydd_ctrl[0x07] = 0x00;	/* Initialize just works right */
+		polyms_ctrl[0x07] = 0x00;	/* Initialize just works right */
 		return;
 	case 4:;
 		/* "buffer command"  - unknown */
 	}
-	polydd_ctrl[0x07] = 0x01;	/* TODO: figure out error codes */
-				/* Driver seems to juse use 0/NZ */
+	polyms_ctrl[0x07] = 0x01;
+	/* Driver seems to juse use 0/NZ */
 }
 
-static void polydd_attach(unsigned unit, const char *path)
+static void polyms_attach(unsigned unit, const char *path)
 {
 	if (path) {
-		polydd_fd[unit] = open(path, O_RDWR);
-		if (polydd_fd[unit] == -1) {
+		polyms_fd[unit] = open(path, O_RDWR);
+		if (polyms_fd[unit] == -1) {
 			perror(path);
 			exit(1);
 		}
 	}
 }
+
+/*
+ *	DD 5.25" driver. Very similar to the DD driver. Again shared
+ *	memory based
+ *
+ *	1C00	Sector address
+ *	1C02	Drive number
+ *	1C03	Number of pages to transfer
+ *	1C04	Status / Control
+ *		FF absent
+ *		FE reset controller
+ *		FD reports whilst powering up
+ *		FC written by 8080 -> read sector
+ *		FB written by 8080 -> write sector
+ *		FA written by 8080 -> media size
+ *		F9 begin read sequence
+ *		F8 begin write sequence
+ *		F7 execute the code at 1D00 on Z80 side
+ *		CF response once Z80 sees a command
+ *		00 response once completed
+ *	1C05	Page Switch
+ *	1C06	Retry limit
+ *	1C07	Number of seek retries
+ *	1C08	XOR of good/bad RAM bytes
+ *	1C09	Soft error counter
+ *	1C0A	Checksum error counter
+ *	1C0B	Verify error counter
+ *	1C0C	Seek error counter
+ *	1CFE	Page 0 (256 data and checksum) ?
+ *	1DFF	Page 1 ditto
+ */
+
+/* TODO */
 
 /*
  *	PRIAM hard disk controller
@@ -1564,8 +1619,8 @@ int main(int argc, char *argv[])
 	if (polyfdc) {
 		polyfd_attach(0, drive_a);
 		polyfd_attach(1, drive_b);
-		polydd_attach(0, drive_c);
-		polydd_attach(1, drive_d);
+		polyms_attach(0, drive_c);
+		polyms_attach(1, drive_d);
 	} else if (tarbell) {
 		if (drive_a || drive_b) {
 			fdc = tbfdc_create();
@@ -1577,10 +1632,10 @@ int main(int argc, char *argv[])
 				wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
 		}
 	} else {
-		polydd_attach(0, drive_a);
-		polydd_attach(1, drive_b);
-		polydd_attach(2, drive_c);
-		polydd_attach(3, drive_d);
+		polyms_attach(0, drive_a);
+		polyms_attach(1, drive_b);
+		polyms_attach(2, drive_c);
+		polyms_attach(3, drive_d);
 	}
 
 	if (sasipath)
@@ -1683,7 +1738,7 @@ int main(int argc, char *argv[])
 			i8080_exec(256);
 			i8251_timer(uart);
 			poll_irq_event();
-			polydd_action();
+			polyms_action();
 		}
 		/* We want to run UI events regularly it seems */
 		poly_rasterize(0);
