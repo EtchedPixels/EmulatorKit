@@ -455,16 +455,16 @@ int main(int argc, char *argv[])
 		usage();
 
 	if (type != 1802 && type != 1804 && type != 1805 && type != 1806) {
-		fprintf(stderr, "rcbus: unknown CPU type. Please select from 1802, 1804, 1805, 1806.\n");
+		fprintf(stderr, "rcbus-1802: unknown CPU type. Please select from 1802, 1804, 1805, 1806.\n");
 		exit(1);
 	}
 	if (acia_uart == 0 && uart_16550a == 0) {
-		fprintf(stderr, "rcbus: no UART selected, defaulting to 68B50\n");
+		fprintf(stderr, "rcbus-1802: no UART selected, defaulting to 68B50\n");
 		acia_uart = 1;
 		acia_input = 1;
 	}
 	if (rom == 0 && bank512 == 0 && bankhigh == 0) {
-		fprintf(stderr, "rcbus: no ROM\n");
+		fprintf(stderr, "rcbus-1802: no ROM\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -483,7 +483,7 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 		if (read(fd, ramrom, 65536) < 2048) {
-			fprintf(stderr, "rcbus: short rom '%s'.\n", rompath);
+			fprintf(stderr, "rcbus-1802: short rom '%s'.\n", rompath);
 			exit(EXIT_FAILURE);
 		}
 		close(fd);
@@ -496,7 +496,7 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		if (read(fd, ramrom, 524288) != 524288) {
-			fprintf(stderr, "rcbus: banked rom image should be 512K.\n");
+			fprintf(stderr, "rcbus-1802: banked rom image should be 512K.\n");
 			exit(EXIT_FAILURE);
 		}
 		bankenable = 1;

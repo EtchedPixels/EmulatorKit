@@ -4,39 +4,17 @@
 
   Use this code for whatever you want. I don't care. It's officially public domain.
   Credit would be appreciated.
-  
-  Modified to sort of emulate the Intel 8085, Alan Cox 2019.
-  
-  The 8085 emulation is WIP and the 8085 undocumented instruction behaviour
-  is exactly that so may not be entirely correct.
-  
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files (the "Software"), to deal
-  in the Software without restriction, including without limitation the rights
-  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-  copies of the Software, and to permit persons to whom the Software is
-  furnished to do so, subject to the following conditions:
-
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-  
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-  SOFTWARE.
-
 */
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "intel_8085_emulator.h"
+#include "intel_8080_emulator.h"
 
-static char *i8085_disassemble(uint16_t addr);
+#define ALLOW_UNDEFINED
+
+static char *i8080_disassemble(uint16_t addr);
 
 #define reg16_PSW (((uint16_t)reg8[A] << 8) | (uint16_t)reg8[FLAGS])
 #define reg16_BC (((uint16_t)reg8[B] << 8) | (uint16_t)reg8[C])
@@ -45,34 +23,28 @@ static char *i8085_disassemble(uint16_t addr);
 
 uint8_t reg8[9], INTE = 0;
 uint16_t reg_SP, reg_PC;
-uint8_t reg_IM = 0x07;	/* Verified with a Tundra CA80C85B */
-uint8_t intprotect;
+
 #define set_S() reg8[FLAGS] |= 0x80
 #define set_Z() reg8[FLAGS] |= 0x40
-#define set_K() reg8[FLAGS] |= 0x20
 #define set_AC() reg8[FLAGS] |= 0x10
 #define set_P() reg8[FLAGS] |= 0x04
-#define set_V() reg8[FLAGS] |= 0x02
 #define set_C() reg8[FLAGS] |= 0x01
 #define clear_S() reg8[FLAGS] &= 0x7F
 #define clear_Z() reg8[FLAGS] &= 0xBF
-#define clear_K() reg8[FLAGS] &= 0xDF
 #define clear_AC() reg8[FLAGS] &= 0xEF
 #define clear_P() reg8[FLAGS] &= 0xFB
-#define clear_V() reg8[FLAGS] &= 0xFD
 #define clear_C() reg8[FLAGS] &= 0xFE
 #define test_S() (reg8[FLAGS] & 0x80)
 #define test_Z() (reg8[FLAGS] & 0x40)
-#define test_K() (reg8[FLAGS] & 0x20)
 #define test_AC() (reg8[FLAGS] & 0x10)
 #define test_P() (reg8[FLAGS] & 0x04)
-#define test_V() (reg8[FLAGS] & 0x02)
 #define test_C() (reg8[FLAGS] & 0x01)
 
-FILE *i8085_log;
+static unsigned halted;
+
+FILE *i8080_log;
 
 static uint8_t intpend;
-static uint8_t halted;
 
 static const uint8_t parity[0x100] = {
 	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
@@ -108,7 +80,7 @@ uint16_t read_RP_PUSHPOP(uint8_t rp) {
 		case 0x02:
 			return reg16_HL;
 		case 0x03:
-			return reg16_PSW;
+			return (reg16_PSW | 0x02) & 0xFFD7;
 	}
 	return 0;
 }
@@ -168,7 +140,7 @@ void write16_RP_PUSHPOP(uint8_t rp, uint16_t value) {
 			reg8[H] = value >> 8;
 			break;
 		case 0x03:
-			reg8[FLAGS] = (value & 0x00FF) & 0xF7;
+			reg8[FLAGS] = ((value & 0x00FF) | 0x02) & 0xD7;
 			reg8[A] = value >> 8;
 			break;
 	}
@@ -212,59 +184,6 @@ void calc_subAC_borrow(int8_t val1, uint8_t val2) {
 	}
 }
 
-void calc_Vadd(int8_t val1, int8_t val2, int c)
-{
-	/* Did adding bits 0-6 together carry into bit 7 ? */
-	uint8_t c6 = ((val1 & 0x7F) + (val2 & 0x7F) + c) & 0x80;
-	/* Did adding bits 0-7 together carry into bit 8 ? */
-	uint16_t c7 = ((uint16_t)val1 + val2 + c) & 0x100;
-	/* V is the xor of the two carries */
-	/* Annoying C has no ^^ operator */
-	if ((!!c6) ^ (!!c7))
-		set_V();
-	else
-		clear_V();
-}
-
-/* 16bit maths is actually 8bit maths done twice */
-void calc_Vadd16(int16_t val1, int16_t val2)
-{
-	/* Internal carry of the first add */
-	int c = ((val1 & 0xFF) + (val2 & 0xFF)) & 0x100;
-	/* Fed into the carry of the following adc */
-	calc_Vadd(val1 >> 8, val2 >> 8, !!c);
-}
-
-void calc_Vsub(int8_t val1, int8_t val2, int c)
-{
-	uint8_t c6 = ((val1 & 0x7F) - (val2 & 0x7F) - c) & 0x80;
-	uint16_t c7 = ((val1 - val2 - c) & 0x100) >> 1;
-	if (c6 ^ c7)
-		set_V();
-	else
-		clear_V();
-}
-
-void calc_Vsub16(int16_t val1, int16_t val2)
-{
-	int c = (val1 & 0xFF) < (val2 & 0xFF);
-	calc_Vsub(val1 >> 8, val2 >> 8, c);
-}
-
-void calc_K(int8_t r)
-{
-	if ((!!test_V()) ^ !!(r & 0x80))
-		set_K();
-	else
-		clear_K();
-}
-
-void calc_KVlogic(uint8_t val)
-{
-	clear_V();
-	calc_K(val);
-}
-
 uint8_t test_cond(uint8_t code) {
 	switch (code) {
 		case 0: //Z not set
@@ -287,55 +206,55 @@ uint8_t test_cond(uint8_t code) {
 	return 0;
 }
 
-void i8085_push(uint16_t value) {
-	i8085_write(--reg_SP, value >> 8);
-	i8085_write(--reg_SP, (uint8_t)value);
+void i8080_push(uint16_t value) {
+	i8080_write(--reg_SP, value >> 8);
+	i8080_write(--reg_SP, (uint8_t)value);
 }
 
-uint16_t i8085_pop(void) {
+uint16_t i8080_pop(void) {
 	uint16_t temp;
-	temp = i8085_read(reg_SP++);
-	temp |= (uint16_t)i8085_read(reg_SP++) << 8;
+	temp = i8080_read(reg_SP++);
+	temp |= (uint16_t)i8080_read(reg_SP++) << 8;
 	return temp;
 }
 
-void i8085_set_int(int n)
+void i8080_set_int(int n)
 {
 	intpend |= n;
 }
 
-void i8085_clear_int(int n)
+void i8080_clear_int(int n)
 {
 	intpend &= ~n;
 }
 
 
-void i8085_jump(uint16_t addr) {
+void i8080_jump(uint16_t addr) {
 	reg_PC = addr;
 }
 
-void i8085_reset(void) {
+void i8080_reset(void) {
 	reg_PC = reg_SP = 0x0000;
 	//reg8[FLAGS] = 0x02;
 }
 
-void i8085_write_reg8(reg_t reg, uint8_t value) {
+void i8080_write_reg8(reg_t reg, uint8_t value) {
 	if (reg == M) {
-		i8085_write(reg16_HL, value);
+		i8080_write(reg16_HL, value);
 	} else {
 		reg8[reg] = value;
 	}
 }
 
-uint8_t i8085_read_reg8(reg_t reg) {
+uint8_t i8080_read_reg8(reg_t reg) {
 	if (reg == M) {
-		return i8085_read(reg16_HL);
+		return i8080_read(reg16_HL);
 	} else {
 		return reg8[reg];
 	}
 }
 
-uint16_t i8085_read_reg16(reg_t reg) {
+uint16_t i8080_read_reg16(reg_t reg) {
 	switch (reg) {
 		case AF: return reg16_PSW;
 		case BC: return reg16_BC;
@@ -343,13 +262,12 @@ uint16_t i8085_read_reg16(reg_t reg) {
 		case HL: return reg16_HL;
 		case SP: return reg_SP;
 		case PC: return reg_PC;
-		default:
-			fprintf(stderr, "bogus rr16\n");
+		default:;
 	}
 	return 0;
 }
 
-void i8085_write_reg16(reg_t reg, uint16_t value) {
+void i8080_write_reg16(reg_t reg, uint16_t value) {
 	switch (reg) {
 		case AF: reg8[A] = value>>8; reg8[FLAGS] = value; break;
 		case BC: reg8[B] = value>>8; reg8[C] = value; break;
@@ -357,12 +275,11 @@ void i8085_write_reg16(reg_t reg, uint16_t value) {
 		case HL: reg8[H] = value>>8; reg8[L] = value; break;
 		case SP: reg_SP = value; break;
 		case PC: reg_PC = value; break;
-		default:
-			fprintf(stderr, "bogus rr16\n");
+		default:;
 	}
 }
 
-static char *i8085_flags(uint8_t v)
+static char *i8080_flags(uint8_t v)
 {
 	static char buf[9];
 	char *fp = "SZKA-PVC";
@@ -380,90 +297,71 @@ static char *i8085_flags(uint8_t v)
 	return buf;
 }
 
-int i8085_exec(int cycles) {
+int i8080_exec(int cycles) {
 	uint8_t opcode, temp8, reg, reg2;
 	uint16_t temp16;
 	uint32_t temp32;
-	uint8_t vec;
 
+	/* TODO: merge in from 8085 interrupt code */
 	while (cycles > 0) {
-		/* TRAP is edge and level - must see the edge and it held */
-		if (intpend & INT_NMI) {	/* TRAP - NMI */
+
+		if (intpend & INT_NMI) {
 			INTE = 0;
-			intpend &= ~8;
-			if (halted)
-				i8085_push(reg_PC + 1);
-			else
-				i8085_push(reg_PC);
+			intpend &= ~INT_NMI;
+			i8080_push(reg_PC + halted);
 			reg_PC = 0x24;
-			cycles -= 12; /* Check me */
-			if (i8085_log)
-				fprintf(i8085_log, "NMI taken.\n");
-		/* The others are level except 0x3C which is positive edge.
-		   The 8085 prioritizes so we must do likewise */
-		} else if (INTE && intprotect == 0 && (intpend & ~reg_IM)) {
+			cycles -= 12;	/* FIXME: 8080 clocking check */
+			if (i8080_log)
+				fprintf(i8080_log, "NMI taken.\n");
+		} else if (INTE && (intpend & INT_IRQ)) {
 			INTE = 0;
-			temp8 = intpend & ~reg_IM;
-
-			if (i8085_log)
-				fprintf(i8085_log, "IRQ taken (%x)\n", temp8);
-
-			if (temp8 & INT_RST75) {
-				/* FIXME: we should temporarily mask not
-				   clear here. We clear in SIM */
-				vec = 0x3C;
-				intpend &= ~INT_RST75;
-			} else if (temp8 & INT_RST65)
-				vec = 0x34;
-			else if (temp8 & INT_RST55)
-				vec = 0x2C;
-			else
-				vec = 0x38;
+			if (i8080_log)
+				fprintf(i8080_log, "IRQ taken\n");
+			opcode = i8080_get_vector();
+			if (i8080_log)
+				fprintf(i8080_log, "IRQ taken (vector op %02X)\n", opcode);
 			if (halted)
-				i8085_push(reg_PC + 1);
-			else
-				i8085_push(reg_PC);
-			reg_PC = vec;
-			cycles -= 12;	/* Check me */
+				reg_PC++;
+			cycles -= 12;	/* Check 8080 timings */
+			if (i8080_log)
+				fprintf(i8080_log, "IRQ opcode %02X executed , PC was %04X\n",
+					opcode, reg_PC);
+		} else {
+			opcode = i8080_read(reg_PC); 
+			if (i8080_log)
+				fprintf(i8080_log, "%04X : %02X %02X %02X : %6s %02X %04X %04X %04X %04X %s\n",
+					reg_PC, i8080_debug_read(reg_PC), i8080_debug_read(reg_PC + 1), i8080_debug_read(reg_PC + 2),
+					i8080_flags(reg8[FLAGS]), reg8[A], reg16_BC, reg16_DE, reg16_HL, reg_SP,
+						i8080_disassemble(reg_PC));
+			reg_PC++;
 		}
-		intprotect = 0;
+		/* if we are re-executing a hlt it'll set halted again */
 		halted = 0;
-
-		opcode = i8085_read(reg_PC);
-		
-		if (i8085_log)
-			fprintf(i8085_log, "%04X : %02X %02X %02X : %6s %02X %04X %04X %04X %04X %s\n",
-				reg_PC, i8085_debug_read(reg_PC), i8085_debug_read(reg_PC + 1), i8085_debug_read(reg_PC + 2),
-				i8085_flags(reg8[FLAGS]), reg8[A], reg16_BC, reg16_DE, reg16_HL, reg_SP,
-					i8085_disassemble(reg_PC));
-		
-		reg_PC++;
 
 		switch (opcode) {
 			case 0x3A: //LDA a - load A from memory
-				temp16 = (uint16_t)i8085_read(reg_PC) | ((uint16_t)i8085_read(reg_PC+1)<<8);
-				reg8[A] = i8085_read(temp16);
+				temp16 = (uint16_t)i8080_read(reg_PC) | ((uint16_t)i8080_read(reg_PC+1)<<8);
+				reg8[A] = i8080_read(temp16);
 				reg_PC += 2;
 				cycles -= 13;
 				break;
 			case 0x32: //STA a - store A to memory
-				temp16 = (uint16_t)i8085_read(reg_PC) | ((uint16_t)i8085_read(reg_PC+1)<<8);
-				i8085_write(temp16, reg8[A]);
+				temp16 = (uint16_t)i8080_read(reg_PC) | ((uint16_t)i8080_read(reg_PC+1)<<8);
+				i8080_write(temp16, reg8[A]);
 				reg_PC += 2;
 				cycles -= 13;
 				break;
 			case 0x2A: //LHLD a - load H:L from memory
-				temp16 = (uint16_t)i8085_read(reg_PC);
-				temp16 |= ((uint16_t)i8085_read(reg_PC+1)<<8);
-				reg8[L] = i8085_read(temp16++);
-				reg8[H] = i8085_read(temp16);
+				temp16 = (uint16_t)i8080_read(reg_PC) | ((uint16_t)i8080_read(reg_PC+1)<<8);
+				reg8[L] = i8080_read(temp16++);
+				reg8[H] = i8080_read(temp16);
 				reg_PC += 2;
 				cycles -= 16;
 				break;
 			case 0x22: //SHLD a - store H:L to memory
-				temp16 = (uint16_t)i8085_read(reg_PC) | ((uint16_t)i8085_read(reg_PC+1)<<8);
-				i8085_write(temp16++, reg8[L]);
-				i8085_write(temp16, reg8[H]);
+				temp16 = (uint16_t)i8080_read(reg_PC) | ((uint16_t)i8080_read(reg_PC+1)<<8);
+				i8080_write(temp16++, reg8[L]);
+				i8080_write(temp16, reg8[H]);
 				reg_PC += 2;
 				cycles -= 16;
 				break;
@@ -477,43 +375,34 @@ int i8085_exec(int cycles) {
 				cycles -= 5;
 				break;
 			case 0xC6: //ADI # - add immediate to A
-				temp8 = i8085_read(reg_PC++);
+				temp8 = i8080_read(reg_PC++);
 				temp16 = (uint16_t)reg8[A] + (uint16_t)temp8;
 				if (temp16 & 0xFF00) set_C(); else clear_C();
 				calc_AC(reg8[A], temp8);
 				calc_SZP((uint8_t)temp16);
-				calc_Vadd(reg8[A], temp8, 0);
-				calc_K((uint8_t)temp16);
 				reg8[A] = (uint8_t)temp16;
 				cycles -= 7;
 				break;
 			case 0xCE: //ACI # - add immediate to A with carry
-				temp8 = i8085_read(reg_PC++);
+				temp8 = i8080_read(reg_PC++);
 				temp16 = (uint16_t)reg8[A] + (uint16_t)temp8 + (uint16_t)test_C();
 				if (test_C()) calc_AC_carry(reg8[A], temp8); else calc_AC(reg8[A], temp8);
-				/* The carry out is computed including the
-				   carry in of the bit before */
-				calc_Vadd(reg8[A], temp8, test_C());
 				if (temp16 & 0xFF00) set_C(); else clear_C();
 				calc_SZP((uint8_t)temp16);
-				calc_K((uint8_t)temp16);
 				reg8[A] = (uint8_t)temp16;
 				cycles -= 7;
 				break;
 			case 0xD6: //SUI # - subtract immediate from A
-				temp8 = i8085_read(reg_PC++);
+				temp8 = i8080_read(reg_PC++);
 				temp16 = (uint16_t)reg8[A] - (uint16_t)temp8;
 				if (((temp16 & 0x00FF) >= reg8[A]) && temp8) set_C(); else clear_C();
 				calc_subAC(reg8[A], temp8);
 				calc_SZP((uint8_t)temp16);
-				calc_Vsub(reg8[A], temp8, 0);
-				calc_K((uint8_t)temp16);
 				reg8[A] = (uint8_t)temp16;
 				cycles -= 7;
 				break;
 			case 0x27: //DAA - decimal adjust accumulator
-				temp8 = reg8[A];
-				temp16 = temp8;
+				temp16 = reg8[A];
 				if (((temp16 & 0x0F) > 0x09) || test_AC()) {
 					if (((temp16 & 0x0F) + 0x06) & 0xF0) set_AC(); else clear_AC();
 					temp16 += 0x06;
@@ -525,82 +414,61 @@ int i8085_exec(int cycles) {
 				}
 				calc_SZP((uint8_t)temp16);
 				reg8[A] = (uint8_t)temp16;
-				/* Verify this behaviour */
-				if ((temp8 & 0xF0) == 0x70 &&
-					(temp16 & 0xF0) == 0x80)
-					set_V();
-				else
-					clear_V();
-				calc_K(reg8[A]);
 				cycles -= 4;
 				break;
 			case 0xE6: //ANI # - AND immediate with A
-				temp8 = i8085_read(reg_PC++);
-				/* This differs from 8080 */
-				set_AC();
+				temp8 = i8080_read(reg_PC++);
+				if ((reg8[A] | temp8) & 0x08) set_AC(); else clear_AC();
 				reg8[A] &= temp8;
 				clear_C();
 				calc_SZP(reg8[A]);
-				calc_KVlogic(reg8[A]);
 				cycles -= 7;
 				break;
 			case 0xF6: //ORI # - OR immediate with A
-				reg8[A] |= i8085_read(reg_PC++);
+				reg8[A] |= i8080_read(reg_PC++);
 				clear_AC();
 				clear_C();
 				calc_SZP(reg8[A]);
-				calc_KVlogic(reg8[A]);
 				cycles -= 7;
 				break;
 			case 0xEE: //XRI # - XOR immediate with A
-				reg8[A] ^= i8085_read(reg_PC++);
+				reg8[A] ^= i8080_read(reg_PC++);
 				clear_AC();
 				clear_C();
 				calc_SZP(reg8[A]);
-				calc_KVlogic(reg8[A]);
 				cycles -= 7;
 				break;
 			case 0xDE: //SBI # - subtract immediate from A with borrow
-				temp8 = i8085_read(reg_PC++);
+				temp8 = i8080_read(reg_PC++);
 				temp16 = (uint16_t)reg8[A] - (uint16_t)temp8 - (uint16_t)test_C();
 				if (test_C()) calc_subAC_borrow(reg8[A], temp8); else calc_subAC(reg8[A], temp8);
-				calc_Vsub(reg8[A], temp8, test_C());
 				if (((temp16 & 0x00FF) >= reg8[A]) && (temp8 | test_C())) set_C(); else clear_C();
 				calc_SZP((uint8_t)temp16);
-				calc_K((uint8_t)temp16);
 				reg8[A] = (uint8_t)temp16;
 				cycles -= 7;
 				break;
 			case 0xFE: //CPI # - compare immediate with A
-				temp8 = i8085_read(reg_PC++);
+				temp8 = i8080_read(reg_PC++);
 				temp16 = (uint16_t)reg8[A] - (uint16_t)temp8;
 				if (((temp16 & 0x00FF) >= reg8[A]) && temp8) set_C(); else clear_C();
 				calc_subAC(reg8[A], temp8);
 				calc_SZP((uint8_t)temp16);
-				calc_Vsub(reg8[A], temp8, 0);
-				calc_K((uint8_t)temp16);
 				cycles -= 7;
 				break;
 			case 0x07: //RLC - rotate A left
 				if (reg8[A] & 0x80) set_C(); else clear_C();
-				calc_Vadd(reg8[A],reg8[A], reg8[A] & 0x80);
 				reg8[A] = (reg8[A] >> 7) | (reg8[A] << 1);
-				calc_K(reg8[A]);
 				cycles -= 4;
 				break;
 			case 0x0F: //RRC - rotate A right
 				if (reg8[A] & 0x01) set_C(); else clear_C();
 				reg8[A] = (reg8[A] << 7) | (reg8[A] >> 1);
-				clear_V();
-				/* Verify if RR ops affect K */
 				cycles -= 4;
 				break;
 			case 0x17: //RAL - rotate A left through carry
 				temp8 = test_C();
 				if (reg8[A] & 0x80) set_C(); else clear_C();
-				calc_Vadd(reg8[A],reg8[A], temp8);
 				reg8[A] = (reg8[A] << 1) | temp8;
-				calc_K(reg8[A]);
 				cycles -= 4;
 				break;
 			case 0x1F: //RAR - rotate A right through carry
@@ -608,29 +476,18 @@ int i8085_exec(int cycles) {
 				if (reg8[A] & 0x01) set_C(); else clear_C();
 				reg8[A] = (reg8[A] >> 1) | (temp8 << 7);
 				cycles -= 4;
-				/* Verify if RR ops affect K */
-				clear_V();
 				break;
-			case 0x2F: //CMA - complement A
+			case 0x2F: //CMA - compliment A
 				reg8[A] = ~reg8[A];
 				cycles -= 4;
-				/* This does not affect flags */
 				break;
-			case 0x3F: //CMC - complement carry flag
+			case 0x3F: //CMC - compliment carry flag
 				reg8[FLAGS] ^= 1;
 				cycles -= 4;
 				break;
 			case 0x37: //STC - set carry flag
 				set_C();
 				cycles -= 4;
-				break;
-			case 0xCB: //RSTv
-				if (test_V()) {
-					cycles -= 6;
-					i8085_push(reg_PC);
-					reg_PC = 0x40;
-				}
-				cycles -= 6;
 				break;
 			case 0xC7: //RST n - restart (call n*8)
 			case 0xD7:
@@ -640,36 +497,34 @@ int i8085_exec(int cycles) {
 			case 0xDF:
 			case 0xEF:
 			case 0xFF:
-				i8085_push(reg_PC);
+				i8080_push(reg_PC);
 				reg_PC = (uint16_t)((opcode >> 3) & 7) << 3;
-				cycles -= 12;
+				cycles -= 11;
 				break;
 			case 0xE9: //PCHL - jump to address in H:L
 				reg_PC = reg16_HL;
-				/* 6 on 8085 5 on 8080 ... */
-				cycles -= 6;
+				cycles -= 5;
 				break;
 			case 0xE3: //XTHL - swap H:L with top word on stack
-				temp16 = i8085_pop();
-				i8085_push(reg16_HL);
+				temp16 = i8080_pop();
+				i8080_push(reg16_HL);
 				write16_RP(2, temp16);
-				cycles -= 16;
+				cycles -= 18;
 				break;
 			case 0xF9: //SPHL - set SP to content of HL
 				reg_SP = reg16_HL;
-				cycles -= 6;
+				cycles -= 5;
 				break;
 			case 0xDB: //IN p - read input port into A
-				reg8[A] = i8085_inport(i8085_read(reg_PC++));
+				reg8[A] = i8080_inport(i8080_read(reg_PC++));
 				cycles -= 10;
 				break;
 			case 0xD3: //OUT p - write A to output port
-				i8085_outport(i8085_read(reg_PC++), reg8[A]);
+				i8080_outport(i8080_read(reg_PC++), reg8[A]);
 				cycles -= 10;
 				break;
-			case 0xFB: //EI - enable intersrupts
+			case 0xFB: //EI - enable interrupts
 				INTE = 1;
-				intprotect = 1;
 				cycles -= 4;
 				break;
 			case 0xF3: //DI - disbale interrupts
@@ -682,84 +537,16 @@ int i8085_exec(int cycles) {
 				halted = 1;
 				break;
 			case 0x00: //NOP - no operation
+#ifdef ALLOW_UNDEFINED
+			case 0x10:
+			case 0x20:
+			case 0x30:
+			case 0x08:
+			case 0x18:
+			case 0x28:
+			case 0x38:
+#endif
 				cycles -= 4;
-				break;
-			case 0x08: // DSUB - 16bit subtraction
-				/* Does SUB L,C; SBC H,B for flags */
-				temp8 = reg8[C];
-				temp16 = (uint16_t)reg8[L] - (uint16_t)temp8;
-				if ((temp16 & 0x00FF) >= reg8[L] && temp8)
-					set_C();
-				else
-					clear_C();
-				reg8[L] = (uint8_t)temp16;
-				/* We don't need the other intermediate flags */
-				temp8 = reg8[B];
-				temp16 = (uint16_t)reg8[H] - (uint16_t)temp8 - (uint16_t)test_C();
-				if (test_C())
-					calc_subAC_borrow(reg8[H], temp8);
-				else
-					calc_subAC(reg8[H], temp8);				
-				calc_Vsub(reg8[H], temp8, test_C());
-				if ((temp16 & 0x00FF) >= reg8[H] && (temp8 | test_C()))
-					set_C();
-				else
-					clear_C();
-				calc_SZP((uint8_t)temp16);
-				calc_K(temp16);
-				reg8[H] = (uint8_t)temp16;
-				cycles -= 10;
-				break;					
-			case 0x10: // ARHL
-				if (reg16_HL & 1)
-					set_C();
-				else
-					clear_C();
-				temp16 = reg16_HL >> 1;
-				if (temp16 & 0x4000)
-					temp16 |= 0x8000;
-				i8085_write_reg16(HL, temp16);
-				cycles -= 7;
-				break;
-			case 0x18: // RDEL
-				/* Affects only CY and V */
-				temp16 = reg16_DE;
-				temp8 = test_C();
-				i8085_write_reg16(DE, (temp16 << 1) + temp8);
-				if (temp16 & 0x8000)
-					set_C();
-				else
-					clear_C();
-				cycles -= 10;
-				/* This seems to be a DAD D,D with carry but
-				   I'm not enitrely sure. FIXME */
-				calc_Vadd16(temp16, temp16 + temp8);
-				break;
-			case 0x20: // RIM
-				temp8 = reg_IM & 0x07;
-				if (intpend & INT_RST75)
-					temp8 |= 0x10;
-				temp8 |= i8085_get_input() ? 0x80: 0x00;
-				temp8 |= (intpend & 7)  << 4;
-				reg8[A] = temp8;
-				cycles -= 4;
-				break;
-			case 0x28: // LDHI
-				i8085_write_reg16(DE, reg16_HL + i8085_read(reg_PC++));
-				cycles -= 10;
-				break;
-			case 0x30: // SIM
-				if (reg8[A] & 0x08)
-					reg_IM = reg8[A] & 0x07;
-				if (reg8[A] & 0x10)
-					intpend &= ~INT_RST75;
-				if (reg8[A] & 0x40)
-					i8085_set_output(reg8[A] & 0x80);
-				cycles -= 4;
-				break;
-			case 0x38: // LDSI
-				i8085_write_reg16(DE, reg_SP + i8085_read(reg_PC++));
-				cycles -= 10;
 				break;
 			case 0x40: case 0x50: case 0x60: case 0x70: //MOV D,S - move register to register
 			case 0x41: case 0x51: case 0x61: case 0x71:
@@ -779,11 +566,11 @@ int i8085_exec(int cycles) {
 			case 0x4F: case 0x5F: case 0x6F: case 0x7F:
 				reg = (opcode >> 3) & 7;
 				reg2 = opcode & 7;
-				i8085_write_reg8(reg, i8085_read_reg8(reg2));
+				i8080_write_reg8(reg, i8080_read_reg8(reg2));
 				if ((reg == M) || (reg2 == M)) {
 					cycles -= 7;
 				} else {
-					cycles -= 4;
+					cycles -= 5;
 				}
 				break;
 			case 0x06: //MVI D,# - move immediate to register
@@ -795,7 +582,7 @@ int i8085_exec(int cycles) {
 			case 0x2E:
 			case 0x3E:
 				reg = (opcode >> 3) & 7;
-				i8085_write_reg8(reg, i8085_read(reg_PC++));
+				i8080_write_reg8(reg, i8080_read(reg_PC++));
 				if (reg == M) {
 					cycles -= 10;
 				} else {
@@ -807,27 +594,24 @@ int i8085_exec(int cycles) {
 			case 0x21:
 			case 0x31:
 				reg = (opcode >> 4) & 3;
-				/* Although there are not internal side effects we must put
-				   the two reads on the bus in order */
-				temp8 = i8085_read(reg_PC);
-				write_RP(reg, temp8, i8085_read(reg_PC + 1));
+				write_RP(reg, i8080_read(reg_PC), i8080_read(reg_PC + 1));
 				reg_PC += 2;
 				cycles -= 10;
 				break;
 			case 0x0A: //LDAX BC - load A indirect through BC
-				reg8[A] = i8085_read(reg16_BC);
+				reg8[A] = i8080_read(reg16_BC);
 				cycles -= 7;
 				break;
 			case 0x1A: //LDAX DE - load A indirect through DE
-				reg8[A] = i8085_read(reg16_DE);
+				reg8[A] = i8080_read(reg16_DE);
 				cycles -= 7;
 				break;
 			case 0x02: //STAX BC - store A indirect through BC
-				i8085_write(reg16_BC, reg8[A]);
+				i8080_write(reg16_BC, reg8[A]);
 				cycles -= 7;
 				break;
 			case 0x12: //STAX DE - store A indirect through DE
-				i8085_write(reg16_DE, reg8[A]);
+				i8080_write(reg16_DE, reg8[A]);
 				cycles -= 7;
 				break;
 			case 0x04: //INR D - increment register
@@ -839,19 +623,14 @@ int i8085_exec(int cycles) {
 			case 0x2C:
 			case 0x3C:
 				reg = (opcode >> 3) & 7;
-				temp8 = i8085_read_reg8(reg); //reg8[reg];
+				temp8 = i8080_read_reg8(reg); //reg8[reg];
 				calc_AC(temp8, 1);
 				calc_SZP(temp8 + 1);
-				if (temp8 == 0x7F)
-					set_V();
-				else
-					clear_V();
-				calc_K(temp8+1);
-				i8085_write_reg8(reg, temp8 + 1); //reg8[reg]++;
+				i8080_write_reg8(reg, temp8 + 1); //reg8[reg]++;
 				if (reg == M) {
 					cycles -= 10;
 				} else {
-					cycles -= 4;
+					cycles -= 5;
 				}
 				break;
 			case 0x05: //DCR D - decrement register
@@ -863,19 +642,14 @@ int i8085_exec(int cycles) {
 			case 0x2D:
 			case 0x3D:
 				reg = (opcode >> 3) & 7;
-				temp8 = i8085_read_reg8(reg); //reg8[reg];
+				temp8 = i8080_read_reg8(reg); //reg8[reg];
 				calc_subAC(temp8, 1);
 				calc_SZP(temp8 - 1);
-				if (temp8 == 0x80)
-					set_V();
-				else
-					clear_V();
-				calc_K(temp8 - 1);
-				i8085_write_reg8(reg, temp8 - 1); //reg8[reg]--;
+				i8080_write_reg8(reg, temp8 - 1); //reg8[reg]--;
 				if (reg == M) {
 					cycles -= 10;
 				} else {
-					cycles -= 4;
+					cycles -= 5;
 				}
 				break;
 			case 0x03: //INX RP - increment register pair
@@ -883,45 +657,25 @@ int i8085_exec(int cycles) {
 			case 0x23:
 			case 0x33:
 				reg = (opcode >> 4) & 3;
-				temp16 = read_RP(reg) + 1;
-				if (temp16 == 0x8000)
-					set_V();
-				else
-					clear_V();
-				if (temp16 == 0x0000)
-					set_K();
-				else
-					clear_K();
-				write16_RP(reg, temp16);
-				cycles -= 6;
+				write16_RP(reg, read_RP(reg) + 1);
+				cycles -= 5;
 				break;
 			case 0x0B: //DCX RP - decrement register pair
 			case 0x1B:
 			case 0x2B:
 			case 0x3B:
 				reg = (opcode >> 4) & 3;
-				temp16 = read_RP(reg) - 1;
-				if (temp16 == 0x7FFF)
-					set_V();
-				else
-					clear_V();
-				if (temp16 == 0xFFFF)
-					set_K();
-				else
-					clear_K();
-				write16_RP(reg, temp16);
-				cycles -= 6;
+				write16_RP(reg, read_RP(reg) - 1);
+				cycles -= 5;
 				break;
 			case 0x09: //DAD RP - add register pair to HL
 			case 0x19:
 			case 0x29:
 			case 0x39:
 				reg = (opcode >> 4) & 3;
-				calc_Vadd16(reg16_HL, read_RP(reg));
 				temp32 = (uint32_t)reg16_HL + (uint32_t)read_RP(reg);
 				write16_RP(2, (uint16_t)temp32);
 				if (temp32 & 0xFFFF0000) set_C(); else clear_C();
-				calc_K(temp32 >> 8);;
 				cycles -= 10;
 				break;
 			case 0x80: //ADD S - add register or memory to A
@@ -933,13 +687,11 @@ int i8085_exec(int cycles) {
 			case 0x86:
 			case 0x87:
 				reg = opcode & 7;
-				temp8 = i8085_read_reg8(reg);
+				temp8 = i8080_read_reg8(reg);
 				temp16 = (uint16_t)reg8[A] + (uint16_t)temp8;
 				if (temp16 & 0xFF00) set_C(); else clear_C();
 				calc_AC(reg8[A], temp8);
 				calc_SZP((uint8_t)temp16);
-				calc_Vadd(reg8[A], temp8, 0);
-				calc_K(temp16);
 				reg8[A] = (uint8_t)temp16;
 				if (reg == M) {
 					cycles -= 7;
@@ -956,13 +708,11 @@ int i8085_exec(int cycles) {
 			case 0x8E:
 			case 0x8F:
 				reg = opcode & 7;
-				temp8 = i8085_read_reg8(reg);
+				temp8 = i8080_read_reg8(reg);
 				temp16 = (uint16_t)reg8[A] + (uint16_t)temp8 + (uint16_t)test_C();
 				if (test_C()) calc_AC_carry(reg8[A], temp8); else calc_AC(reg8[A], temp8);
-				calc_Vadd(reg8[A], temp8, test_C());
 				if (temp16 & 0xFF00) set_C(); else clear_C();
 				calc_SZP((uint8_t)temp16);
-				calc_K(temp16);
 				reg8[A] = (uint8_t)temp16;
 				if (reg == M) {
 					cycles -= 7;
@@ -979,13 +729,11 @@ int i8085_exec(int cycles) {
 			case 0x96:
 			case 0x97:
 				reg = opcode & 7;
-				temp8 = i8085_read_reg8(reg);
+				temp8 = i8080_read_reg8(reg);
 				temp16 = (uint16_t)reg8[A] - (uint16_t)temp8;
 				if (((temp16 & 0x00FF) >= reg8[A]) && temp8) set_C(); else clear_C();
 				calc_subAC(reg8[A], temp8);
 				calc_SZP((uint8_t)temp16);
-				calc_Vsub(reg8[A], temp8, 0);
-				calc_K(temp16);
 				reg8[A] = (uint8_t)temp16;
 				if (reg == M) {
 					cycles -= 7;
@@ -1002,13 +750,11 @@ int i8085_exec(int cycles) {
 			case 0x9E:
 			case 0x9F:
 				reg = opcode & 7;
-				temp8 = i8085_read_reg8(reg);
+				temp8 = i8080_read_reg8(reg);
 				temp16 = (uint16_t)reg8[A] - (uint16_t)temp8 - (uint16_t)test_C();
 				if (test_C()) calc_subAC_borrow(reg8[A], temp8); else calc_subAC(reg8[A], temp8);
-				calc_Vsub(reg8[A], temp8, test_C());
 				if (((temp16 & 0x00FF) >= reg8[A]) && (temp8 | test_C())) set_C(); else clear_C();
 				calc_SZP((uint8_t)temp16);
-				calc_K(temp16);
 				reg8[A] = (uint8_t)temp16;
 				if (reg == M) {
 					cycles -= 7;
@@ -1025,14 +771,11 @@ int i8085_exec(int cycles) {
 			case 0xA6:
 			case 0xA7:
 				reg = opcode & 7;
-				temp8 = i8085_read_reg8(reg);
-				/* The 8085 always sets AC, the 8080 it's an
-				   or of bit 3 of the values */
-				set_AC();
+				temp8 = i8080_read_reg8(reg);
+				if ((reg8[A] | temp8) & 0x08) set_AC(); else clear_AC();
 				reg8[A] &= temp8;
 				clear_C();
 				calc_SZP(reg8[A]);
-				calc_KVlogic(reg8[A]);
 				if (reg == M) {
 					cycles -= 7;
 				} else {
@@ -1048,11 +791,10 @@ int i8085_exec(int cycles) {
 			case 0xB6:
 			case 0xB7:
 				reg = opcode & 7;
-				reg8[A] |= i8085_read_reg8(reg);
+				reg8[A] |= i8080_read_reg8(reg);
 				clear_AC();
 				clear_C();
 				calc_SZP(reg8[A]);
-				calc_KVlogic(reg8[A]);
 				if (reg == M) {
 					cycles -= 7;
 				} else {
@@ -1068,11 +810,10 @@ int i8085_exec(int cycles) {
 			case 0xAE:
 			case 0xAF:
 				reg = opcode & 7;
-				reg8[A] ^= i8085_read_reg8(reg);
+				reg8[A] ^= i8080_read_reg8(reg);
 				clear_AC();
 				clear_C();
 				calc_SZP(reg8[A]);
-				calc_KVlogic(reg8[A]);
 				if (reg == M) {
 					cycles -= 7;
 				} else {
@@ -1088,13 +829,11 @@ int i8085_exec(int cycles) {
 			case 0xBE:
 			case 0xBF:
 				reg = opcode & 7;
-				temp8 = i8085_read_reg8(reg);
+				temp8 = i8080_read_reg8(reg);
 				temp16 = (uint16_t)reg8[A] - (uint16_t)temp8;
 				if (((temp16 & 0x00FF) >= reg8[A]) && temp8) set_C(); else clear_C();
 				calc_subAC(reg8[A], temp8);
 				calc_SZP((uint8_t)temp16);
-				calc_Vsub(reg8[A], temp8, 0);
-				calc_K(temp16);
 				if (reg == M) {
 					cycles -= 7;
 				} else {
@@ -1102,8 +841,10 @@ int i8085_exec(int cycles) {
 				}
 				break;
 			case 0xC3: //JMP a - unconditional jump
-				temp16 = (uint8_t)i8085_read(reg_PC);
-				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+#ifdef ALLOW_UNDEFINED
+			case 0xCB:
+#endif
+				temp16 = (uint16_t)i8080_read(reg_PC) | (((uint16_t)i8080_read(reg_PC + 1)) << 8);
 				reg_PC = temp16;
 				cycles -= 10;
 				break;
@@ -1115,49 +856,20 @@ int i8085_exec(int cycles) {
 			case 0xEA:
 			case 0xF2:
 			case 0xFA:
-				temp16 = (uint8_t)i8085_read(reg_PC);
-				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
-				if (test_cond((opcode >> 3) & 7)) {
-					reg_PC = temp16;
-					cycles -= 10;
-				} else {
-					reg_PC += 2;
-					cycles -= 7;
-				}
-				break;
-			case 0xDD: // JNK
-				temp16 = (uint8_t)i8085_read(reg_PC);
-				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
-				if (!test_K()) {
-					reg_PC = temp16;
-					cycles -= 10;
-				} else {
-					reg_PC += 2;
-					cycles -= 7;
-				}
-				break;
-			case 0xED:
-				reg8[L] = i8085_read(reg16_DE);
-				reg8[H] = i8085_read(reg16_DE + 1);
+				temp16 = (uint16_t)i8080_read(reg_PC) | (((uint16_t)i8080_read(reg_PC + 1)) << 8);
+				if (test_cond((opcode >> 3) & 7)) reg_PC = temp16; else reg_PC += 2;
 				cycles -= 10;
 				break;
-			case 0xFD: // JK
-				temp16 = (uint8_t)i8085_read(reg_PC);
-				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
-				if (test_K()) {
-					reg_PC = temp16;
-					cycles -= 10;
-				} else {
-					reg_PC += 2;
-					cycles -= 7;
-				}
-				break;
 			case 0xCD: //CALL a - unconditional call
-				temp16 = (uint8_t)i8085_read(reg_PC);
-				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
-				i8085_push(reg_PC + 2);
+#ifdef ALLOW_UNDEFINED
+			case 0xDD:
+			case 0xED:
+			case 0xFD:
+#endif
+				temp16 = (uint16_t)i8080_read(reg_PC) | (((uint16_t)i8080_read(reg_PC + 1)) << 8);
+				i8080_push(reg_PC + 2);
 				reg_PC = temp16;
-				cycles -= 18;
+				cycles -= 17;
 				break;
 			case 0xC4: //Cccc - conditional calls
 			case 0xCC:
@@ -1167,24 +879,21 @@ int i8085_exec(int cycles) {
 			case 0xEC:
 			case 0xF4:
 			case 0xFC:
-				temp16 = (uint8_t)i8085_read(reg_PC);
-				temp16 |= (((uint16_t)i8085_read(reg_PC + 1)) << 8);
+				temp16 = (uint16_t)i8080_read(reg_PC) | (((uint16_t)i8080_read(reg_PC + 1)) << 8);
 				if (test_cond((opcode >> 3) & 7)) {
-					i8085_push(reg_PC + 2);
+					i8080_push(reg_PC + 2);
 					reg_PC = temp16;
-					cycles -= 18;
+					cycles -= 17;
 				} else {
 					reg_PC += 2;
-					cycles -= 9;
+					cycles -= 11;
 				}
 				break;
-			case 0xD9: //SHLX
-				i8085_write(reg16_DE, reg8[L]);
-				i8085_write(reg16_DE+1, reg8[H]);
-				cycles -= 10;
-				break;
 			case 0xC9: //RET - unconditional return
-				reg_PC = i8085_pop();
+#ifdef ALLOW_UNDEFINED
+			case 0xD9:
+#endif
+				reg_PC = i8080_pop();
 				cycles -= 10;
 				break;
 			case 0xC0: //Rccc - conditional returns
@@ -1196,10 +905,10 @@ int i8085_exec(int cycles) {
 			case 0xF0:
 			case 0xF8:
 				if (test_cond((opcode >> 3) & 7)) {
-					reg_PC = i8085_pop();
-					cycles -= 12;
+					reg_PC = i8080_pop();
+					cycles -= 11;
 				} else {
-					cycles -= 6;
+					cycles -= 5;
 				}
 				break;
 			case 0xC5: //PUSH RP - push register pair on the stack
@@ -1207,50 +916,53 @@ int i8085_exec(int cycles) {
 			case 0xE5:
 			case 0xF5:
 				reg = (opcode >> 4) & 3;
-				i8085_push(read_RP_PUSHPOP(reg));
-				/* 11 on 8080 12 on 8085 */
-				cycles -= 12;
+				i8080_push(read_RP_PUSHPOP(reg));
+				cycles -= 11;
 				break;
 			case 0xC1: //POP RP - pop register pair from the stack
 			case 0xD1:
 			case 0xE1:
 			case 0xF1:
 				reg = (opcode >> 4) & 3;
-				write16_RP_PUSHPOP(reg, i8085_pop());
+				write16_RP_PUSHPOP(reg, i8080_pop());
 				cycles -= 10;
 				break;
+
+#ifndef ALLOW_UNDEFINED
 			default:
 				printf("UNRECOGNIZED INSTRUCTION @ %04Xh: %02X\n", reg_PC - 1, opcode);
 				exit(0);
+#endif
 		}
 
 	}
+
 	return cycles;
 }
 
 /*
- *	8085 disassembler - added by Alan Cox 2022
+ *	8080 disassembler - added by Alan Cox 2025 (from the 8085 one)
  */
 
 
-struct i8085_addr {
+struct i8080_addr {
 	unsigned addr;
-	struct i8085_addr *next;
+	struct i8080_addr *next;
 	char name[16];
 	char type;
 };
 
-static struct i8085_addr *sym[0x40];
+static struct i8080_addr *sym[0x40];
 
 static unsigned ahash(unsigned addr)
 {
 	return (addr >> 6) & 0x3F;
 }
 
-static struct i8085_addr *i8085_addr_find(unsigned addr)
+static struct i8080_addr *i8080_addr_find(unsigned addr)
 {
 	unsigned hash = ahash(addr);
-	struct i8085_addr *a = sym[hash];
+	struct i8080_addr *a = sym[hash];
 	while(a) {
 		if (a->addr == addr)
 			return a;
@@ -1259,9 +971,9 @@ static struct i8085_addr *i8085_addr_find(unsigned addr)
 	return NULL;
 }
 
-static void i8085_add_symbol(unsigned addr, char type, char *name)
+static void i8080_add_symbol(unsigned addr, char type, char *name)
 {
-	struct i8085_addr *a = malloc(sizeof(struct i8085_addr));
+	struct i8080_addr *a = malloc(sizeof(struct i8080_addr));
 	unsigned hash = ahash(addr);
 	strncpy(a->name, name, 16);
 	a->addr = addr;
@@ -1270,12 +982,12 @@ static void i8085_add_symbol(unsigned addr, char type, char *name)
 	sym[hash] = a;
 }
 
-void i8085_load_symbols(const char *path)
+void i8080_load_symbols(const char *path)
 {
 	char buf[64];
 	unsigned addr;
 	char type;
-	char name[17];
+	char name[16];
 	FILE *fp = fopen(path, "r");
 	if (fp == NULL) {
 		perror(path);
@@ -1283,7 +995,7 @@ void i8085_load_symbols(const char *path)
 	}
 	while(fgets(buf, 63, fp) != NULL) {
 		if (sscanf(buf, "%x %c %16s", &addr, &type, name) == 3)
-			i8085_add_symbol(addr, type, name);
+			i8080_add_symbol(addr, type, name);
 		else
 			fprintf(stderr, "format error %s\n", buf);
 	}
@@ -1298,7 +1010,7 @@ static char *rpair_p[4] = { "bc", "de", "hl", "psw" };
 static char *cc[8] = { "nz", "z", "nc", "c", "po", "pe", "p", "m" };
 
 static char *blk00[] = {
-	"nop", "dsub", "arhl", "rdel", "rim", "ldhi", "sim", "ldsi"
+	"nop", "ill(dsub)", "ill(arhl)", "ill(rdel)", "ill(rim)", "ill(ldhi)", "ill(sim)", "ill(ldsi)"
 };
 
 static char *blk02[] = {
@@ -1314,10 +1026,10 @@ static char *blk07[] = {
 static char *idrw(unsigned addr)
 {
 	static char buf[16];
-	struct i8085_addr *a;
-	unsigned v = i8085_debug_read(addr);
-	v |= i8085_debug_read(addr + 1) << 8;
-	a = i8085_addr_find(v);
+	struct i8080_addr *a;
+	unsigned v = i8080_debug_read(addr);
+	v |= i8080_debug_read(addr + 1) << 8;
+	a = i8080_addr_find(v);
 	if (a)
 		return a->name;
 	else {
@@ -1333,7 +1045,7 @@ static void dis0(uint8_t op, uint16_t addr)
 		case 0:
 			/* Real mix */
 			if (y == 5 || y == 7)
-				sprintf(opbuf, "%s %02X", blk00[y], i8085_debug_read(addr));
+				sprintf(opbuf, "%s %02X", blk00[y], i8080_debug_read(addr));
 			else
 				strcpy(opbuf, blk00[y]);
 			break;
@@ -1364,7 +1076,7 @@ static void dis0(uint8_t op, uint16_t addr)
 			break;
 		case 6:
 			sprintf(opbuf, "mvi %c,%02X", rname[y],
-				i8085_debug_read(addr));
+				i8080_debug_read(addr));
 			break;
 		case 7:
 			strcpy(opbuf, blk07[y]);
@@ -1394,7 +1106,7 @@ static void dis2(uint8_t op, uint16_t addr)
 }
 
 static char *blk31[] = {
-	"ret", "shlx", "pchl", "sphl"
+	"ret", "ill(shlx)", "pchl", "sphl"
 };
 
 static void dis3(uint8_t op, uint16_t addr)
@@ -1423,10 +1135,10 @@ static void dis3(uint8_t op, uint16_t addr)
 			strcpy(opbuf, "rstv");
 			return;
 		case 2:
-			sprintf(opbuf, "out %02X", i8085_debug_read(addr));
+			sprintf(opbuf, "out %02X", i8080_debug_read(addr));
 			return;
 		case 3:
-			sprintf(opbuf, "in %02X", i8085_debug_read(addr));
+			sprintf(opbuf, "in %02X", i8080_debug_read(addr));
 			return;
 		case 4:
 			strcpy(opbuf, "xthl");
@@ -1455,18 +1167,18 @@ static void dis3(uint8_t op, uint16_t addr)
 			sprintf(opbuf, "call %s", idrw(addr));
 			break;
 		case 1:
-			sprintf(opbuf, "jnx %s", idrw(addr));
+			sprintf(opbuf, "ill(jnx %s)", idrw(addr));
 			break;
 		case 2:
-			strcpy(opbuf, "lhlx");
+			strcpy(opbuf, "ill(lhlx)");
 			break;
 		case 3:
-			sprintf(opbuf, "jx %s", idrw(addr));
+			sprintf(opbuf, "ill(jx %s)", idrw(addr));
 			break;
 		}
 		break;
 	case 6:
-		sprintf(opbuf, "%s %02X", aluim[y], i8085_debug_read(addr));
+		sprintf(opbuf, "%s %02X", aluim[y], i8080_debug_read(addr));
 		break;
 	case 7:
 		sprintf(opbuf, "rst %d", y);
@@ -1474,9 +1186,9 @@ static void dis3(uint8_t op, uint16_t addr)
 	}
 }
 
-static char *i8085_disassemble(uint16_t addr)
+static char *i8080_disassemble(uint16_t addr)
 {
-	uint8_t op = i8085_debug_read(addr++);
+	uint8_t op = i8080_debug_read(addr++);
 	switch (op & 0xC0) {
 	case 0x00:
 		dis0(op, addr);

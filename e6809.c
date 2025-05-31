@@ -505,7 +505,8 @@ static einline unsigned ea_indexed (unsigned *cycles)
 		*cycles += 5;
 		break;
 	default:
-		printf ("undefined post-byte\n");
+		fprintf (stderr, "undefined post-byte at %04X\n", reg_pc);
+		ea = 0;
 		break;
 	}
 

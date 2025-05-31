@@ -66,7 +66,7 @@ void ppide_write(struct ppide *ppide, uint8_t addr, uint8_t val)
             break;
         case 3: /* Control register */
             /* Check for control commands being used to flip the clock
-               as that is how Will's katest code drives the clock */
+               as that is how Will's latest code drives the clock */
             if (val & 0x80) {
                 /* We could check the direction bits but we don't */
                 ppide->pioreg[addr] = val;

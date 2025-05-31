@@ -42,6 +42,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 
+#include "system.h"
 #include "w5100.h"
 
 typedef enum w5100_socket_mode {

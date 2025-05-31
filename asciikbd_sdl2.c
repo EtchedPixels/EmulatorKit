@@ -82,6 +82,13 @@ void asciikbd_event(struct asciikbd *kbd)
                             asciikbd_insert(kbd, (uint8_t)ev.key.keysym.sym);
                             break;
                         default:;
+                            if (ev.key.keysym.sym >= 64 && ev.key.keysym.sym < 128) {
+                                if (ev.key.keysym.mod & KMOD_CTRL) {
+                                    asciikbd_insert(kbd, (uint8_t)
+                                        ev.key.keysym.sym & 0x1F);
+                                    break;
+                                }
+                            }
                         }
                 }
     	}

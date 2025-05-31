@@ -2,6 +2,7 @@
  *	Z80Master S-100 Z80 at 4MHz with port 0xD2/0xD3 memory mapping
  *	0x30: Dual CF-Card/Hard Disk IDE S100 Bus Board 
  *	0x00: Propellor Console I/O (interrupt not currently emulated)
+ *	0XF8: Tarbell 8" floppy
  */
 
 #include <stdio.h>
@@ -17,6 +18,8 @@
 #include <sys/select.h>
 #include "libz80/z80.h"
 #include "ppide.h"
+#include "wd17xx.h"
+#include "tarbell_fdc.h"
 
 static uint8_t rom[2][4096];
 static uint8_t ram[1048576];
@@ -25,6 +28,7 @@ static uint8_t port_d2, port_d3;
 
 static Z80Context cpu_z80;
 static struct ppide *ppide;
+static struct wd17xx *fdc;
 
 static unsigned int fast;
 static volatile int done;
@@ -32,7 +36,7 @@ static volatile int done;
 #define TRACE_MEM	1
 #define TRACE_IO	2
 #define TRACE_UNK	8
-#define TRACE_ACIA	16
+#define TRACE_FDC	16
 #define TRACE_BANK	32
 #define TRACE_IRQ	64
 
@@ -130,6 +134,8 @@ static uint8_t io_read(int unused, uint16_t addr)
 		return next_char();
 	if (addr >= 0x30 && addr <= 0x33)
 		return ppide_read(ppide, addr & 3);
+	if (fdc && addr >= 0xF8 && addr <= 0xFC)
+		return tbfdc_read(fdc, addr & 7);
 	if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown read from port %04X\n", addr);
 	return 0xFF;
@@ -148,6 +154,8 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		port_d3 = val;
 	else if (addr >= 0x30 && addr <= 0x33)
 		ppide_write(ppide, addr & 3, val);
+	else if (fdc && addr >= 0xF8 && addr <= 0xFC)
+		tbfdc_write(fdc, addr & 7, val);
 	else if (addr == 0xFD)
 		trace = val;
 	else if (trace & TRACE_UNK)
@@ -170,7 +178,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "s100: [-f] [-i path] [-r path] [-d debug]\n");
+	fprintf(stderr, "s100: [-A drive] [-B drive] [-f] [-i path] [-r path] [-d debug]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -182,9 +190,16 @@ int main(int argc, char *argv[])
 	int l;
 	char *rompath = "s100.rom";
 	char *idepath = "s100.cf";
+	char *drive_a = NULL, *drive_b = NULL;
 
 	while ((opt = getopt(argc, argv, "d:i:r:ft")) != -1) {
 		switch (opt) {
+		case 'A':
+			drive_a = optarg;
+			break;
+		case 'B':
+			drive_b = optarg;
+			break;
 		case 'r':
 			rompath = optarg;
 			break;
@@ -225,6 +240,16 @@ int main(int argc, char *argv[])
 	}
 	close(fd);
 
+	if (drive_a || drive_b) {
+		fdc = tbfdc_create();
+		if (trace & TRACE_FDC)
+			wd17xx_trace(fdc, 1);
+		if (drive_a)
+			wd17xx_attach(fdc, 0, drive_a, 1, 80, 26, 128);
+		if (drive_b)
+			wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
+	}
+
 	ppide = ppide_create("ppide0");
 	if (ppide) {
 		fd = open(idepath, O_RDWR);
@@ -236,10 +261,10 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	/* 5ms - it's a balance between nice behaviour and simulation
+	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
-	tc.tv_nsec = 5000000L;
+	tc.tv_nsec = 20000000L;
 
 	if (tcgetattr(0, &term) == 0) {
 		saved_term = term;
@@ -273,17 +298,16 @@ int main(int argc, char *argv[])
 	while (!done) {
 		int l;
 		/* 50 Hz outer loop for a 4MHz CPU */
-		/* 40,000 T states a loop */
-		for (l = 0; l < 4; l++) {
-			int i;
+		/* 80,000 T states a tick */
+		for (l = 0; l < 20; l++) {
 			/* We do 4000 tstates per ms */
-			for (i = 0; i < 5; i++) {
-				Z80ExecuteTStates(&cpu_z80, 4000);
-			}
-			/* Do 5ms of I/O and delays */
-			if (!fast)
-				nanosleep(&tc, NULL);
+			Z80ExecuteTStates(&cpu_z80, 4000);
 		}
+		/* Do 20ms of I/O and delays */
+		if (fdc)
+			wd17xx_tick(fdc, 20);
+		if (!fast)
+			nanosleep(&tc, NULL);
 	}
 	exit(0);
 }

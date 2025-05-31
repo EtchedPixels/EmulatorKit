@@ -1,3 +1,8 @@
+/* Handle the fact POSIX can't stop meddling */
+#ifndef FNDELAY
+#define FNDELAY O_NONBLOCK
+#endif
+
 /* We may need the context unused for DMA on some platforms */
 
 extern uint8_t mem_read(int unused, uint16_t addr);

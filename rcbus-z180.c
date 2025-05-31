@@ -292,7 +292,7 @@ struct rtc *rtc;
 
 uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 {
-	uint8_t r;
+	int r;
 
 	if (pspi_cs == 0 && pspi) {
 		r = piratespi_txrx(pspi, bitrev[bits]);
@@ -306,6 +306,8 @@ uint8_t z180_csio_write(struct z180_io *io, uint8_t bits)
 	if (sdcard == NULL)
 		return 0xFF;
 
+	/* bitrev will always return a value 0-255 so the trace reverse below
+	   is safe */
 	r = bitrev[sd_spi_in(sdcard, bitrev[bits])];
 	if (trace & TRACE_SPI)
 		fprintf(stderr,	"[SPI %02X:%02X]\n", bitrev[bits], bitrev[r]);

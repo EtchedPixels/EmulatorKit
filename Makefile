@@ -7,13 +7,15 @@ BINS =  rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80 \
-	trcwm6809 swt6809 nybbles scmp2 sbc08k mini11
-
+	trcwm6809 swt6809 nybbles scmp2 sbc08k mini11 microtanic6808 \
+	s100-8080
+ 
 all: $(BINS)
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
-	sorceror z80all osi400 osi500 spectrum microtan 6502retro
+	sorceror z80all osi400 osi500 spectrum microtan 6502retro \
+	poly88
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -205,8 +207,14 @@ markiv:	markiv.o z180_io.o ttycon.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis
 n8_sdl2: n8.o n8_sdlui.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
 	cc -g3 n8.o n8_sdlui.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a  -o n8_sdl2 -lSDL2
 
-s100-z80:	s100-z80.o acia.o ppide.o ide.o libz80/libz80.o
-	cc -g3 s100-z80.o acia.o ppide.o ide.o libz80/libz80.o -o s100-z80
+s100-z80:	s100-z80.o acia.o ppide.o ide.o tarbell_fdc.o wd17xx.o libz80/libz80.o
+	cc -g3 s100-z80.o acia.o ppide.o ide.o tarbell_fdc.o wd17xx.o libz80/libz80.o -o s100-z80
+
+s100-8080: s100-8080.o intel_8080_emulator.o mits1.o ide.o tarbell_fdc.o wd17xx.o ttycon.o
+	cc -g3 s100-8080.o mits1.o ttycon.o ide.o tarbell_fdc.o wd17xx.o intel_8080_emulator.o -o s100-8080
+
+poly88: poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o
+	cc -g3 poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o -o poly88 -lSDL2
 
 mini11: mini11.o 68hc11.o sdcard.o 6522.o
 	cc -g3 mini11.o sdcard.o 6522.o 68hc11.o -o mini11
@@ -300,6 +308,9 @@ max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
 
 microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o
 	cc -g3 microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o -lSDL2 -o microtan
+
+microtanic6808: microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o
+	cc -g3 microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o -o microtanic6808
 
 sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
