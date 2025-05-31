@@ -836,7 +836,7 @@ int main(int argc, char *argv[])
 		}
 		if (machine == MACH_MICROTAN) {
 			/* We want to run UI events before we rasterize */
-			asciikbd_event(kbd);
+			asciikbd_event();
 			utan_rasterize();
 			utan_render();
 		}

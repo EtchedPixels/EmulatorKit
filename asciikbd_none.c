@@ -41,6 +41,10 @@ void asciikbd_ack(struct asciikbd *kbd)
     kbd->ready = 0;
 }
 
-void asciikbd_event(struct asciikbd *kbd)
+void asciikbd_event(void)
+{
+}
+
+void asciikbd_bind(struct asciikbd *kbd, unsigned window_id)
 {
 }

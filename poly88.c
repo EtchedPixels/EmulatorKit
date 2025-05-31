@@ -1809,8 +1809,11 @@ int main(int argc, char *argv[])
 	i8251_attach(uart, &console);
 
 	kbd[0] = asciikbd_create();
-	if (twinsys)
+	asciikbd_bind(kbd[0], SDL_GetWindowID(window[0]));
+	if (twinsys) {
 		kbd[1] = asciikbd_create();
+		asciikbd_bind(kbd[1], SDL_GetWindowID(window[1]));
+	}
 
 	i8080_reset();
 	if (trace & TRACE_CPU)
@@ -1829,12 +1832,10 @@ int main(int argc, char *argv[])
 		/* We want to run UI events regularly it seems */
 		poly_rasterize(0);
 		poly_render(0);
-		asciikbd_event(kbd[0]);
+		asciikbd_event();
 		if (twinsys) {
 			poly_rasterize(1);
 			poly_render(1);
-			/* FIXME */
-/* Not yet possible without fixing our SDL layer asciikbd_event(kbd[1]); */
 		}
 		/* Do 20ms of I/O and delays */
 		if (!fast)

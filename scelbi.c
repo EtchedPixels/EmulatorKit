@@ -365,7 +365,7 @@ static void run_system(void)
 				scopewriter_render(swrender);
 			dgvideo_rasterize(dgvideo);
 		}
-		asciikbd_event(kbd);
+		asciikbd_event();
 		nanosleep(&tc, NULL);
 		if (i8008_halted(cpu)) {
 			tcsetattr(0, TCSADRAIN, &saved_term);
