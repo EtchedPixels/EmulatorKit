@@ -49,7 +49,7 @@ static unsigned con_noready(struct serial_device *dev)
 static uint8_t con_get(struct serial_device *dev)
 {
 	static uint8_t c;
-	if (read(0, (char *)&c, 1) != 1)
+	if (read(0, (char *) &c, 1) != 1)
 		return c;
 	if (c == 0x0A)
 		c = '\r';
@@ -63,7 +63,7 @@ static uint8_t con_noget(struct serial_device *dev)
 
 static void con_put(struct serial_device *dev, uint8_t c)
 {
-        write(1, &c, 1);
+	write(1, &c, 1);
 }
 
 static void con_noput(struct serial_device *dev, uint8_t c)
@@ -71,25 +71,25 @@ static void con_noput(struct serial_device *dev, uint8_t c)
 }
 
 struct serial_device console = {
-    "Console",
-    NULL,
-    con_get,
-    con_put,
-    con_ready
+	"Console",
+	NULL,
+	con_get,
+	con_put,
+	con_ready
 };
 
 struct serial_device console_wo = {
-    "Console",
-    NULL,
-    con_noget,
-    con_put,
-    con_wready
+	"Console",
+	NULL,
+	con_noget,
+	con_put,
+	con_wready
 };
 
 struct serial_device nulldev = {
-    "Null",
-    NULL,
-    con_noget,
-    con_noput,
-    con_noready
+	"Null",
+	NULL,
+	con_noget,
+	con_noput,
+	con_noready
 };
