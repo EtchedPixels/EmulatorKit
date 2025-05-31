@@ -56,6 +56,8 @@
 #include "keymatrix.h"
 #include "sdcard.h"
 
+#include "event.h"
+
 #include "libz80/z80.h"
 #include "z80dis.h"
 
@@ -424,21 +426,29 @@ uint8_t m6847_font_rom(struct m6847 *video, uint8_t ch, unsigned row)
 	return 0xFF;
 }
 
-static void ui_event(void)
+unsigned ui_event(void)
 {
 	SDL_Event ev;
 	while (SDL_PollEvent(&ev)) {
 		switch(ev.type) {
 		case SDL_QUIT:
 			Z80NMI(&cpu_z80);
-			break;
+			return 1;
 		case SDL_KEYDOWN:
 		case SDL_KEYUP:
 			keymatrix_SDL2event(matrix, &ev);
 			break;
 		}
 	}
+	return 0;
 }
+
+/* Dummy as we don't want to use the generic UI helpers */
+
+void add_ui_handler(int (*func)(void *, void *), void *dev)
+{
+}
+
 
 static struct termios saved_term, term;
 
@@ -536,8 +546,6 @@ static void select_vzfile(void)
 	load_vzfile(buf);
 }
 
-int sdl_live;
-
 int main(int argc, char *argv[])
 {
 	static struct timespec tc;
@@ -588,8 +596,14 @@ int main(int argc, char *argv[])
 	if (sd_path) 
 		sd_init(sdrom_path, sd_path);
 
+	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
+	        fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
+	        exit(1);
+	}
+
 	matrix = keymatrix_create(8, 6, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
+
 
 	video = m6847_create(M6847);
 	m6847_reset(video);

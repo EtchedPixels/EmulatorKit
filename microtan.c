@@ -45,6 +45,7 @@
 #include "ttycon.h"
 #include "6522.h"
 #include "6551.h"
+#include "event.h"
 #include "asciikbd.h"
 #include "wd17xx.h"
 #include "ide.h"
@@ -836,7 +837,8 @@ int main(int argc, char *argv[])
 		}
 		if (machine == MACH_MICROTAN) {
 			/* We want to run UI events before we rasterize */
-			asciikbd_event();
+			if (ui_event())
+				break;
 			utan_rasterize();
 			utan_render();
 		}

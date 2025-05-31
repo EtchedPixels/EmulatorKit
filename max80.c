@@ -1374,6 +1374,11 @@ static void ui_event(void)
 	}
 }
 
+/* Dummy as we don't want to use the generic UI helpers */
+
+void add_ui_handler(int (*func)(void *, void *), void *dev)
+{
+}
 
 /* Most PC layouts don't have a colon key so use # */
 

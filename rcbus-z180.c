@@ -23,6 +23,7 @@
 #include <errno.h>
 
 #include "system.h"
+#include "event.h"
 #include "libz180/z180.h"
 #include "lib765/include/765.h"
 #include "serialdevice.h"

@@ -34,6 +34,8 @@
 #include "16x50.h"
 #include "sdcard.h"
 #include "system.h"
+#include "event.h"
+#include "2063ui.h"
 #include "joystick.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
@@ -49,8 +51,6 @@ static struct sdcard *sdcard;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct uart16x50 *uart;
-
-int sdl_live;
 
 static uint8_t ram[16 * 32768];
 static uint8_t rom[65536];
@@ -1020,6 +1020,8 @@ int main(int argc, char *argv[])
 	} else
 		sio2_input = 1;
 
+	ui_init();
+
 	if (have_tms) {
 		vdp = tms9918a_create();
 		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
@@ -1027,6 +1029,7 @@ int main(int argc, char *argv[])
 		/* SDL init called in tms9918a_renderer_create */
 		joystick_create();
 		joystick_trace( !! (trace & TRACE_JOY ));
+		js2063_add_events();
 	}
 
 	/* 60Hz for the VDP */
@@ -1080,7 +1083,8 @@ int main(int argc, char *argv[])
 				sio2_timer();
 			}
 			/* We want to run UI events regularly it seems */
-			ui_event();
+			if (ui_event())
+				emulator_done = 1;
 		}
 
 		/* Do 20ms of I/O and delays */

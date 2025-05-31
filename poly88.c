@@ -53,6 +53,7 @@
 #include <SDL2/SDL.h>
 
 #include "intel_8080_emulator.h"
+#include "event.h"
 #include "serialdevice.h"
 #include "ttycon.h"
 #include "i8251.h"
@@ -1832,7 +1833,8 @@ int main(int argc, char *argv[])
 		/* We want to run UI events regularly it seems */
 		poly_rasterize(0);
 		poly_render(0);
-		asciikbd_event();
+		if (ui_event())
+			break;
 		if (twinsys) {
 			poly_rasterize(1);
 			poly_render(1);

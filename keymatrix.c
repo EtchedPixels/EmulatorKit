@@ -20,6 +20,7 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "event.h"
 #include "keymatrix.h"
 
 struct keymatrix {
@@ -107,6 +108,18 @@ bool keymatrix_SDL2event(struct keymatrix *km, SDL_Event *ev)
     if (ev->type == SDL_KEYUP)
         return keymatrix_event(km, &ev->key.keysym, false);
     return false;
+}
+
+static int keymatrix_handler(void *dev, void *evp)
+{
+    if (keymatrix_SDL2event(dev, evp))
+        return 1;
+    return 0;
+}
+
+void keymatrix_add_events(struct keymatrix *km)
+{
+    add_ui_handler(keymatrix_handler, km);
 }
 
 void keymatrix_free(struct keymatrix *km)

@@ -36,6 +36,7 @@
 #include <sys/select.h>
 
 #include "system.h"
+#include "event.h"
 #include "libz80/z80.h"
 #include "libz180/z180.h"
 #include "lib765/include/765.h"
@@ -3646,6 +3647,7 @@ int main(int argc, char *argv[])
 	if (have_ps2) {
 		ps2 = ps2_create(7);
 		ps2_trace(ps2, trace & TRACE_PS2);
+		ps2_add_events(ps2, 0);
 	}
 
 	if (have_wiznet) {
@@ -3786,7 +3788,8 @@ int main(int argc, char *argv[])
 			}
 			fdc_tick(fdc);
 			/* We want to run UI events regularly it seems */
-			ui_event();
+			if (ui_event())
+				emulator_done = 1;
 		}
 
 		if (is_z512 && (z512_control & 0x20)) {

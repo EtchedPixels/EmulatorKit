@@ -229,6 +229,13 @@ static void ui_event(void)
 	}
 }
 
+/* Dummy as we don't want to use the generic UI helpers */
+
+void add_ui_handler(int (*func)(void *, void *), void *dev)
+{
+}
+
+
 /* We do this in the 6502 loop instead. Provide a dummy for the device models */
 void recalc_interrupts(void)
 {

@@ -14,8 +14,6 @@
 #include "ef9345.h"
 #include "ef9345_render.h"
 
-extern int sdl_live;
-
 /* RGB colours : only 8 used as we ignore the I hack */
 static uint32_t ef9345_ctab[16] = {
     0xFF000000,
@@ -61,15 +59,6 @@ void ef8345_renderer_free(struct ef9345_renderer *render)
 struct ef9345_renderer *ef9345_renderer_create(struct ef9345 *ef9345)
 {
     struct ef9345_renderer *render;
-
-    if (sdl_live == 0) {
-        sdl_live = 1;
-        if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-            fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
-            exit(1);
-        }
-        atexit(SDL_Quit);
-    }
 
     render = malloc(sizeof(struct ef9345_renderer));
     if (render == NULL) {

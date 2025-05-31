@@ -860,6 +860,13 @@ static void ui_event(void)
 	}
 }
 
+/* Dummy as we don't want to use the generic UI helpers */
+
+void add_ui_handler(int (*func)(void *, void *), void *dev)
+{
+}
+
+
 static struct termios saved_term, term;
 
 static void cleanup(int sig)

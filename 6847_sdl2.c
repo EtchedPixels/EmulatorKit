@@ -14,8 +14,6 @@
 #include "6847.h"
 #include "6847_render.h"
 
-extern int sdl_live;
-
 /*
  * The 6847 set up is odd - there are 8 colours in the encoding plus black
  * which has a life of its own and we keep in slot 8 
@@ -71,17 +69,6 @@ void m6847_renderer_free(struct m6847_renderer *render)
 struct m6847_renderer *m6847_renderer_create(struct m6847 *vdp)
 {
     struct m6847_renderer *render;
-
-    /* We will need a nicer way to do this once we have multiple SDL using
-       devices */
-    if (sdl_live == 0) {
-        sdl_live = 1;
-        if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-            fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
-            exit(1);
-        }
-        atexit(SDL_Quit);
-    }
 
     render = malloc(sizeof(struct m6847_renderer));
     if (render == NULL) {
