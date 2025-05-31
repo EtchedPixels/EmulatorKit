@@ -45,6 +45,7 @@
 
 #include "serialdevice.h"
 #include "ttycon.h"
+#include "vtcon.h"
 #include "16x50.h"
 #include "acia.h"
 #include "amd9511.h"
@@ -3425,6 +3426,8 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
+	ui_init();
+
 	if (have_kio) {
 		sio2 = 1;
 		have_ctc = 0;
@@ -3601,7 +3604,10 @@ int main(int argc, char *argv[])
 		acia = acia_create();
 		if (trace & TRACE_ACIA)
 			acia_trace(acia, 1);
-		acia_attach(acia, &nulldev);
+		if (indev == INDEV_ACIA)
+			acia_attach(acia, &console);
+		else
+			acia_attach(acia, create_vt("ACIA"));
 	}
 	if (rtc && (trace & TRACE_RTC))
 		rtc_trace(rtc, 1);
@@ -3621,7 +3627,7 @@ int main(int argc, char *argv[])
 		if (indev == INDEV_16C550A)
 			uart16x50_attach(uart, &console);
 		else
-			uart16x50_attach(uart, &console_wo);
+			uart16x50_attach(uart, create_vt("16x50"));
 	}
 	if (have_tms) {
 		vdp = tms9918a_create();
