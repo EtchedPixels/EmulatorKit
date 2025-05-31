@@ -111,8 +111,11 @@ tiny68k:
 	https://www.retrobrewcomputers.org/doku.php?id=boards:sbc:tiny68k
 	Non-free, non-redistributable, downloadable
 
-s100-z80:
+s100-8080:
 	Pick your boot ROM. Various are open source
+
+s100-z80:
+	Pick your boot ROM.
 
 scelbi:
 	No boot firmware required (no ROM)
@@ -227,3 +230,12 @@ spectrum:
 6502retro:
 	https://github.com/6502-retro
 	Open Source
+
+poly88:
+	Boot ROM is non free
+	Micmod and Polex are modern and can be found at
+	https://deramp.com/downloads/polymorphic/poly-88/software/Polex/
+	along with modern CP/M setups
+
+	Polymorphic OS products are non free, or in some cases sadly appear
+	lost (eg the Twin system software)
