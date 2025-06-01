@@ -113,7 +113,6 @@ static uint8_t have_busstop;
 static uint8_t port30 = 0;
 static uint8_t port38 = 0;
 static uint8_t fast = 0;
-static uint8_t int_recalc = 0;
 static uint8_t is_z512;
 static uint8_t z512_control = 0;
 static uint8_t ef_latch = 0;
@@ -1035,11 +1034,6 @@ unsigned int next_char(void)
 	return c;
 }
 
-void recalc_interrupts(void)
-{
-	int_recalc = 1;
-}
-
 struct acia *acia;
 static uint8_t acia_narrow;
 
@@ -1116,7 +1110,6 @@ static void ctc_interrupt(struct z80_ctc *c)
 	if (c->ctrl & CTC_IRQ) {
 		if (!(ctc_irqmask & (1 << i))) {
 			ctc_irqmask |= 1 << i;
-			recalc_interrupts();
 			if (trace & TRACE_CTC)
 				fprintf(stderr, "CTC %d wants to interrupt.\n", i);
 		}
@@ -2742,24 +2735,34 @@ static void poll_irq_nonim2(void)
 /* Zilog style interrupt chain */
 static void poll_irq_event(void)
 {
-	int v;
+	int v = -1;
 	if (have_im2) {
 		if (!live_irq) {
-			v = sio_check_im2(sio);
+			if (sio)
+				v = sio_check_im2(sio);
 			if (v == -1)
 				ctc_check_im2();
 			else {
-				Z80INT(&cpu_z80, v);
+				intvec = v;
 				live_irq = IRQ_SIO;
 			}
 		}
 	} else {
-		v = sio_check_im2(sio);
-		if (v != -1)
-			Z80INT(&cpu_z80, v);
+		if (sio)
+			v = sio_check_im2(sio);
+		if (v != -1) {
+			intvec = v;
+			live_irq = IRQ_SIO;
+		}
 		ctc_check_im2();
 	}
 	set_interrupt();
+}
+
+void recalc_interrupts(void)
+{
+	/* Still used by ACIA driver - need to migrate eventually */
+	poll_irq_event();
 }
 
 static void reti_event(void)
@@ -3400,13 +3403,8 @@ int main(int argc, char *argv[])
 
 	switch(indev) {
 	case INDEV_ACIA:
-		/* FIXME: can remove ?? */
-		acia_attach(acia, &console);
-		break;
 	case INDEV_SIO:
-		break;
 	case INDEV_CPLD:
-		break;
 	case INDEV_16C550A:
 		break;
 	default:
@@ -3535,18 +3533,11 @@ int main(int argc, char *argv[])
 		if (!fast)
 			nanosleep(&tc, NULL);
 		/* Non IM2 devices just hold interrupt */
-		if (int_recalc) {
-			/* If there is no pending Z80 vector IRQ but we think
-			   there now might be one we use the same logic as for
-			   reti */
-			if (!live_irq || !have_im2)
-				poll_irq_event();
-			/* Clear this after because reti_event may set the
-			   flags to indicate there is more happening. We will
-			   pick up the next state changes on the reti if so */
-			if (!(cpu_z80.IFF1|cpu_z80.IFF2))
-				int_recalc = 0;
-		}
+		/* If there is no pending Z80 vector IRQ but we think
+		   there now might be one we use the same logic as for
+		   reti */
+		if (!live_irq || !have_im2)
+			poll_irq_event();
 	}
 	if (cpuboard == 3 && save) {
 		lseek(fd, 0L, SEEK_SET);
