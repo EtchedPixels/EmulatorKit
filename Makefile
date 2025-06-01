@@ -189,8 +189,8 @@ z180-mini-itx_sdl2: z180-mini-itx.o event_sdl2.o ps2event_sdl2.o z180_io.o ttyco
 flexbox: flexbox.o 6800.o acia.o ttycon.o ide.o
 	cc -g3 flexbox.o 6800.o acia.o ttycon.o ide.o -o flexbox
 
-simple80: simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o
-	cc -g3 simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o -o simple80
+simple80: simple80.o event_noui.o z80sio.o ttycon.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o
+	cc -g3 simple80.o event_noui.o z80sio.o ttycon.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o -o simple80
 
 zsc: zsc.o ide.o acia.o libz80/libz80.o
 	cc -g3 zsc.o acia.o ide.o libz80/libz80.o -o zsc
@@ -303,8 +303,8 @@ nybbles: nybbles.o ns807x.o
 scmp2: scmp2.o ns806x.o
 	cc -g3 scmp2.o ns806x.o -o scmp2
 
-max80: max80.o event_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
-	cc -g3 max80.o event_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
+max80: max80.o event_sdl2.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
+	cc -g3 max80.o event_sdl2.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
 
 microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o
 	cc -g3 microtan.o event_sdl2.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o -lSDL2 -o microtan
