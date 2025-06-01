@@ -9,7 +9,8 @@
 #include <errno.h>
 #include <sys/select.h>
 #include <SDL2/SDL.h>
-#include "vtfont.h"		/* Quick hack to start off */
+#include "vtfont.h"
+#include "printfont.h"
 #include "serialdevice.h"
 #include "event.h"
 #include "asciikbd.h"
@@ -70,15 +71,10 @@ static void vtchar(struct vtcon *v, unsigned y, unsigned x, uint8_t c)
     }
 }
 
-static void vtraster(struct vtcon *v)
+static void vtrender(struct vtcon *v)
 {
     SDL_Rect rect;
-    const uint8_t *p = v->video;
-    unsigned y, x;
-    for (y = 0; y < 24; y++)
-        for (x = 0; x < 80; x++)
-            vtchar(v, y, x, *p++);
-    
+
     rect.x = rect.y = 0;
     rect.w = 80 * CWIDTH;
     rect.h = 24 * CHEIGHT;
@@ -87,6 +83,29 @@ static void vtraster(struct vtcon *v)
     SDL_RenderClear(v->render);
     SDL_RenderCopy(v->render, v->texture, NULL, &rect);
     SDL_RenderPresent(v->render);
+}
+
+static void vtraster(struct vtcon *v)
+{
+    const uint8_t *p = v->video;
+    unsigned y, x;
+    for (y = 0; y < 24; y++)
+        for (x = 0; x < 80; x++)
+            vtchar(v, y, x, *p++);
+
+    vtrender(v);
+}
+
+/* Wipe helper for dumb console */
+static void vtwipe(struct vtcon *v)
+{
+        uint32_t *p = v->bitmap;
+        unsigned n = sizeof(v->bitmap) / sizeof(uint32_t);
+        while(n--)
+            *p++ = 0xFFB0B0B0;
+        v->x = 0;
+        v->y = 23;
+        vtrender(v);
 }
 
 static void vtscroll(struct vtcon *v)
@@ -119,7 +138,10 @@ static int vtcon_refresh(void *dev, void *evp)
             switch(ev->window.event) {
                 case SDL_WINDOWEVENT_SHOWN:
                 case SDL_WINDOWEVENT_SIZE_CHANGED:
-                    vtraster(v);
+                    if (v->type == CON_DUMB)
+                        vtwipe(v);
+                    else
+                        vtraster(v);
             }
         }
     }
@@ -129,7 +151,7 @@ static int vtcon_refresh(void *dev, void *evp)
 static void vtcon_init(struct vtcon *v)
 {
     v->kbd = asciikbd_create();
-    v->window = SDL_CreateWindow(v->name, 
+    v->window = SDL_CreateWindow(v->name,
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
         80 * CWIDTH, 24 * CHEIGHT,
@@ -156,11 +178,74 @@ static void vtcon_init(struct vtcon *v)
     SDL_RenderSetLogicalSize(v->render, 80 * CWIDTH, 24 * CHEIGHT);
     asciikbd_bind(v->kbd, SDL_GetWindowID(v->window));
     add_ui_handler(vtcon_refresh, v);
+    if (v->type == CON_DUMB) {
+        vtwipe(v);
+    }
 }
 
 static void vtput(struct vtcon *v, uint8_t c)
 {
     v->video[80 * v->y + v->x] = c;
+}
+
+static void vtscroll_dumb(struct vtcon *v)
+{
+    uint32_t *p;
+    unsigned n;
+
+    /* Update the actual text map */
+    vtscroll(v);
+    /* Scrol the rastered bitmap to get the right effect */
+    memmove(v->bitmap, v->bitmap + 80 * CWIDTH * CHEIGHT,
+        23 * 80 * CWIDTH * CHEIGHT * 4);
+    p = v->bitmap + 80 * CWIDTH * CHEIGHT * 23;
+    /* Blank paper */
+    for (n = 0; n < 80 * CWIDTH * CHEIGHT; n++)
+        *p++ = 0xB0B0B0;
+}
+
+static void vtdumb_darken(uint32_t *p)
+{
+    uint32_t n = *p & 0xFF;	/* Get the shade for the square */
+    unsigned ink = (rand() >> 4) & 0x3F;
+    ink += (rand() >> 4) & 0x3F;
+    n *= ink;	/* Multiply by 0-128 / 128 bell curve distribution */
+    n >>= 7;
+    n |= (n << 8) | (n << 16) | 0xFF000000UL;
+    *p = n;
+}
+
+static void vtdumb_darkbit(uint32_t *p)
+{
+    uint32_t n = *p & 0xFF;	/* Get the shade for the square */
+    unsigned ink = ((rand() >> 4) & 31) + 96;
+    n *= ink;	/* Multiply by 96-127 / 128 */
+    n >>= 7;
+    n |= (n << 8) | (n << 16) | 0xFF000000UL;
+    *p = n;
+}
+
+static void vtchar_dumb(struct vtcon *v, uint8_t c)
+{
+    const uint8_t *fp = printfont + 16 * c;
+    uint32_t *pixp = v->bitmap + v->x * CWIDTH + 80 * v->y * CHEIGHT * CWIDTH;
+    unsigned rows, pixels;
+
+    for (rows = 0; rows < CHEIGHT; rows ++) {
+        uint8_t bits = *fp++;
+        for (pixels = 0; pixels < CWIDTH; pixels++) {
+            if (bits & 0x80) {
+                vtdumb_darken(pixp);
+                if (v->x != 0)
+                    vtdumb_darkbit(pixp - 1);
+                if (v->x != 79)
+                    vtdumb_darkbit(pixp + 1);
+            }
+            pixp++;
+            bits <<= 1;
+        }
+        pixp += 79 * CWIDTH;
+    }
 }
 
 static void vtcon_put_dumb(struct serial_device *dev, uint8_t c)
@@ -175,10 +260,10 @@ static void vtcon_put_dumb(struct serial_device *dev, uint8_t c)
     if (c == 10) {
         v->y++;
         if (v->y == 24) {
-            vtscroll(v);
+            vtscroll_dumb(v);
             v->y = 23;
         }
-        vtraster(v);
+        vtrender(v);
         return;
     }
     if (c == 8) {
@@ -186,17 +271,19 @@ static void vtcon_put_dumb(struct serial_device *dev, uint8_t c)
             v->x--;
         return;
     }
-            
+
+    vtput(v, c);
+    vtchar_dumb(v, c);
     v->x++;
     if (v->x == 80) {
         v->x = 0;
         v->y++;
         if (v->y == 24) {
-            vtscroll(v);
+            vtscroll_dumb(v);
             v->y = 23;
         }
     }
-    vtraster(v);
+    vtrender(v);
 }
 
 static void vt52_clearacross(struct vtcon *v)
@@ -297,7 +384,7 @@ static void vtcon_put_vt52(struct serial_device *dev, uint8_t c)
             case 'I':
                 if (v->y)
                     v->y--;
-                else { 
+                else {
                     vtbackscroll(v);
                     memset(v->video, ' ', 80);
                 }
@@ -348,6 +435,7 @@ struct serial_device *vt_create(const char *name, unsigned type)
     dev->dev.private = dev;
     dev->dev.name = "Terminal";
     dev->dev.get = vtcon_get;
+
     switch(type) {
     case CON_DUMB:
         dev->dev.put = vtcon_put_dumb;
@@ -362,5 +450,6 @@ struct serial_device *vt_create(const char *name, unsigned type)
     memset(dev->video, ' ', sizeof(dev->video));
     dev->window = NULL;
     dev->name = name;
+    dev->type = type;
     return &dev->dev;
 }
