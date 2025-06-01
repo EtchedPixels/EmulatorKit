@@ -54,11 +54,6 @@ static uint8_t banknum = 0;
 static Z80Context cpu_z80;
 static struct z80_sio *sio;
 
-/* IRQ source that is live */
-static uint8_t live_irq;
-
-#define IRQ_SIO	1
-
 static volatile int done;
 
 #define TRACE_MEM	1
@@ -271,14 +266,12 @@ static void poll_irq_event(void)
 	int v = sio_check_im2(sio);
 	if (v < 0)
 		return;
-	live_irq = IRQ_SIO;
 	Z80INT(&cpu_z80, v);
 }
 
 static void reti_event(void)
 {
 	sio_reti(sio);
-	live_irq = 0;
 	poll_irq_event();
 }
 
@@ -410,13 +403,11 @@ int main(int argc, char *argv[])
 				Z80ExecuteTStates(&cpu_z80, 364);
 				sio_timer(sio);
 			}
-			ui_event();
+			if (ui_event())
+				done = 1;
 			/* Do 5ms of I/O and delays */
 			if (!fast)
 				nanosleep(&tc, NULL);
-			/* If there is no pending Z80 vector IRQ but we think
-			   there now might be one we use the same logic as for
-			   reti */
 			poll_irq_event();
 		}
 		timer_pulse();
