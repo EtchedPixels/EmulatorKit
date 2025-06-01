@@ -322,6 +322,16 @@ void sio_write(struct z80_sio *sio, uint8_t addr, uint8_t val)
 	}
 }
 
+void sio_set_dcd(struct z80_sio *sio, unsigned chan, unsigned onoff)
+{
+	if (onoff)
+		sio->chan[chan].rr[0] &= ~0x08;
+	else
+		sio->chan[chan].rr[0] |= 0x08;
+	if (sio->chan[chan].wr[1] & 1)
+		sio_raise_int(sio->chan + chan, INT_ERR, 0);	/* External/status */
+}
+
 void sio_timer(struct z80_sio *sio)
 {
 	sio_channel_timer(sio->chan, 0);
