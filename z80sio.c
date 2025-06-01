@@ -394,3 +394,8 @@ int sio_check_im2(struct z80_sio *sio)
 		return r;
 	return sio_check_im2_chan(sio->chan + 1);
 }
+
+uint8_t sio_get_wr(struct z80_sio *sio, unsigned chan, unsigned r)
+{
+	return sio->chan[chan].wr[r];
+}

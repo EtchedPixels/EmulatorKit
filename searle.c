@@ -261,9 +261,11 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	if (trace & TRACE_IO)
 		fprintf(stderr, "write %02x <- %02x\n", addr, val);
 	addr &= 0xFF;
-	if (addr >= 0x00 && addr <= 0x03)
+	if (addr >= 0x00 && addr <= 0x03) {
 		sio_write(sio, sio_port[addr & 3], val);
-	else if (addr >= 0x10 && addr <= 0x17)
+		if (bankhack == 1)
+			banken = !sio_get_wr(sio, 0, 0x40);
+	} else if (addr >= 0x10 && addr <= 0x17)
 		my_ide_write(addr & 7, val);
 	else if (addr == 0x38)
 		control_rom(val);

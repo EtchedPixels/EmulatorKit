@@ -15,6 +15,9 @@ extern int sio_check_im2(struct z80_sio *sio);
 extern uint8_t sio_read(struct z80_sio *sio, uint8_t addr);
 extern void sio_write(struct z80_sio *sio, uint8_t addr, uint8_t val);
 
+/* Needed for devices that abuse WRDY and the like */
+extern uint8_t sio_get_wr(struct z80_sio *sio, unsigned chan, unsigned r);
+
 /* Mappings vary wildly be device. This is the mappings as expected
    by the driver, and thus what should be used for translations */
 
