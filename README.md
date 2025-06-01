@@ -14,7 +14,8 @@ RC2014 and Fuzix.
 
 - 1802 - initial model of 1802/4/5 processors
 - 6303 
-- 6502 - NMOS part with no illegal models (Mike Chambers)
+- 6502 - NMOS part (Mike Chambers)
+- 65C02 - CMOS part (derived from Mike Chambers code)
 - 65C816 (uses a slightly modified lib65816)
 - 6800
 - 68000/10/EC020/020 (uses Musashi)
@@ -22,9 +23,11 @@ RC2014 and Fuzix.
 - 6809 (vecX)
 - 68HC11 - I/O model is very basic
 - 8008
+- 8080 - From Mike Chambers 8080 emulation
 - 8085 - Extended from Mike Chambers 8080 emulation
 - 8086 (from Hampa Hug's pcem)
-- NS8070 (work in progress)
+- NS8060
+- NS8070
 - NS32K (from PiTubeClient)
 - Z8 - initial model
 - Z80 (libz80)
@@ -79,9 +82,11 @@ RC2014 and Fuzix.
 - EF9345
 - Floppy Disk
 - Gluino/Z80 PIO with SD card
+- NMI trap
 - PS/2 Keyboard
 - TMS9918A (no sprites yet)
 - W5100 (actual card not yet available)
+- Z180CoPro
 - Z80 SIO
 - ZXKey
 
@@ -94,6 +99,7 @@ RC2014 and Fuzix.
 ## Other Systems Emulated
 - 2063
 - 68KNano
+- 8080 S100
 - Ampro Littleboard/PLUS
 - Amstrad NC100
 - Amstrad NC150
@@ -102,7 +108,13 @@ RC2014 and Fuzix.
 - Grant Searle's 9 chip Z80
 - Linc-80
 - Micro80
+- Microtan 6502
+- Microtanic 6808
+- Mini11
+- Mini11/M8
+- Nybbles (NS8070 Basic)
 - Pico 68K
+- Poly88 / Poly 8813
 - PZ1
 - Retrobrew N8
 - Rewtrobrew SBC v2
@@ -110,7 +122,10 @@ RC2014 and Fuzix.
 - SBC 2G
 - Simple80
 - Scelbi
+- SC/MP 2 (BASIC)
 - Small Z80
+- SBC08K (Arnewsh)
+- SWT 6809
 - Tiny68K
 - TinyZ80
 - Tom's SBC
@@ -120,6 +135,7 @@ RC2014 and Fuzix.
 - Z80 Membership Card
 - Z80 MBC2
 - ZRCC
+- ZX Spectrum/+2/+3 with DIVIDE+ (not timing accurate)
 
 # Hardware And ROM Images
 
