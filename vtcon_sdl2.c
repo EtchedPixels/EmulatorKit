@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <sys/select.h>
 #include <SDL2/SDL.h>
-#include "nasfont.h"		/* Quick hack to start off */
+#include "vtfont.h"		/* Quick hack to start off */
 #include "serialdevice.h"
 #include "event.h"
 #include "asciikbd.h"
@@ -37,19 +37,32 @@ struct vtcon {
 
 static void vtchar(struct vtcon *v, unsigned y, unsigned x, uint8_t c)
 {
-    uint8_t *fp = nascom_font_raw + CHEIGHT * c;
+    const uint8_t *fp = vtfont + 8 * c;	/* We make a 16 pixel char from 8 */
     uint32_t *pixp = v->bitmap + x * CWIDTH + 80 * y * CHEIGHT * CWIDTH;
     unsigned rows, pixels;
 
-    for (rows = 0; rows < CHEIGHT; rows ++) {
-        uint8_t bits = *fp++;
-        if (y == v->y && x == v->x && rows < 11)
+    for (rows = 0; rows < CHEIGHT / 2; rows ++) {
+        uint8_t bits = *fp;
+        if (y == v->y && x == v->x)
             bits ^= 0xFF;
         for (pixels = 0; pixels < CWIDTH; pixels++) {
             if (bits & 0x80)
-                *pixp++ = 0xFF10D010;
+                *pixp++ = 0xFFFFBB0A;
             else
-                *pixp++ = 0xFF080808;
+                *pixp++ = 0xFF0A0A0A;
+            bits <<= 1;
+        }
+        /* To next line */
+        pixp += 79 * CWIDTH;
+
+        bits = *fp++;
+        if (y == v->y && x == v->x)
+            bits ^= 0xFF;
+        for (pixels = 0; pixels < CWIDTH; pixels++) {
+            if (bits & 0x80)
+                *pixp++ = 0xFFCCA20A;
+            else
+                *pixp++ = 0xFF060606;
             bits <<= 1;
         }
         /* To next line */
@@ -96,6 +109,23 @@ static unsigned vtcon_ready(struct serial_device *dev)
     return 2;
 }
 
+static int vtcon_refresh(void *dev, void *evp)
+{
+    struct vtcon *v = dev;
+    SDL_Event *ev = evp;
+
+    if (ev->type == SDL_WINDOWEVENT) {
+        if (SDL_GetWindowID(v->window) == ev->window.windowID) {
+            switch(ev->window.event) {
+                case SDL_WINDOWEVENT_SHOWN:
+                case SDL_WINDOWEVENT_SIZE_CHANGED:
+                    vtraster(v);
+            }
+        }
+    }
+    return 0;
+}
+
 static void vtcon_init(struct vtcon *v)
 {
     v->kbd = asciikbd_create();
@@ -125,6 +155,7 @@ static void vtcon_init(struct vtcon *v)
     SDL_RenderPresent(v->render);
     SDL_RenderSetLogicalSize(v->render, 80 * CWIDTH, 24 * CHEIGHT);
     asciikbd_bind(v->kbd, SDL_GetWindowID(v->window));
+    add_ui_handler(vtcon_refresh, v);
 }
 
 static void vtput(struct vtcon *v, uint8_t c)
