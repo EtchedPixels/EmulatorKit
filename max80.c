@@ -1195,8 +1195,8 @@ int main(int argc, char *argv[])
 		sio_trace(sio, 0, 1);
 		sio_trace(sio, 1, 1);
 	}
-	sio_attach(sio, 0, create_vt("sioa"));
-	sio_attach(sio, 1, create_vt("siob"));
+	sio_attach(sio, 0, vt_create("sioa", CON_VT52));
+	sio_attach(sio, 1, vt_create("siob", CON_VT52));
 
 	tc.tv_sec = 0;
 	tc.tv_nsec = 1639344L;	/*  about right */

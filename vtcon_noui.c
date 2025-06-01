@@ -24,7 +24,7 @@ static uint8_t vtcon_get(struct serial_device *dev)
     return 0xFF;
 }
 
-struct serial_device *create_vt(const char *name)
+struct serial_device *vt_create(const char *name, unsigned type)
 {
     struct serial_device *dev = malloc(sizeof(struct serial_device));
     dev->private = dev;

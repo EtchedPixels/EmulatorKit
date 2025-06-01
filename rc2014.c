@@ -3308,7 +3308,7 @@ int main(int argc, char *argv[])
 		if (indev == INDEV_ACIA)
 			acia_attach(acia, &console);
 		else
-			acia_attach(acia, create_vt("ACIA"));
+			acia_attach(acia, vt_create("ACIA", CON_VT52));
 	}
 	if (rtc && (trace & TRACE_RTC))
 		rtc_trace(rtc, 1);
@@ -3322,8 +3322,8 @@ int main(int argc, char *argv[])
 		if (indev == INDEV_SIO)
 			sio_attach(sio, 0, &console);
 		else
-			sio_attach(sio, 0, create_vt("SIOA"));
-		sio_attach(sio, 1, create_vt("SIOB"));
+			sio_attach(sio, 0, vt_create("SIOA", CON_VT52));
+		sio_attach(sio, 1, vt_create("SIOB", CON_VT52));
 	}
 	if (have_ctc)
 		ctc_init();
@@ -3338,7 +3338,7 @@ int main(int argc, char *argv[])
 		if (indev == INDEV_16C550A)
 			uart16x50_attach(uart, &console);
 		else
-			uart16x50_attach(uart, create_vt("16x50"));
+			uart16x50_attach(uart, vt_create("16x50", CON_VT52));
 	}
 	if (have_tms) {
 		vdp = tms9918a_create();

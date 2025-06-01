@@ -678,11 +678,11 @@ int main(int argc, char *argv[])
 		uart16x50_trace(uart, trace & TRACE_UART);
 		uart16x50_attach(uart, &console);
 		uart16x50_reset(uart);
-		sio_attach(sio, 0, create_vt("sioa"));
-		sio_attach(sio, 1, create_vt("siob"));
+		sio_attach(sio, 0, vt_create("sioa", CON_VT52));
+		sio_attach(sio, 1, vt_create("siob", CON_VT52));
 	} else {
 		sio_attach(sio, 0, &console);
-		sio_attach(sio, 1, create_vt("siob"));
+		sio_attach(sio, 1, vt_create("siob", CON_VT52));
 	}
 
 	ui_init();
