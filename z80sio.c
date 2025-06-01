@@ -85,16 +85,29 @@ static void sio_recalc_interrupts(struct z80_sio *sio)
 static int sio_check_im2_chan(struct z80_sio_chan *chan)
 {
         struct z80_sio *sio = chan->sio;
+        uint8_t vector = sio->chan[1].wr[2];	/* B R2 */
         /* One is in progress still */
         if (sio->irqchan)
         	return -1;
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
 	        /* The vector seems to take the port B register value when it is deliverable */
-		if (sio->chan[1].wr[1] & 0x04)
-			chan->vector += (sio->chan[1].wr[2] & 0xF1);
-		else
-			chan->vector += sio->chan[1].wr[2];
+		if (sio->chan[1].wr[1] & 0x04) {
+			vector &= 0xF1;
+			/* TODO: external status change */
+			if (chan->unit == 0)
+				vector |= 8;
+			if (chan->intbits & INT_RX)
+				vector |= 4;
+			if (chan->intbits & INT_ERR)
+				vector |= 2;
+			if (chan->trace)
+				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
+			chan->vector = vector;
+		} else {
+			chan->vector = vector;
+		}
+			
 		if (chan->trace)
 			fprintf(stderr, "New live interrupt pending is sio%c (%02X).\n",
 				chan->unit, chan->vector);
