@@ -260,8 +260,8 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 
 68hc11.o: 6800.c
 
-z80retro: z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
-	cc -g3 z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
+z80retro: z80retro.o event_noui.o z80sio.o ttycon.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
+	cc -g3 z80retro.o event_noui.o z80sio.o ttycon.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
 2063: 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o z80sio.o vtcon_noui.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
 	cc -g3 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o z80sio.o vtcon_noui.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
