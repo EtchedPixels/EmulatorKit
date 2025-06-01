@@ -34,16 +34,16 @@ struct vtcon {
 static void vtchar(struct vtcon *v, unsigned y, unsigned x, uint8_t c)
 {
     uint8_t *fp = nascom_font_raw + CHEIGHT * c;
-    uint32_t *pixp = v->bitmap + x * CWIDTH + 80 * y * CHEIGHT;
+    uint32_t *pixp = v->bitmap + x * CWIDTH + 80 * y * CHEIGHT * CWIDTH;
     unsigned rows, pixels;
 
     for (rows = 0; rows < CHEIGHT; rows ++) {
         uint8_t bits = *fp++;
         for (pixels = 0; pixels < CWIDTH; pixels++) {
             if (bits & 0x80)
-                *pixp += 0xFF10D010;
+                *pixp++ = 0xFF10D010;
             else
-                *pixp += 0xFF080808;
+                *pixp++ = 0xFF080808;
             bits <<= 1;
         }
         /* To next line */
@@ -138,7 +138,7 @@ struct serial_device *create_vt(const char *name)
     dev->kbd = asciikbd_create();
     dev->x = 0;
     dev->y = 0;
-    memset(dev->video, ' ', sizeof(dev->video));
+    memset(dev->video, '@', sizeof(dev->video));
     dev->window = SDL_CreateWindow(name, 
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
