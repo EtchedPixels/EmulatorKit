@@ -132,8 +132,8 @@ rcbus-z180:	rcbus-z180.o event_noui.o z180_io.o 16x50.o acia.o ttycon.o ide.o pp
 smallz80: smallz80.o ide.o libz80/libz80.o
 	cc -g3 smallz80.o ide.o libz80/libz80.o -o smallz80
 
-sbc2g:	sbc2g.o ide.o libz80/libz80.o
-	cc -g3 sbc2g.o ide.o z80dis.o libz80/libz80.o -o sbc2g
+sbc2g:	sbc2g.o event_noui.o z80sio.o ttycon.o ide.o libz80/libz80.o
+	cc -g3 sbc2g.o event_noui.o z80sio.o ttycon.o ide.o z80dis.o libz80/libz80.o -o sbc2g
 
 tiny68k: tiny68k.o ide.o duart.o m68k/lib68k.a
 	cc -g3 tiny68k.o ide.o duart.o m68k/lib68k.a -o tiny68k
@@ -195,11 +195,11 @@ simple80: simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o
 zsc: zsc.o ide.o acia.o libz80/libz80.o
 	cc -g3 zsc.o acia.o ide.o libz80/libz80.o -o zsc
 
-nc100: nc100.o keymatrix.o libz80/libz80.o z80dis.o
-	cc -g3 nc100.o keymatrix.o libz80/libz80.o z80dis.o -o nc100 -lSDL2
+nc100: nc100.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o
+	cc -g3 nc100.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o -o nc100 -lSDL2
 
-nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
-	cc -g3 nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
+nc200: nc200.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
+	cc -g3 nc200.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
 
 markiv:	markiv.o z180_io.o ttycon.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o
 	cc -g3 markiv.o z180_io.o ttycon.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o -o markiv
