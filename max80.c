@@ -33,6 +33,7 @@
 #include "wd17xx.h"
 
 #include <SDL2/SDL.h>
+#include "event.h"
 #include "keymatrix.h"
 
 static SDL_Window *window;
@@ -1030,8 +1031,6 @@ static unsigned mb_write(uint16_t addr, uint8_t val)
 	return 0;
 }
 
-static void ui_event(void);
-
 static uint8_t do_max_read(uint16_t addr, unsigned debug)
 {
 	uint8_t r;
@@ -1357,29 +1356,6 @@ static void keytranslate(SDL_Event *ev)
 	ev->key.keysym.sym = c;
 }
 
-static void ui_event(void)
-{
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch (ev.type) {
-		case SDL_QUIT:
-			emulator_done = 1;
-			break;
-		case SDL_KEYDOWN:
-		case SDL_KEYUP:
-			keytranslate(&ev);
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
-}
-
-/* Dummy as we don't want to use the generic UI helpers */
-
-void add_ui_handler(int (*func)(void *, void *), void *dev)
-{
-}
-
 /* Most PC layouts don't have a colon key so use # */
 
 static struct termios saved_term, term;
@@ -1538,11 +1514,8 @@ int main(int argc, char *argv[])
 	memrandom(shortchar, sizeof(shortchar));
 	memrandom(tallchar, sizeof(tallchar));
 
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "max80: unable to initialize SDL: %s\n", SDL_GetError());
-		exit(1);
-	}
+	ui_init();
+
 	window = SDL_CreateWindow("LOBO MAX 80", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, COLS * CWIDTH, ROWS * CHEIGHT, SDL_WINDOW_RESIZABLE);
 	if (window == NULL) {
 		fprintf(stderr, "max80: unable to open window: %s\n", SDL_GetError());
@@ -1566,6 +1539,8 @@ int main(int argc, char *argv[])
 
 	matrix = keymatrix_create(8, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
+	keymatrix_add_events(matrix);
+	keymatrix_translator(matrix, keytranslate);
 
 	tc.tv_sec = 0;
 	tc.tv_nsec = 1639344L;	/*  about right */
@@ -1609,7 +1584,8 @@ int main(int argc, char *argv[])
 				sio2_timer();
 			}
 			/* ~8295 T states */
-			ui_event();
+			if (ui_event())
+				emulator_done = 1;
 			/* Do a small block of I/O and delays */
 			if (!fast)
 				nanosleep(&tc, NULL);

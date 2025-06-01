@@ -7,4 +7,4 @@ struct keymatrix *keymatrix_create(unsigned int rows, unsigned int cols, SDL_Key
 void keymatrix_reset(struct keymatrix *km);
 void keymatrix_trace(struct keymatrix *km, int onoff);
 void keymatrix_add_events(struct keymatrix *km);
-
+void keymatrix_translator(struct keymatrix *km, void (*translator)(SDL_Event *ev));

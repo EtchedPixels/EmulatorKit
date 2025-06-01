@@ -30,6 +30,7 @@ struct keymatrix {
     SDL_Keycode *matrix;
     bool *status;
     int trace;
+    void (*translate)(SDL_Event *ev);
 };
  
 /*
@@ -112,7 +113,13 @@ bool keymatrix_SDL2event(struct keymatrix *km, SDL_Event *ev)
 
 static int keymatrix_handler(void *dev, void *evp)
 {
-    if (keymatrix_SDL2event(dev, evp))
+    SDL_Event *ev = evp;
+    struct keymatrix *km = dev;
+    if (ev->type == SDL_KEYDOWN || ev->type == SDL_KEYUP) {
+        if (km->translate)
+            km->translate(ev);
+    }
+    if (keymatrix_SDL2event(km, ev))
         return 1;
     return 0;
 }
@@ -141,6 +148,7 @@ struct keymatrix *keymatrix_create(unsigned int rows, unsigned int cols, SDL_Key
     km->size = rows * cols;
     km->matrix = matrix;
     km->status = calloc(km->size, sizeof(bool));
+    km->translate = NULL;
     if (km->status == NULL) {
         fprintf(stderr, "Out of memory.\n");
         exit(1);
@@ -157,3 +165,7 @@ void keymatrix_trace(struct keymatrix *km, int onoff)
     km->trace = onoff;
 }
 
+void keymatrix_translator(struct keymatrix *km, void (*translate)(SDL_Event *ev))
+{
+    km->translate = translate;
+}

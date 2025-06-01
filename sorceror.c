@@ -69,8 +69,8 @@
 #include "ide.h"
 #include "ppide.h"
 
-
 #include <SDL2/SDL.h>
+#include "event.h"
 #include "keymatrix.h"
 
 static SDL_Window *window;
@@ -557,30 +557,6 @@ static void keytranslate(SDL_Event *ev)
 	ev->key.keysym.sym = c;
 }
 
-static void ui_event(void)
-{
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch (ev.type) {
-		case SDL_QUIT:
-			emulator_done = 1;
-			break;
-		case SDL_KEYDOWN:
-		case SDL_KEYUP:
-			keytranslate(&ev);
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
-}
-
-/* Dummy as we don't want to use the generic UI helpers */
-
-void add_ui_handler(int (*func)(void *, void *), void *dev)
-{
-}
-
-
 static struct termios saved_term, term;
 
 static void cleanup(int sig)
@@ -790,13 +766,8 @@ int main(int argc, char *argv[])
 	if (wirepath)
 		drivewire_attach(0, wirepath, 0);
 
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr,
-			"sorceror: unable to initialize SDL: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
+	ui_init();
+
 	window = SDL_CreateWindow("Exidy Sorceror",
 				  SDL_WINDOWPOS_UNDEFINED,
 				  SDL_WINDOWPOS_UNDEFINED,
@@ -834,6 +805,8 @@ int main(int argc, char *argv[])
 
 	matrix = keymatrix_create(16, 5, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
+	keymatrix_add_events(matrix);
+	keymatrix_translator(matrix, keytranslate);
 
 	/* TODO */
 	tc.tv_sec = 0;

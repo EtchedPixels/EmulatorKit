@@ -234,14 +234,14 @@ scelbi: scelbi.o i8008.o event_noui.o dgvideo.o dgvideo_norender.o scopewriter.o
 scelbi_sdl2: scelbi.o i8008.o event_sdl2.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o
 	cc -g3 scelbi.o i8008.o event_sdl2.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o -o scelbi_sdl2 -lSDL2
 
-nascom: nascom.o keymatrix.o 58174.o libz80/libz80.o z80dis.o wd17xx.o sasi.o ide.o
-	cc -g3 nascom.o keymatrix.o 58174.o ide.o sasi.o wd17xx.o libz80/libz80.o z80dis.o -lSDL2 -o nascom
+nascom: nascom.o event_sdl2.o keymatrix.o 58174.o libz80/libz80.o z80dis.o wd17xx.o sasi.o ide.o
+	cc -g3 nascom.o event_sdl2.o keymatrix.o 58174.o ide.o sasi.o wd17xx.o libz80/libz80.o z80dis.o -lSDL2 -o nascom
 
-uk101: uk101.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o
-	cc -g3 uk101.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o -lSDL2 -o uk101
+uk101: uk101.o event_sdl2.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o
+	cc -g3 uk101.o event_sdl2.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o -lSDL2 -o uk101
 
-vz300: vz300.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o
-	cc -g3 vz300.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o -lSDL2 -o vz300
+vz300: vz300.o event_sdl2.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o
+	cc -g3 vz300.o event_sdl2.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o -lSDL2 -o vz300
 
 rhyophyre:rhyophyre.o z180_io.o ttycon.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o
 	cc -g3 rhyophyre.o z180_io.o ttycon.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o -o rhyophyre
@@ -303,8 +303,8 @@ nybbles: nybbles.o ns807x.o
 scmp2: scmp2.o ns806x.o
 	cc -g3 scmp2.o ns806x.o -o scmp2
 
-max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
-	cc -g3 max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
+max80: max80.o event_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
+	cc -g3 max80.o event_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
 
 microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o
 	cc -g3 microtan.o event_sdl2.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o -lSDL2 -o microtan
@@ -312,8 +312,8 @@ microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174
 microtanic6808: microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o
 	cc -g3 microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o -o microtanic6808
 
-sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
-	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
+sorceror: sorceror.o event_sdl2.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 sorceror.o event_sdl2.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
 
 spectrum: spectrum.o event_sdl2.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o
 	cc -g3 spectrum.o event_sdl2.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o -lm -o spectrum -lSDL2

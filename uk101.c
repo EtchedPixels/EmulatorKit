@@ -18,6 +18,7 @@
 #include <SDL2/SDL.h>
 
 #include "6502.h"
+#include "event.h"
 #include "serialdevice.h"
 #include "ttycon.h"
 #include "acia.h"
@@ -212,30 +213,6 @@ static void keytranslate(SDL_Event *ev)
 	ev->key.keysym.sym = c;
 }
 	
-static void ui_event(void)
-{
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch(ev.type) {
-		case SDL_QUIT:
-			emulator_done = 1;
-			break;
-		case SDL_KEYDOWN:
-		case SDL_KEYUP:
-			keytranslate(&ev);
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
-}
-
-/* Dummy as we don't want to use the generic UI helpers */
-
-void add_ui_handler(int (*func)(void *, void *), void *dev)
-{
-}
-
-
 /* We do this in the 6502 loop instead. Provide a dummy for the device models */
 void recalc_interrupts(void)
 {
@@ -330,14 +307,13 @@ int main(int argc, char *argv[])
 	}
 	romload(font_path, font, 2048);
 
+	ui_init();
+
 	matrix = keymatrix_create(8, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "uk101: unable to initialize SDL: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
+	keymatrix_add_events(matrix);
+	keymatrix_translator(matrix, keytranslate);
+
 	window = SDL_CreateWindow("UK101",
 			SDL_WINDOWPOS_UNDEFINED,
 			SDL_WINDOWPOS_UNDEFINED,
