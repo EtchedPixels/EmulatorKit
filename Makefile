@@ -41,8 +41,8 @@ rb-mbc:	rb-mbc.o 16x50.o ttycon.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/li
 rbcv2:	rbcv2.o 16x50.o ttycon.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o
 	cc -g3 rbcv2.o 16x50.o ttycon.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o -o rbcv2
 
-searle:	searle.o ide.o z80dis.o libz80/libz80.o
-	cc -g3 searle.o ide.o z80dis.o libz80/libz80.o -o searle
+searle:	searle.o event_noui.o z80sio.o ttycon.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 searle.o event_noui.o z80sio.o ttycon.o ide.o z80dis.o libz80/libz80.o -o searle
 
 linc80:	linc80.o ide.o sdcard.o z80sio.o ttycon.o z80dis.o libz80/libz80.o
 	cc -g3 linc80.o ide.o sdcard.o z80sio.o ttycon.o z80dis.o libz80/libz80.o -o linc80
@@ -263,11 +263,11 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 z80retro: z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
-2063: 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
-	cc -g3 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
+2063: 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o z80sio.o vtcon_noui.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
+	cc -g3 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o z80sio.o vtcon_noui.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
 
-2063_sdl2: 2063.o event_sdl2.o 2063_sdl2.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o
-	cc -g3 2063.o event_sdl2.o 2063_sdl2.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
+2063_sdl2: 2063.o event_sdl2.o 2063_sdl2.o sdcard.o 16x50.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o
+	cc -g3 2063.o event_sdl2.o 2063_sdl2.o sdcard.o 16x50.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
 
 zeta-v2: zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a
 	cc -g3 zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a -o zeta-v2
