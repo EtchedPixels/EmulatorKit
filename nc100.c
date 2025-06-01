@@ -32,6 +32,7 @@
 
 #include <SDL2/SDL.h>
 
+#include "event.h"
 #include "keymatrix.h"
 
 #include "libz80/z80.h"
@@ -591,28 +592,6 @@ static void nc100_render(void)
 	SDL_RenderPresent(render);
 }
 
-static void ui_event(void)
-{
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch(ev.type) {
-		case SDL_QUIT:
-			Z80NMI(&cpu_z80);
-			break;
-		case SDL_KEYDOWN:
-		case SDL_KEYUP:
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
-}
-
-/* Dummy as we don't want to use the generic UI helpers */
-
-void add_ui_handler(int (*func)(void *, void *), void *dev)
-{
-}
-
 static struct termios saved_term, term;
 
 static void cleanup(int sig)
@@ -708,14 +687,12 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "nc100: mapped %dKB PCMCIA image.\n", pcmcia_size);
 	}
 
+	ui_init();
+
 	matrix = keymatrix_create(10, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "nc100: unable to initialize SDL: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
+	keymatrix_add_events(matrix);
+
 	window = SDL_CreateWindow("NC100",
 			SDL_WINDOWPOS_UNDEFINED,
 			SDL_WINDOWPOS_UNDEFINED,
@@ -786,7 +763,9 @@ int main(int argc, char *argv[])
 		}
 
 		/* We want to run UI events before we rasterize */
-		ui_event();
+		if (ui_event())
+			Z80NMI(&cpu_z80);
+
 		nc100_rasterize();
 		nc100_render();
 		raise_irq(IRQ_TICK);
