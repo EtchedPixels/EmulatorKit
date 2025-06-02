@@ -49,6 +49,7 @@
 #include "amd9511.h"
 #include "ef9345.h"
 #include "ef9345_render.h"
+#include "gdb-server.h"
 #include "ide.h"
 #include "ppide.h"
 #include "ps2.h"
@@ -161,6 +162,7 @@ static uint8_t live_nonim2;
 #define IRQM_16X50	4
 
 static Z80Context cpu_z80;
+static struct gdb_server *gdb;
 static nic_w5100_t *wiz;
 
 volatile int emulator_done;
@@ -879,6 +881,10 @@ uint8_t mem_read(int unused, uint16_t addr)
 	static uint8_t rstate = 0;
 	uint8_t r = do_mem_read(addr, 0);
 
+	if (gdb) {
+		gdb_server_notify(gdb, addr, 1, false);
+	}
+
 	if (cpu_z80.M1) {
 		/* DD FD CB see the Z80 interrupt manual */
 		if (r == 0xDD || r == 0xFD || r == 0xCB) {
@@ -900,6 +906,10 @@ uint8_t mem_read(int unused, uint16_t addr)
 
 void mem_write(int unused, uint16_t addr, uint8_t val)
 {
+	if (gdb) {
+		gdb_server_notify(gdb, addr, 1, true);
+	}
+
 	switch (cpuboard) {
 	case CPUBOARD_Z80:
 		mem_write0(addr, val);
@@ -2841,6 +2851,8 @@ int main(int argc, char *argv[])
 	int indev;
 	char *patha = NULL, *pathb = NULL;
 	int have_sn = 0;
+	char *gdb_bind = NULL;
+	bool gdb_stopped = false;
 
 #define INDEV_ACIA	1
 #define INDEV_SIO	2
@@ -2852,7 +2864,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "179Aabcd:e:EfF:i:I:km:nN:pPr:sRS:Tuw8CZz:XS")) != -1) {
+	while ((opt = getopt(argc, argv, "179Aabcd:e:EfF:G:i:I:km:nN:pPr:sRS:Tuw8CZz:XS")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -3088,6 +3100,13 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			fast = 1;
+			break;
+		case 'G':
+			if (strcmp(optarg, "s") == 0 || strcmp(optarg, "S") == 0) {
+				gdb_stopped = true;
+			} else {
+				gdb_bind = optarg;
+			}
 			break;
 		case 'R':
 			rtc = rtc_create();
@@ -3423,6 +3442,14 @@ int main(int argc, char *argv[])
 
 	pio_reset();
 
+	if (gdb_bind) {
+		gdb = gdb_server_create(calloc(1, sizeof(struct gdb_backend)), gdb_bind, gdb_stopped);
+		if (!gdb) {
+			fprintf(stderr, "rc2014: could not bind gdb server to %s.\n", gdb_bind);
+			exit(EXIT_FAILURE);
+		}
+	}
+
 	/* 2.5ms - it's a balance between nice behaviour and simulation
 	   smoothness */
 	tc.tv_sec = 0;
@@ -3471,7 +3498,16 @@ int main(int argc, char *argv[])
 		for (i = 0; i < 40; i++) {
 			int j;
 			for (j = 0; j < 100; j++) {
-				Z80ExecuteTStates(&cpu_z80, (tstate_steps + 5)/ 10);
+				unsigned int tstates = (tstate_steps + 5) / 10;
+				if (gdb) {
+					cpu_z80.tstates = 0;
+					while (cpu_z80.tstates < tstates) {
+						gdb_server_step(gdb, &emulator_done);
+						Z80Execute(&cpu_z80);
+					}
+				} else {
+					Z80ExecuteTStates(&cpu_z80, tstates);
+				}
 				if (ef9345)
 					ef9345_cycles(ef9345, 200);
 				if (copro)
@@ -3548,6 +3584,9 @@ int main(int argc, char *argv[])
 		   reti */
 		if (!live_irq || !have_im2)
 			poll_irq_event();
+	}
+	if (gdb) {
+		gdb_server_free(gdb);
 	}
 	if (cpuboard == 3 && save) {
 		lseek(fd, 0L, SEEK_SET);
