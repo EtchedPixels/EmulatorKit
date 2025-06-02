@@ -3,6 +3,7 @@
  * ================================= */
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <stdio.h>
@@ -62,7 +63,7 @@ static bool gdb_server_select(struct gdb_server *gdb, struct timeval *tv);
 static char *gdb_server_handle_input(struct gdb_server *gdb);
 
 /* actual debugging logic */
-static void gdb_server_handle_packet(struct gdb_server *gdb, char *start, char *end);
+static void gdb_server_handle_packet(struct gdb_server *gdb, struct gdb_packet *p);
 
 /* create a listening gdb server */
 struct gdb_server *gdb_server_create(struct gdb_backend *backend, char *bindstr, bool stopped)
@@ -414,8 +415,17 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 			}
 		}
 
+		/* subtle business: we can write to buf[len] because it contains # */
+		struct gdb_packet packet = {
+			/* skip the $ */
+			gdb->input_buf + 1,
+			/* -1 for $, -3 for #CS */
+			p - 1 - 3 - gdb->input_buf,
+			gdb->input_buf[1],
+		};
+
 		/* handle the packet and eat it */
-		gdb_server_handle_packet(gdb, gdb->input_buf + 1, p - 3);
+		gdb_server_handle_packet(gdb, &packet);
 		return p;
 	} else {
 		for (char *p = gdb->input_buf; p < gdb->input_next; p++) {
@@ -449,15 +459,294 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 	}
 }
 
+/* ============== *
+ * Writing to GDB *
+ * ============== */
+
+static void gdb_write_start(struct gdb_server *gdb);
+static void gdb_write_end(struct gdb_server *gdb);
+
+static void gdb_write_str(struct gdb_server *gdb, const char *str);
+
+static void gdb_write_unsupported(struct gdb_server *gdb);
+static void gdb_write_ok(struct gdb_server *gdb);
+
+/* write a formatted string into the output buffer */
+void gdb_writef(struct gdb_server *gdb, const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	gdb_writefv(gdb, fmt, args);
+	va_end(args);
+}
+
+/* write a formatted string into the output buffer, using va_list */
+void gdb_writefv(struct gdb_server *gdb, const char *fmt, va_list args)
+{
+	size_t avail = gdb->output_buf + GDB_BUFFER_SIZE - gdb->output_next;
+	size_t amt = vsnprintf(gdb->output_next, avail, fmt, args);
+	if (amt >= avail) {
+		gdb->output_overflow = true;
+	} else {
+		gdb->output_next += amt;
+	}
+}
+
+/* start a new packet in the output buffer */
+static void gdb_write_start(struct gdb_server *gdb)
+{
+	if (gdb->waiting_on_ack) {
+		/* can't send a new packet while waiting on the old one */
+		gdb_server_close_client(gdb);
+		return;
+	}
+
+	gdb->output_next = gdb->output_buf;
+	gdb->output_overflow = false;
+	*(gdb->output_next++) = gdb_c_start;
+}
+
+/* finish a packet, compute the checksum, and send it */
+static void gdb_write_end(struct gdb_server *gdb)
+{
+	if (gdb->output_next + 3 > gdb->output_buf + GDB_BUFFER_SIZE) {
+		/* overflow */
+		gdb->output_overflow = true;
+	} else {
+		/* tack on the packet end character and checksum */
+		uint8_t checksum = 0;
+		for (char *p = gdb->output_buf + 1; p < gdb->output_next; p++) {
+			checksum += *p;
+		}
+		gdb_writef(gdb, "%c%02x", gdb_c_end, checksum);
+	}
+	gdb_server_send_buffer(gdb);
+}
+
+/* put a 0-terminated string into the output buffer */
+static void gdb_write_str(struct gdb_server *gdb, const char *str)
+{
+	size_t len = strlen(str);
+	if (gdb->output_next + len > gdb->output_buf + GDB_BUFFER_SIZE) {
+		gdb->output_overflow = true;
+		return;
+	}
+
+	memcpy(gdb->output_next, str, len);
+	gdb->output_next += len;
+}
+
+/* write an entire empty packet, indicating last packet is unsupported */
+static void gdb_write_unsupported(struct gdb_server *gdb)
+{
+	gdb_write_start(gdb);
+	gdb_write_end(gdb);
+}
+
+/* write an entire ok packet */
+static void gdb_write_ok(struct gdb_server *gdb)
+{
+	gdb_write_start(gdb);
+	gdb_write_str(gdb, "OK");
+	gdb_write_end(gdb);
+}
+
+/* ============== *
+ * Packet Parsing *
+ * ============== */
+
+static void gdb_packet_restore(struct gdb_packet *p, struct gdb_packet *other);
+
+static const char *gdb_packet_take(struct gdb_packet *p, size_t amt);
+static bool gdb_packet_skip(struct gdb_packet *p, size_t amt);
+static bool gdb_packet_match(struct gdb_packet *p, const char *prefix);
+static const char *gdb_packet_until(struct gdb_packet *p, const char *delimiters);
+
+/* slightly different from scanf, used like:
+
+   int end;
+   gdb_packet_scanf(p, &end, "some format", [...]);
+   // ... or ...
+   _gdb_packet_scanf(p, &end, "some format%n", [...], &end);
+
+   never matches an empty string.
+   returns true and consumes up to end on success.
+    on failure, returns false and end == -1 */
+bool _gdb_packet_scanf(struct gdb_packet *p, int *end, const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	bool success = _gdb_packet_scanfv(p, end, fmt, args);
+	va_end(args);
+	return success;
+}
+
+/* _gdb_packet_scanf but with va_list */
+bool _gdb_packet_scanfv(struct gdb_packet *p, int *end, const char *fmt, va_list args)
+{
+	*end = -1;
+
+	/* never match an empty string */
+	if (!p->len) {
+		return false;
+	}
+
+	/* careful: p->len > 0, so setting p->buf[p->len] doesn't touch p->c */
+	char last = p->buf[p->len];
+	p->buf[p->len] = 0;
+	gdb_packet_restore(p, NULL);
+
+	if (vsscanf(p->buf, fmt, args) < 0 || *end <= 0) {
+		p->buf[p->len] = last;
+		*end = -1;
+		return false;
+	}
+
+	p->buf[p->len] = last;
+	gdb_packet_skip(p, *end);
+	return true;
+}
+
+/* restore packet state from backup.
+   other may be NULL, which only resets buf[0].
+   usage:
+
+   struct gdb_packet backup = *p;
+   ...;
+   gdb_packet_restore(p, &backup); */
+static void gdb_packet_restore(struct gdb_packet *p, struct gdb_packet *other)
+{
+	p->buf[0] = p->c;
+	if (other) {
+		*p = *other;
+	}
+}
+
+/* consumes and returns amt bytes, or NULL if not available */
+static const char *gdb_packet_take(struct gdb_packet *p, size_t amt)
+{
+	if (p->len < amt) {
+		p->buf += p->len;
+		p->len = 0;
+		p->c = p->buf[0];
+		return NULL;
+	}
+
+	/* return the current buffer, restoring buf[0] */
+	gdb_packet_restore(p, NULL);
+	char *ret = p->buf;
+
+	/* advance by amt and drop a 0 */
+	p->buf += amt;
+	p->len -= amt;
+	p->c = p->buf[0];
+	p->buf[0] = 0;
+
+	return ret;
+}
+
+/* skips amt bytes. returns true if successful */
+static bool gdb_packet_skip(struct gdb_packet *p, size_t amt)
+{
+	if (p->len < amt) {
+		p->buf += p->len;
+		p->len = 0;
+		p->c = p->buf[0];
+		return false;
+	}
+
+	/* advance by amt, don't bother restoring buf[0] */
+	p->buf += amt;
+	p->len -= amt;
+	p->c = p->buf[0];
+
+	return true;
+}
+
+/* returns true if packet matches prefix. consumes prefix */
+static bool gdb_packet_match(struct gdb_packet *p, const char *prefix)
+{
+	size_t len = strlen(prefix);
+	gdb_packet_restore(p, NULL);
+	if (strncmp(p->buf, prefix, len) == 0) {
+		gdb_packet_skip(p, len);
+		return true;
+	}
+	return false;
+}
+
+/* return bytes up to (not including) any delimiter
+   or up to the end of the packet
+   on success, consumes up to and including the delimiter */
+static const char *gdb_packet_until(struct gdb_packet *p, const char *delimiters)
+{
+	size_t i;
+	gdb_packet_restore(p, NULL);
+	for (i = 0; i < p->len; i++) {
+		if (strchr(delimiters, p->buf[i])) {
+			break;
+		}
+	}
+
+	/* end of string or a delimiter is in p->buf[i] */
+	const char *ret = gdb_packet_take(p, i);
+
+	/* skip delimiter */
+	gdb_packet_skip(p, 1);
+
+	return ret;
+}
+
 /* =============================== *
  * Packet Handling and Debug Logic *
  * =============================== */
 
-/* handle a complete packet from GDB */
-static void gdb_server_handle_packet(struct gdb_server *gdb, char *start, char *end)
+/* why is the target stopped: ? */
+static void gdb_handle_why(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
 {
-	/* reply with empty packet for now */
-	strcpy(gdb->output_next, "$#00");
-	gdb->output_next += 4;
-	gdb_server_send_buffer(gdb);
+	gdb_write_start(gdb);
+	gdb_write_str(gdb, "S05");
+	gdb_write_end(gdb);
+}
+
+/* read registers: g */
+static void gdb_handle_read_registers(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	gdb_write_start(gdb);
+	for (int i = 0; i < 13; i++) {
+		gdb_writef(gdb, "%04x", gdb_swap_u16(0x1234));
+	}
+	gdb_write_end(gdb);
+}
+
+struct gdb_handler {
+	const char *cmd;
+	void (*handle)(struct gdb_server *gdb, struct gdb_packet *p, bool upper);
+};
+
+static const struct gdb_handler gdb_handlers[] = {
+	{"?", gdb_handle_why},
+	{"g", gdb_handle_read_registers},
+	{ 0 },
+};
+
+/* handle a complete packet from GDB */
+static void gdb_server_handle_packet(struct gdb_server *gdb, struct gdb_packet *p)
+{
+	bool upper = isupper(p->c);
+
+	gdb_packet_restore(p, NULL);
+	for (const struct gdb_handler *handler = gdb_handlers; handler->cmd; handler++) {
+		if (gdb_packet_match(p, handler->cmd)) {
+			handler->handle(gdb, p, upper);
+			return;
+		}
+	}
+
+	/* unknown packet */
+	gdb_write_unsupported(gdb);
+
+	/* not used yet, but will be. silence warnings. */
+	(void)&gdb_packet_until;
+	(void)&gdb_write_ok;
 }
