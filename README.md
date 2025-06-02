@@ -93,6 +93,7 @@ RC2014 and Fuzix.
 # Retrobrew/N8VEM Systems Emulated
 - SBC v2
 - Mark IV
+- Mini M68K
 - N8
 - Rhyophyre
 
@@ -104,15 +105,20 @@ RC2014 and Fuzix.
 - Amstrad NC100
 - Amstrad NC150
 - Amstrad NC200
+- Exidy Sorceror
 - Flex (minimal Flex 6800 system)
 - Grant Searle's 9 chip Z80
 - Linc-80
+- Lobo Max 80
 - Micro80
 - Microtan 6502
 - Microtanic 6808
 - Mini11
 - Mini11/M8
+- Nascom 1/2/3
 - Nybbles (NS8070 Basic)
+- OSI 400 series
+- OSI 500 series
 - Pico 68K
 - Poly88 / Poly 8813
 - PZ1
@@ -130,6 +136,7 @@ RC2014 and Fuzix.
 - TinyZ80
 - Tom's SBC
 - TRCWM HD6309 (but as 6809)
+- UK101
 - VZ200/300
 - Z80Master
 - Z80 Membership Card
