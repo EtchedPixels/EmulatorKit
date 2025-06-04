@@ -20,6 +20,10 @@ enum gdb_state {
 	GDB_STATE_RUN,
 };
 
+enum gdb_supported_flags {
+	GDB_S_ERROR_MESSAGE	= 1 << 0,
+};
+
 struct gdb_server {
 	struct gdb_backend *b;
 
@@ -33,6 +37,10 @@ struct gdb_server {
 
 	/* are we waiting on an ack? */
 	bool waiting_on_ack;
+	/* should we use acks? */
+	bool use_acks;
+	/* features advertised by gdb */
+	enum gdb_supported_flags supported;
 
 	/* input buffer and position */
 	char input_buf[GDB_BUFFER_SIZE];
@@ -114,6 +122,8 @@ struct gdb_server *gdb_server_create(struct gdb_backend *backend, char *bindstr,
 	gdb->client = -1;
 
 	gdb->waiting_on_ack = false;
+	gdb->use_acks = true;
+	gdb->supported = 0;
 
 	gdb->input_next = gdb->input_buf;
 	gdb->output_next = gdb->output_buf;
@@ -275,7 +285,7 @@ static void gdb_server_send_buffer(struct gdb_server *gdb)
 			return;
 		}
 
-		gdb->waiting_on_ack = true;
+		gdb->waiting_on_ack = gdb->use_acks;
 	}
 }
 
@@ -331,6 +341,8 @@ static bool gdb_server_select(struct gdb_server *gdb, struct timeval *tv)
 			/* reset relevant variables */
 
 			gdb->waiting_on_ack = false;
+			gdb->use_acks = true;
+			gdb->supported = 0;
 
 			gdb->input_next = gdb->input_buf;
 			gdb->output_next = gdb->output_buf;
@@ -391,24 +403,30 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 		}
 		p++;
 
-		unsigned int checksum_expected = 0x100;
-		sscanf(p, "%02x", &checksum_expected);
-		p += 2;
-		if (checksum != checksum_expected) {
-			/* bad checksum, send nack */
-			if (gdb->client >= 0) {
-				if (send(gdb->client, &gdb_c_nack, 1, 0) != 1) {
-					gdb_server_close_client(gdb);
-					return p;
+		/* only bother with the checksum if we use acks */
+		if (gdb->use_acks) {
+			unsigned int checksum_expected = 0x100;
+			sscanf(p, "%02x", &checksum_expected);
+			p += 2;
+			if (checksum != checksum_expected) {
+				/* bad checksum, send nack */
+				if (gdb->client >= 0) {
+					if (send(gdb->client, &gdb_c_nack, 1, 0) != 1) {
+						gdb_server_close_client(gdb);
+						return p;
+					}
 				}
-			}
 
-			/* eat this whole packet */
-			return p;
+				/* eat this whole packet */
+				return p;
+			}
+		} else {
+			/* skip checksum */
+			p += 2;
 		}
 
 		/* we found a valid packet, ack it */
-		if (gdb->client >= 0) {
+		if (gdb->use_acks && gdb->client >= 0) {
 			if (send(gdb->client, &gdb_c_ack, 1, 0) != 1) {
 				gdb_server_close_client(gdb);
 				return p;
@@ -429,7 +447,7 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 		return p;
 	} else {
 		for (char *p = gdb->input_buf; p < gdb->input_next; p++) {
-			if (*p == gdb_c_ack) {
+			if (gdb->use_acks && *p == gdb_c_ack) {
 				/* ack */
 				gdb->waiting_on_ack = false;
 
@@ -437,7 +455,7 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 				gdb->output_overflow = false;
 				gdb->output_next = gdb->output_buf;
 			}
-			if (*p == gdb_c_nack) {
+			if (gdb->use_acks && *p == gdb_c_nack) {
 				/* nack */
 				if (!gdb->waiting_on_ack || gdb->output_next == gdb->output_buf) {
 					/* we don't have anything to resend, close connection */
@@ -463,6 +481,10 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
  * Writing to GDB *
  * ============== */
 
+enum gdb_error {
+	GDB_ERR_ARGUMENT,
+};
+
 static void gdb_write_start(struct gdb_server *gdb);
 static void gdb_write_end(struct gdb_server *gdb);
 
@@ -470,6 +492,10 @@ static void gdb_write_str(struct gdb_server *gdb, const char *str);
 
 static void gdb_write_unsupported(struct gdb_server *gdb);
 static void gdb_write_ok(struct gdb_server *gdb);
+
+static void gdb_write_err(struct gdb_server *gdb, enum gdb_error err);
+static void gdb_write_errf(struct gdb_server *gdb, enum gdb_error err, const char *fmt, ...) GDB_ATTR_FORMAT(printf, 3, 4);
+static void gdb_write_errfv(struct gdb_server *gdb, enum gdb_error err, const char *fmt, va_list args);
 
 /* write a formatted string into the output buffer */
 void gdb_writef(struct gdb_server *gdb, const char *fmt, ...)
@@ -495,7 +521,7 @@ void gdb_writefv(struct gdb_server *gdb, const char *fmt, va_list args)
 /* start a new packet in the output buffer */
 static void gdb_write_start(struct gdb_server *gdb)
 {
-	if (gdb->waiting_on_ack) {
+	if (gdb->use_acks && gdb->waiting_on_ack) {
 		/* can't send a new packet while waiting on the old one */
 		gdb_server_close_client(gdb);
 		return;
@@ -548,6 +574,48 @@ static void gdb_write_ok(struct gdb_server *gdb)
 {
 	gdb_write_start(gdb);
 	gdb_write_str(gdb, "OK");
+	gdb_write_end(gdb);
+}
+
+/* write an entire error packet */
+static void gdb_write_err(struct gdb_server *gdb, enum gdb_error err)
+{
+	va_list args;
+	gdb_write_errfv(gdb, err, NULL, args);
+}
+
+/* write an entire error packet, with extra message */
+static void gdb_write_errf(struct gdb_server *gdb, enum gdb_error err, const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	gdb_write_errfv(gdb, err, fmt, args);
+	va_end(args);
+}
+
+/* gdb_write_errf but with va_list */
+static void gdb_write_errfv(struct gdb_server *gdb, enum gdb_error err, const char *fmt, va_list args)
+{
+	gdb_write_start(gdb);
+	if (gdb->supported & GDB_S_ERROR_MESSAGE) {
+		gdb_write_str(gdb, "E.");
+		gdb_writef(gdb, "error %02x: ", err);
+
+		const char *msg = "unknown";
+		switch (err) {
+		case GDB_ERR_ARGUMENT:
+			msg = "bad argument";
+			break;
+		}
+
+		gdb_write_str(gdb, msg);
+		if (fmt) {
+			gdb_write_str(gdb, ": ");
+			gdb_writefv(gdb, fmt, args);
+		}
+	} else {
+		gdb_writef(gdb, "E%02x", err);
+	}
 	gdb_write_end(gdb);
 }
 
@@ -704,6 +772,11 @@ static const char *gdb_packet_until(struct gdb_packet *p, const char *delimiters
 /* why is the target stopped: ? */
 static void gdb_handle_why(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
 {
+	if (!gdb_packet_end(p)) {
+		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
+		return;
+	}
+
 	gdb_write_start(gdb);
 	gdb_write_str(gdb, "S05");
 	gdb_write_end(gdb);
@@ -712,10 +785,81 @@ static void gdb_handle_why(struct gdb_server *gdb, struct gdb_packet *p, bool up
 /* read registers: g */
 static void gdb_handle_read_registers(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
 {
+	if (!gdb_packet_end(p)) {
+		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
+		return;
+	}
+
 	gdb_write_start(gdb);
 	for (int i = 0; i < 13; i++) {
 		gdb_writef(gdb, "%04x", gdb_swap_u16(0x1234));
 	}
+	gdb_write_end(gdb);
+}
+
+/* disable acks: QStartNoAckMode */
+static void gdb_handle_q_start_no_ack_mode(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	if (!gdb_packet_end(p)) {
+		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
+		return;
+	}
+
+	gdb->use_acks = false;
+	gdb_write_ok(gdb);
+}
+
+/* feature definitions for qSupported */
+struct gdb_feature {
+	enum gdb_supported_flags flag;
+	const char *gdbfeature;
+	const char *stubfeature;
+	bool end;
+};
+
+static const struct gdb_feature gdb_features[] = {
+	{GDB_S_ERROR_MESSAGE, "error-message+", "error-message+", false},
+
+	{0, NULL, "QStartNoAckMode+", false},
+
+	{ .end = true },
+};
+
+/* supported features: qSupported [:gdbfeature [;gdbfeature]] */
+static void gdb_handle_q_supported(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	gdb->supported = 0;
+	if (p->len && !gdb_packet_scanf(p, &end, ":")) {
+		/* something follows but it's not features */
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "features");
+		return;
+	}
+
+	/* some features follow */
+	const char *feature;
+	while ((feature = gdb_packet_until(p, ";")) && *feature) {
+		for (const struct gdb_feature *feat = gdb_features; !feat->end; feat++) {
+			if (feat->gdbfeature && strcmp(feature, feat->gdbfeature) == 0) {
+				gdb->supported |= feat->flag;
+			}
+		}
+	}
+
+	/* report our features */
+	gdb_write_start(gdb);
+
+	/* our buffer size, excluding room for framing, checksum, and 0 */
+	gdb_writef(gdb, "PacketSize=%x", GDB_BUFFER_SIZE - 2 - 2 - 1);
+
+	/* the rest of our features */
+	for (const struct gdb_feature *feat = gdb_features; !feat->end; feat++) {
+		if (feat->stubfeature && (feat->flag == 0 || (gdb->supported & feat->flag))) {
+			gdb_write_str(gdb, ";");
+			gdb_write_str(gdb, feat->stubfeature);
+		}
+	}
+
 	gdb_write_end(gdb);
 }
 
@@ -727,6 +871,8 @@ struct gdb_handler {
 static const struct gdb_handler gdb_handlers[] = {
 	{"?", gdb_handle_why},
 	{"g", gdb_handle_read_registers},
+	{"QStartNoAckMode", gdb_handle_q_start_no_ack_mode},
+	{"qSupported", gdb_handle_q_supported},
 	{ 0 },
 };
 
@@ -745,8 +891,4 @@ static void gdb_server_handle_packet(struct gdb_server *gdb, struct gdb_packet *
 
 	/* unknown packet */
 	gdb_write_unsupported(gdb);
-
-	/* not used yet, but will be. silence warnings. */
-	(void)&gdb_packet_until;
-	(void)&gdb_write_ok;
 }
