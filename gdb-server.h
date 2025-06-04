@@ -54,6 +54,11 @@ struct gdb_backend {
 	/* target description xml */
 	const char *target_description;
 
+	/* manipulate the program counter
+	   specifically: what instruction will run next */
+	unsigned long (*get_pc)(void *ctx);
+	void (*set_pc)(void *ctx, unsigned long addr);
+
 	/* get and set registers */
 	unsigned int register_max;
 	void (*get_reg)(void *ctx, struct gdb_server *gdb, unsigned int reg);

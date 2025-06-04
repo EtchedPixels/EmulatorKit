@@ -18,10 +18,45 @@
 enum gdb_state {
 	GDB_STATE_STOP,
 	GDB_STATE_RUN,
+	GDB_STATE_STEP_SETUP,
+	GDB_STATE_STEP,
+	GDB_STATE_KILL,
 };
 
 enum gdb_supported_flags {
 	GDB_S_ERROR_MESSAGE	= 1 << 0,
+	GDB_S_HWBREAK		= 1 << 1,
+	GDB_S_SWBREAK		= 1 << 2,
+	GDB_S_VCONTSUPPORTED	= 1 << 3,
+};
+
+enum gdb_breakpoint_type {
+	/* values same as used by protocol */
+	GDB_SWBREAK	= 0,
+	GDB_HWBREAK	= 1,
+	GDB_WATCH	= 2,
+	GDB_RWATCH	= 3,
+	GDB_AWATCH	= 4,
+
+	GDB_BREAKPOINT_TYPE_MAX,
+
+	/* not actual breakpoint types, but other reasons for gdb_write_stop */
+	GDB_STOP_STEP,
+	GDB_STOP_CTRLC,
+	GDB_STOP_WHY,
+};
+
+struct gdb_breakpoint {
+	struct gdb_breakpoint *next;
+	enum gdb_breakpoint_type type;
+	unsigned long addr;
+
+	/* length of memory region, for watchpoints */
+	unsigned int kind;
+	/* set to true on r/w/a for watchpoints */
+	bool tripped;
+	/* the address that tripped this watchpoint */
+	unsigned long trip_addr;
 };
 
 struct gdb_server {
@@ -29,6 +64,10 @@ struct gdb_server {
 
 	/* program execution state */
 	enum gdb_state state;
+	/* request Ctrl-C next time program is running */
+	bool ctrlc;
+	/* address breakpoints */
+	struct gdb_breakpoint *breakpoints;
 
 	/* the listening socket, if >= 0 */
 	int listen;
@@ -64,6 +103,7 @@ static const char gdb_c_end	= '#';
 static const char gdb_c_rle	= '*';
 static const char gdb_c_escape	= '}';
 static const char gdb_c_mangle	= ' ';
+static const char gdb_c_ctrlc	= 0x03;
 
 static bool gdb_server_parse_bind(char *bindstr, struct sockaddr_in6 *address);
 static void gdb_server_close_listen(struct gdb_server *gdb);
@@ -75,6 +115,7 @@ static char *gdb_server_handle_input(struct gdb_server *gdb);
 
 /* actual debugging logic */
 static void gdb_server_handle_packet(struct gdb_server *gdb, struct gdb_packet *p);
+static void gdb_server_check_for_stop(struct gdb_server *gdb);
 
 /* create a listening gdb server */
 struct gdb_server *gdb_server_create(struct gdb_backend *backend, char *bindstr, bool stopped)
@@ -120,6 +161,8 @@ struct gdb_server *gdb_server_create(struct gdb_backend *backend, char *bindstr,
 
 	gdb->b = backend;
 	gdb->state = stopped ? GDB_STATE_STOP : GDB_STATE_RUN;
+	gdb->ctrlc = false;
+	gdb->breakpoints = NULL;
 
 	gdb->listen = sock;
 	gdb->client = -1;
@@ -153,6 +196,11 @@ void gdb_server_free(struct gdb_server *gdb)
 	if (gdb) {
 		gdb_server_close_client(gdb);
 		gdb_server_close_listen(gdb);
+		while (gdb->breakpoints) {
+			struct gdb_breakpoint *bp = gdb->breakpoints;
+			gdb->breakpoints = bp->next;
+			free(bp);
+		}
 		if (gdb->b->free) {
 			gdb->b->free(gdb->b->ctx);
 		}
@@ -165,6 +213,14 @@ void gdb_server_free(struct gdb_server *gdb)
 void gdb_server_step(struct gdb_server *gdb, volatile int *done)
 {
 	do {
+		/* kill if requested */
+		if (gdb->state == GDB_STATE_KILL) {
+			if (done) {
+				*done = 1;
+			}
+			return;
+		}
+
 		/* 100ms when stopped, no blocking when running */
 		struct timeval tv = { 0, (gdb->state == GDB_STATE_STOP) ? 100000 : 0 };
 		if (!gdb_server_select(gdb, &tv)) {
@@ -175,12 +231,40 @@ void gdb_server_step(struct gdb_server *gdb, volatile int *done)
 			return;
 		}
 
+		if (gdb->state != GDB_STATE_STOP) {
+			/* evaluate breakpoints and other stop conditions */
+			gdb_server_check_for_stop(gdb);
+		}
+
 	} while (gdb->state == GDB_STATE_STOP && !(done && *done));
 }
 
 /* notify that memory has been accessed */
 void gdb_server_notify(struct gdb_server *gdb, unsigned long addr, unsigned int len, bool write)
 {
+	/* gdb only accesses us when stopped, cpu only when not stopped.
+	   return here if stopped to prevent gdb from triggering watchpoints */
+	if (gdb->state == GDB_STATE_STOP) {
+		return;
+	}
+
+	/* trip any matching watchpoints */
+	for (struct gdb_breakpoint *bp = gdb->breakpoints; bp; bp = bp->next) {
+		if (bp->tripped) {
+			continue;
+		}
+
+		bool relevant =
+			(bp->type == GDB_WATCH && write) ||
+			(bp->type == GDB_RWATCH && !write) ||
+			(bp->type == GDB_AWATCH);
+
+		if (relevant && bp->addr < addr + len && addr < bp->addr + bp->kind) {
+			bp->tripped = true;
+			/* we want to use addr, but use bp->addr if addr out of range */
+			bp->trip_addr = addr >= bp->addr ? addr : bp->addr;
+		}
+	}
 }
 
 /* parse a [host]:<port> string into a socket address
@@ -343,6 +427,13 @@ static bool gdb_server_select(struct gdb_server *gdb, struct timeval *tv)
 
 			/* reset relevant variables */
 
+			gdb->ctrlc = false;
+			while (gdb->breakpoints) {
+				struct gdb_breakpoint *bp = gdb->breakpoints;
+				gdb->breakpoints = bp->next;
+				free(bp);
+			}
+
 			gdb->waiting_on_ack = false;
 			gdb->use_acks = true;
 			gdb->supported = 0;
@@ -469,6 +560,10 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 				/* resend buffer */
 				gdb_server_send_buffer(gdb);
 			}
+			if (*p == gdb_c_ctrlc) {
+				/* Ctrl-C outside of a packet, request Ctrl-C in program */
+				gdb->ctrlc = true;
+			}
 			if (*p == gdb_c_start) {
 				/* found a packet start, discard it */
 				return p;
@@ -487,6 +582,8 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 enum gdb_error {
 	GDB_ERR_ARGUMENT,
 	GDB_ERR_NOT_FOUND,
+	GDB_ERR_NOT_IMPLEMENTED,
+	GDB_ERR_OUT_OF_MEMORY,
 };
 
 static void gdb_write_start(struct gdb_server *gdb);
@@ -497,6 +594,7 @@ static void gdb_write_bin(struct gdb_server *gdb, const uint8_t *data, size_t le
 
 static void gdb_write_unsupported(struct gdb_server *gdb);
 static void gdb_write_ok(struct gdb_server *gdb);
+static void gdb_write_stop(struct gdb_server *gdb, enum gdb_breakpoint_type type, unsigned long addr);
 
 static void gdb_write_err(struct gdb_server *gdb, enum gdb_error err);
 static void gdb_write_errf(struct gdb_server *gdb, enum gdb_error err, const char *fmt, ...) GDB_ATTR_FORMAT(printf, 3, 4);
@@ -610,6 +708,67 @@ static void gdb_write_ok(struct gdb_server *gdb)
 	gdb_write_end(gdb);
 }
 
+static void gdb_write_stop(struct gdb_server *gdb, enum gdb_breakpoint_type type, unsigned long addr)
+{
+	/* unix signal values used here */
+	const unsigned int sigint = 0x02;
+	const unsigned int sigtrap = 0x05;
+
+	/* should we put the address in the stop reply? */
+	bool use_addr =
+		type == GDB_WATCH || type == GDB_RWATCH || type == GDB_AWATCH;
+	/* should we use a stop reply reason? */
+	bool use_reason =
+		(type == GDB_SWBREAK && (gdb->supported & GDB_S_SWBREAK)) ||
+		(type == GDB_HWBREAK && (gdb->supported & GDB_S_HWBREAK)) ||
+		use_addr;
+
+	/* use SIGTRAP by default for breakpoints */
+	unsigned int signal = sigtrap;
+	if (type == GDB_STOP_CTRLC) {
+		/* but use SIGINT for Ctrl-C */
+		signal = sigint;
+	}
+
+	/* stop the program */
+	gdb->state = GDB_STATE_STOP;
+
+	/* send gdb a reason why we stopped */
+	gdb_write_start(gdb);
+	if (use_reason) {
+		const char *reason = "unknown";
+		switch (type) {
+		case GDB_SWBREAK:
+			reason = "swbreak";
+			break;
+		case GDB_HWBREAK:
+			reason = "hwbreak";
+			break;
+		case GDB_WATCH:
+			reason = "watch";
+			break;
+		case GDB_RWATCH:
+			reason = "rwatch";
+			break;
+		case GDB_AWATCH:
+			reason = "awatch";
+			break;
+		default:
+			/* not reachable: use_reason is true */
+			break;
+		}
+
+		if (use_addr) {
+			gdb_writef(gdb, "T%02x%s:%lx;", signal, reason, addr);
+		} else {
+			gdb_writef(gdb, "T%02x%s:;", signal, reason);
+		}
+	} else {
+		gdb_writef(gdb, "S%02x", signal);
+	}
+	gdb_write_end(gdb);
+}
+
 /* write an entire error packet */
 static void gdb_write_err(struct gdb_server *gdb, enum gdb_error err)
 {
@@ -641,6 +800,12 @@ static void gdb_write_errfv(struct gdb_server *gdb, enum gdb_error err, const ch
 			break;
 		case GDB_ERR_NOT_FOUND:
 			msg = "not found";
+			break;
+		case GDB_ERR_NOT_IMPLEMENTED:
+			msg = "not implemented";
+			break;
+		case GDB_ERR_OUT_OF_MEMORY:
+			msg = "out of memory";
 			break;
 		}
 
@@ -836,14 +1001,65 @@ static bool gdb_packet_binary(struct gdb_packet *p)
 /* why is the target stopped: ? */
 static void gdb_handle_why(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
 {
+	unsigned long pc = 0;
 	if (!gdb_packet_end(p)) {
 		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
 		return;
 	}
 
-	gdb_write_start(gdb);
-	gdb_write_str(gdb, "S05");
-	gdb_write_end(gdb);
+	if (gdb->b->get_pc) {
+		pc = gdb->b->get_pc(gdb->b->ctx);
+	}
+
+	gdb_write_stop(gdb, GDB_STOP_WHY, pc);
+}
+
+/* continue: c [addr] */
+static void gdb_handle_continue(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned long addr;
+	bool has_addr;
+
+	if (upper) {
+		/* parse the signal first (that we discard) */
+		if (!gdb_packet_scanf(p, &end, "%*02x")) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "signal");
+			return;
+		}
+		has_addr = gdb_packet_scanf(p, &end, ";%lx", &addr);
+	} else {
+		has_addr = gdb_packet_scanf(p, &end, "%lx", &addr);
+	}
+
+	if (!gdb_packet_end(p)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "address");
+		return;
+	}
+
+	/* set address and go */
+	if (has_addr) {
+		if (!gdb->b->set_pc) {
+			gdb_write_errf(gdb, GDB_ERR_NOT_IMPLEMENTED, "continue at address");
+			return;
+		}
+
+		gdb->b->set_pc(gdb->b->ctx, addr);
+	}
+
+	gdb->state = GDB_STATE_RUN;
+}
+
+/* detach target: D */
+static void gdb_handle_detach(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	if (!gdb_packet_end(p)) {
+		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
+		return;
+	}
+
+	gdb->state = GDB_STATE_RUN;
+	gdb_write_ok(gdb);
 }
 
 /* read registers: g */
@@ -888,6 +1104,19 @@ static void gdb_handle_write_registers(struct gdb_server *gdb, struct gdb_packet
 	}
 
 	gdb_write_ok(gdb);
+}
+
+/* kill target: k */
+static void gdb_handle_kill(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	if (!gdb_packet_end(p)) {
+		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
+		return;
+	}
+
+	gdb->state = GDB_STATE_KILL;
+	gdb_server_close_client(gdb);
+	gdb_server_close_listen(gdb);
 }
 
 /* memory read:  m addr, length
@@ -997,6 +1226,19 @@ static void gdb_handle_register(struct gdb_server *gdb, struct gdb_packet *p, bo
 		gdb->b->get_reg(gdb->b->ctx, gdb, reg);
 		gdb_write_end(gdb);
 	}
+}
+
+/* is this an existing process: qAttached */
+static void gdb_handle_q_attached(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	if (!gdb_packet_end(p)) {
+		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
+		return;
+	}
+
+	gdb_write_start(gdb);
+	gdb_write_str(gdb, "1");
+	gdb_write_end(gdb);
 }
 
 /* memory crc-32: qCRC: addr, length */
@@ -1111,6 +1353,9 @@ struct gdb_feature {
 
 static const struct gdb_feature gdb_features[] = {
 	{GDB_S_ERROR_MESSAGE, "error-message+", "error-message+", false},
+	{GDB_S_HWBREAK, "hwbreak+", "hwbreak+", false},
+	{GDB_S_SWBREAK, "swbreak+", "swbreak+", false},
+	{GDB_S_VCONTSUPPORTED, "vContSupported+", "vContSupported+", false},
 
 	{0, NULL, "binary-upload?", false},
 	{0, NULL, "QStartNoAckMode+", false},
@@ -1209,6 +1454,106 @@ static void gdb_handle_qxfer_features_read(struct gdb_server *gdb, struct gdb_pa
 	gdb_write_end(gdb);
 }
 
+/* step: s [addr] */
+static void gdb_handle_step(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned long addr;
+	bool has_addr;
+
+	if (upper) {
+		/* parse the signal first (that we discard) */
+		if (!gdb_packet_scanf(p, &end, "%*02x")) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "signal");
+			return;
+		}
+		has_addr = gdb_packet_scanf(p, &end, ";%lx", &addr);
+	} else {
+		has_addr = gdb_packet_scanf(p, &end, "%lx", &addr);
+	}
+
+	if (!gdb_packet_end(p)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "address");
+		return;
+	}
+
+	/* set address and go */
+	if (has_addr) {
+		if (!gdb->b->set_pc) {
+			gdb_write_errf(gdb, GDB_ERR_NOT_IMPLEMENTED, "step at address");
+			return;
+		}
+
+		gdb->b->set_pc(gdb->b->ctx, addr);
+	}
+
+	gdb->state = GDB_STATE_STEP_SETUP;
+}
+
+/* vCont supported actions: vCont? */
+static void gdb_handle_v_cont_supported(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	if (gdb->supported & GDB_S_VCONTSUPPORTED) {
+		gdb_write_start(gdb);
+		gdb_write_str(gdb, "vCont;c;C;s;S");
+		gdb_write_end(gdb);
+	} else {
+		gdb_write_ok(gdb);
+	}
+}
+
+/* verbose continue: vCont [;action[:thread-id]]... */
+static void gdb_handle_v_cont(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	bool first = true;
+	const char *action;
+	char action_to_take = 0;
+	int end;
+
+	/* eat first semicolon */
+	if (gdb_packet_end(p) || !gdb_packet_scanf(p, &end, ";")) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "action");
+	}
+
+	/* iterate through actions */
+	while ((action = gdb_packet_until(p, ";")) && *action) {
+		/* action contains more info than just the command, but
+		   we don't care about thread ids or signals so instead
+		   just look at the first letter */
+
+		/* leftmost action applies */
+		if (first) {
+			action_to_take = action[0];
+			first = false;
+		}
+	}
+
+	switch (action_to_take) {
+	case 'c':
+	case 'C':
+		gdb->state = GDB_STATE_RUN;
+		break;
+	case 's':
+	case 'S':
+		gdb->state = GDB_STATE_STEP_SETUP;
+		break;
+	}
+}
+
+/* kill process: vKill; pid */
+static void gdb_handle_v_kill(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	if (!gdb_packet_scanf(p, &end, ";%*x") || !gdb_packet_end(p)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "pid");
+		return;
+	}
+
+	gdb->state = GDB_STATE_KILL;
+	gdb_server_close_client(gdb);
+	gdb_server_close_listen(gdb);
+}
+
 /* binary memory read:  x addr, length
    binary memory write: X addr, length: data */
 static void gdb_handle_binary_memory(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
@@ -1257,6 +1602,52 @@ static void gdb_handle_binary_memory(struct gdb_server *gdb, struct gdb_packet *
 	}
 }
 
+/* remove breakpoint: z type, addr, kind
+   add breakpoint:    Z type, addr, kind */
+static void gdb_handle_breakpoint(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned int type, kind;
+	unsigned long addr;
+	if (!gdb_packet_scanf(p, &end, "%x,%lx,%x", &type, &addr, &kind)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "type, address, or kind");
+		return;
+	}
+
+	if (!(type < GDB_BREAKPOINT_TYPE_MAX)) {
+		gdb_write_errf(gdb, GDB_ERR_NOT_IMPLEMENTED, "unsupported type %i", type);
+		return;
+	}
+
+	if (upper) {
+		struct gdb_breakpoint *bp = calloc(1, sizeof(struct gdb_breakpoint));
+		if (bp) {
+			bp->type = type;
+			bp->addr = addr;
+			bp->kind = kind;
+			bp->tripped = false;
+
+			bp->next = gdb->breakpoints;
+			gdb->breakpoints = bp;
+			gdb_write_ok(gdb);
+		} else {
+			gdb_write_err(gdb, GDB_ERR_OUT_OF_MEMORY);
+		}
+
+	} else {
+		struct gdb_breakpoint **prev = &(gdb->breakpoints);
+		for (struct gdb_breakpoint *bp = *prev; bp; prev = &(bp->next), bp = bp->next) {
+			if (bp->type == type && bp->addr == addr && bp->kind == kind) {
+				*prev = bp->next;
+				free(bp);
+				gdb_write_ok(gdb);
+				return;
+			}
+		}
+		gdb_write_err(gdb, GDB_ERR_NOT_FOUND);
+	}
+}
+
 struct gdb_handler {
 	const char *cmd;
 	void (*handle)(struct gdb_server *gdb, struct gdb_packet *p, bool upper);
@@ -1264,19 +1655,31 @@ struct gdb_handler {
 
 static const struct gdb_handler gdb_handlers[] = {
 	{"?", gdb_handle_why},
+	{"c", gdb_handle_continue},
+	{"C", gdb_handle_continue},
+	{"D", gdb_handle_detach},
 	{"g", gdb_handle_read_registers},
 	{"G", gdb_handle_write_registers},
+	{"k", gdb_handle_kill},
 	{"m", gdb_handle_memory},
 	{"M", gdb_handle_memory},
 	{"p", gdb_handle_register},
 	{"P", gdb_handle_register},
+	{"qAttached", gdb_handle_q_attached},
 	{"qCRC", gdb_handle_q_crc},
 	{"qSearch:memory", gdb_handle_q_search_memory},
 	{"QStartNoAckMode", gdb_handle_q_start_no_ack_mode},
 	{"qSupported", gdb_handle_q_supported},
 	{"qXfer:features:read", gdb_handle_qxfer_features_read},
+	{"s", gdb_handle_step},
+	{"S", gdb_handle_step},
+	{"vCont?", gdb_handle_v_cont_supported},
+	{"vCont", gdb_handle_v_cont},
+	{"vKill", gdb_handle_v_kill},
 	{"x", gdb_handle_binary_memory},
 	{"X", gdb_handle_binary_memory},
+	{"z", gdb_handle_breakpoint},
+	{"Z", gdb_handle_breakpoint},
 	{ 0 },
 };
 
@@ -1295,4 +1698,50 @@ static void gdb_server_handle_packet(struct gdb_server *gdb, struct gdb_packet *
 
 	/* unknown packet */
 	gdb_write_unsupported(gdb);
+}
+
+/* evaluate our breakpoints and other stop conditions,
+   and send a stop packet if needed */
+static void gdb_server_check_for_stop(struct gdb_server *gdb)
+{
+	unsigned long pc = 0;
+
+	if (gdb->b->get_pc) {
+		pc = gdb->b->get_pc(gdb->b->ctx);
+	}
+
+	/* Ctrl-C request from gdb, handled and reset only if running */
+	if (gdb->ctrlc && gdb->state != GDB_STATE_STOP) {
+		gdb->ctrlc = false;
+		gdb_write_stop(gdb, GDB_STOP_CTRLC, pc);
+	}
+
+	/* single stepping: since we are called directly after packet handling,
+	   do this in two steps */
+	if (gdb->state == GDB_STATE_STEP_SETUP) {
+		gdb->state = GDB_STATE_STEP;
+	} else if (gdb->state == GDB_STATE_STEP) {
+		gdb_write_stop(gdb, GDB_STOP_STEP, pc);
+	}
+
+	/* address breakpoints */
+	for (struct gdb_breakpoint *bp = gdb->breakpoints; bp; bp = bp->next) {
+		bool breakpoint = bp->type == GDB_SWBREAK || bp->type == GDB_HWBREAK;
+		bool watchpoint =
+			bp->type == GDB_WATCH || bp->type == GDB_RWATCH || bp->type == GDB_AWATCH;
+
+		/* only look at breakpoints if we have a usable get_pc */
+		breakpoint = gdb->b->get_pc && breakpoint;
+
+		if (gdb->state != GDB_STATE_STOP) {
+			if (breakpoint && bp->addr == pc) {
+				gdb_write_stop(gdb, bp->type, pc);
+			} else if (watchpoint && bp->tripped) {
+				gdb_write_stop(gdb, bp->type, bp->trip_addr);
+			}
+		}
+
+		/* anything tripped now is handled above */
+		bp->tripped = false;
+	}
 }

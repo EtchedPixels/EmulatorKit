@@ -19,6 +19,20 @@ static const char *z80_target_description = MULTILINE_STRING(
 	</target>
 );
 
+/* get the address of the next instruction */
+static unsigned long z80_get_pc(void *vctx)
+{
+	Z80Context *ctx = vctx;
+	return ctx->PC;
+}
+
+/* set the address of the next instruction */
+static void z80_set_pc(void *vctx, unsigned long addr)
+{
+	Z80Context *ctx = vctx;
+	ctx->PC = addr;
+}
+
 /* GDB expects registers in this order */
 enum z80_regs {
 	R_AF,	R_BC,	R_DE,	R_HL,
@@ -175,6 +189,9 @@ struct gdb_backend *gdb_backend_z80(Z80Context *ctx)
 	backend->ctx = ctx;
 
 	backend->target_description = z80_target_description;
+
+	backend->get_pc = z80_get_pc;
+	backend->set_pc = z80_set_pc;
 
 	backend->register_max = R_REGISTER_MAX;
 	backend->get_reg = z80_get_reg;
