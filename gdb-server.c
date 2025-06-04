@@ -61,6 +61,9 @@ static const char gdb_c_ack	= '+';
 static const char gdb_c_nack	= '-';
 static const char gdb_c_start	= '$';
 static const char gdb_c_end	= '#';
+static const char gdb_c_rle	= '*';
+static const char gdb_c_escape	= '}';
+static const char gdb_c_mangle	= ' ';
 
 static bool gdb_server_parse_bind(char *bindstr, struct sockaddr_in6 *address);
 static void gdb_server_close_listen(struct gdb_server *gdb);
@@ -483,12 +486,14 @@ static char *gdb_server_handle_input(struct gdb_server *gdb)
 
 enum gdb_error {
 	GDB_ERR_ARGUMENT,
+	GDB_ERR_NOT_FOUND,
 };
 
 static void gdb_write_start(struct gdb_server *gdb);
 static void gdb_write_end(struct gdb_server *gdb);
 
 static void gdb_write_str(struct gdb_server *gdb, const char *str);
+static void gdb_write_bin(struct gdb_server *gdb, const uint8_t *data, size_t len);
 
 static void gdb_write_unsupported(struct gdb_server *gdb);
 static void gdb_write_ok(struct gdb_server *gdb);
@@ -562,6 +567,34 @@ static void gdb_write_str(struct gdb_server *gdb, const char *str)
 	gdb->output_next += len;
 }
 
+/* put an escaped binary string into the output buffer */
+static void gdb_write_bin(struct gdb_server *gdb, const uint8_t *data, size_t len)
+{
+	char *output_end = gdb->output_buf + GDB_BUFFER_SIZE;
+	while (len) {
+		uint8_t val = *data;
+
+		if (val == gdb_c_start || val == gdb_c_end || val == gdb_c_rle || val == gdb_c_escape) {
+			val ^= gdb_c_mangle;
+			if (gdb->output_next + 1 > output_end) {
+				gdb->output_overflow = true;
+				break;
+			}
+
+			*(gdb->output_next++) = gdb_c_escape;
+		}
+
+		if (gdb->output_next + 1 > output_end) {
+			gdb->output_overflow = true;
+			break;
+		}
+
+		*(gdb->output_next++) = val;
+		data++;
+		len--;
+	}
+}
+
 /* write an entire empty packet, indicating last packet is unsupported */
 static void gdb_write_unsupported(struct gdb_server *gdb)
 {
@@ -606,6 +639,9 @@ static void gdb_write_errfv(struct gdb_server *gdb, enum gdb_error err, const ch
 		case GDB_ERR_ARGUMENT:
 			msg = "bad argument";
 			break;
+		case GDB_ERR_NOT_FOUND:
+			msg = "not found";
+			break;
 		}
 
 		gdb_write_str(gdb, msg);
@@ -629,6 +665,7 @@ static const char *gdb_packet_take(struct gdb_packet *p, size_t amt);
 static bool gdb_packet_skip(struct gdb_packet *p, size_t amt);
 static bool gdb_packet_match(struct gdb_packet *p, const char *prefix);
 static const char *gdb_packet_until(struct gdb_packet *p, const char *delimiters);
+static bool gdb_packet_binary(struct gdb_packet *p);
 
 /* slightly different from scanf, used like:
 
@@ -765,6 +802,33 @@ static const char *gdb_packet_until(struct gdb_packet *p, const char *delimiters
 	return ret;
 }
 
+/* convert the rest of the packet into unescaped binary data.
+   returns true on success and leaves data in p->buf / p->len  */
+static bool gdb_packet_binary(struct gdb_packet *p)
+{
+	char *src = p->buf;
+	char *src_end = p->buf + p->len;
+	char *dest = p->buf;
+	gdb_packet_restore(p, NULL);
+
+	while (src < src_end) {
+		if (*src == gdb_c_escape) {
+			src++;
+			if (src >= src_end) {
+				/* unpaired escape */
+				return false;
+			}
+
+			*src ^= gdb_c_mangle;
+			p->len--;
+		}
+
+		*(dest++) = *(src++);
+	}
+
+	return true;
+}
+
 /* =============================== *
  * Packet Handling and Debug Logic *
  * =============================== */
@@ -785,15 +849,243 @@ static void gdb_handle_why(struct gdb_server *gdb, struct gdb_packet *p, bool up
 /* read registers: g */
 static void gdb_handle_read_registers(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
 {
+	if (!gdb->b->get_reg) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
 	if (!gdb_packet_end(p)) {
 		gdb_write_err(gdb, GDB_ERR_ARGUMENT);
 		return;
 	}
 
 	gdb_write_start(gdb);
-	for (int i = 0; i < 13; i++) {
-		gdb_writef(gdb, "%04x", gdb_swap_u16(0x1234));
+	for (unsigned int r = 0; r < gdb->b->register_max; r++) {
+		gdb->b->get_reg(gdb->b->ctx, gdb, r);
 	}
+	gdb_write_end(gdb);
+}
+
+/* write registers: G data */
+static void gdb_handle_write_registers(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	if (!gdb->b->set_reg) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
+	for (unsigned int r = 0; r < gdb->b->register_max; r++) {
+		gdb_packet_restore(p, NULL);
+		if (!gdb->b->set_reg(gdb->b->ctx, p, r)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "register values");
+			return;
+		}
+	}
+
+	if (!gdb_packet_end(p)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "register values");
+		return;
+	}
+
+	gdb_write_ok(gdb);
+}
+
+/* memory read:  m addr, length
+   memory write: M addr, length: data */
+static void gdb_handle_memory(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned long addr, len;
+
+	if ((upper && !gdb->b->write_mem) || (!upper && !gdb->b->read_mem)) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
+	if (!gdb_packet_scanf(p, &end, "%lx,%lx", &addr, &len)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "address or length");
+		return;
+	}
+
+	if (upper) {
+		if (!gdb_packet_scanf(p, &end, ":") || p->len != 2 * len) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "data");
+			return;
+		}
+
+		while (len) {
+			uint8_t val;
+			gdb_packet_scanf(p, &end, "%02hhx", &val);
+			gdb->b->write_mem(gdb->b->ctx, addr, val);
+			addr++;
+			len--;
+		}
+		gdb_write_ok(gdb);
+	} else {
+		if (!gdb_packet_end(p)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "length");
+			return;
+		}
+
+		gdb_write_start(gdb);
+		while (len) {
+			uint8_t val = gdb->b->read_mem(gdb->b->ctx, addr);
+			gdb_writef(gdb, "%02x", val);
+			addr++;
+			len--;
+		}
+		gdb_write_end(gdb);
+	}
+}
+
+/* register read:  p n
+   register write: P n=r */
+static void gdb_handle_register(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned int reg;
+
+	if (upper) {
+		if (!gdb->b->set_reg) {
+			gdb_write_unsupported(gdb);
+			return;
+		}
+
+		if (!gdb_packet_scanf(p, &end, "%x=", &reg)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "register");
+			return;
+		}
+
+		if (reg >= gdb->b->register_max) {
+			gdb_write_errf(gdb, GDB_ERR_NOT_FOUND, "register %i", reg);
+			return;
+		}
+
+		if (!gdb->b->set_reg(gdb->b->ctx, p, reg)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "value");
+			return;
+		}
+
+		if (!gdb_packet_end(p)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "value");
+			return;
+		}
+
+		gdb_write_ok(gdb);
+	} else {
+		if (!gdb->b->get_reg) {
+			gdb_write_unsupported(gdb);
+			return;
+		}
+
+		if (!gdb_packet_scanf(p, &end, "%x", &reg)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "register");
+			return;
+		}
+
+		if (!gdb_packet_end(p)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "register");
+			return;
+		}
+
+		if (reg >= gdb->b->register_max) {
+			gdb_write_errf(gdb, GDB_ERR_NOT_FOUND, "register %i", reg);
+			return;
+		}
+
+		gdb_write_start(gdb);
+		gdb->b->get_reg(gdb->b->ctx, gdb, reg);
+		gdb_write_end(gdb);
+	}
+}
+
+/* memory crc-32: qCRC: addr, length */
+static void gdb_handle_q_crc(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned long addr, len;
+
+	if (!gdb->b->read_mem) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
+	if (!gdb_packet_scanf(p, &end, ":%lx,%lx", &addr, &len) || !gdb_packet_end(p)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "address or length");
+		return;
+	}
+
+	/* MSB-first CRC32 from IEEE 802.3, inverted input, normal output */
+	uint32_t crc = ~0;
+	while (len) {
+		uint32_t val = gdb->b->read_mem(gdb->b->ctx, addr);
+		addr++;
+		len--;
+
+		crc ^= val << 24;
+
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+		crc = (crc << 1) ^ ((crc & (1 << 31)) ? 0x04c11db7 : 0);
+	}
+
+	gdb_write_start(gdb);
+	gdb_writef(gdb, "C%08x", crc);
+	gdb_write_end(gdb);
+}
+
+/* memory search: qSearch:memory: address; length; pattern */
+static void gdb_handle_q_search_memory(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned long addr, len;
+
+	if (!gdb->b->read_mem) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
+	if (!gdb_packet_scanf(p, &end, ":%lx;%lx;", &addr, &len)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "address or length");
+		return;
+	}
+
+	if (!gdb_packet_binary(p) || p->len == 0) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "pattern");
+		return;
+	}
+
+	uint8_t *pat = (uint8_t *)p->buf;
+	uint8_t *pat_start = pat;
+	uint8_t *pat_end = pat + p->len;
+	while (len) {
+		uint8_t val = gdb->b->read_mem(gdb->b->ctx, addr);
+		addr++;
+		len--;
+
+		if (*pat == val) {
+			pat++;
+			if (pat >= pat_end) {
+				/* we found it, at addr - p->len */
+				gdb_write_start(gdb);
+				gdb_writef(gdb, "1,%lx", addr - p->len);
+				gdb_write_end(gdb);
+				return;
+			}
+		} else {
+			pat = pat_start;
+		}
+	}
+
+	/* we did not find it */
+	gdb_write_start(gdb);
+	gdb_write_str(gdb, "0");
 	gdb_write_end(gdb);
 }
 
@@ -820,7 +1112,9 @@ struct gdb_feature {
 static const struct gdb_feature gdb_features[] = {
 	{GDB_S_ERROR_MESSAGE, "error-message+", "error-message+", false},
 
+	{0, NULL, "binary-upload?", false},
 	{0, NULL, "QStartNoAckMode+", false},
+	{0, NULL, "qXfer:features:read?", false},
 
 	{ .end = true },
 };
@@ -863,6 +1157,106 @@ static void gdb_handle_q_supported(struct gdb_server *gdb, struct gdb_packet *p,
 	gdb_write_end(gdb);
 }
 
+/* read target description: qXfer:features:read: annex: offset, length */
+static void gdb_handle_qxfer_features_read(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	char annex[64];
+	unsigned long offset, len;
+
+	if (!gdb->b->target_description) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
+	if (!gdb_packet_scanf(p, &end, ":%63[^:]:%lx,%lx", annex, &offset, &len) || !gdb_packet_end(p)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "annex, offset, or length");
+		return;
+	}
+
+	if (strcmp(annex, "target.xml") != 0) {
+		gdb_write_errf(gdb, GDB_ERR_NOT_FOUND, "annex %s", annex);
+		return;
+	}
+
+	/* some buffer math: leave room for $m and #CS\0 */
+	size_t max_len = GDB_BUFFER_SIZE - 6;
+	/* pessimistically, all characters need to be escaped */
+	max_len /= 2;
+	if (len > max_len) {
+		len = max_len;
+	}
+
+	/* fit offset, amt into the available data */
+	size_t source_len = strlen(gdb->b->target_description);
+	size_t amt = len;
+	if (offset > source_len) {
+		offset = source_len;
+	}
+	if (offset + amt > source_len) {
+		amt = source_len - offset;
+	}
+
+	gdb_write_start(gdb);
+	if (amt < len) {
+		/* this is all of it */
+		gdb_write_str(gdb, "l");
+	} else {
+		/* there is still some more */
+		gdb_write_str(gdb, "m");
+	}
+	gdb_write_bin(gdb, (const uint8_t *)gdb->b->target_description, amt);
+	gdb_write_end(gdb);
+}
+
+/* binary memory read:  x addr, length
+   binary memory write: X addr, length: data */
+static void gdb_handle_binary_memory(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	unsigned long addr, len;
+
+	if ((upper && !gdb->b->write_mem) || (!upper && !gdb->b->read_mem)) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
+	if (!gdb_packet_scanf(p, &end, "%lx,%lx", &addr, &len)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "address or length");
+		return;
+	}
+
+	if (upper) {
+		if (!gdb_packet_scanf(p, &end, ":") || !gdb_packet_binary(p) || p->len != len) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "data");
+			return;
+		}
+
+		while (p->len) {
+			gdb->b->write_mem(gdb->b->ctx, addr, *(p->buf));
+			addr++;
+			p->buf++;
+			p->len--;
+		}
+		gdb_write_ok(gdb);
+	} else {
+		if (!gdb_packet_end(p)) {
+			gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "length");
+			return;
+		}
+
+		gdb_write_start(gdb);
+		gdb_write_str(gdb, "b");
+		while (len) {
+			uint8_t val = gdb->b->read_mem(gdb->b->ctx, addr);
+			gdb_write_bin(gdb, &val, 1);
+			addr++;
+			len--;
+		}
+		gdb_write_end(gdb);
+	}
+}
+
 struct gdb_handler {
 	const char *cmd;
 	void (*handle)(struct gdb_server *gdb, struct gdb_packet *p, bool upper);
@@ -871,8 +1265,18 @@ struct gdb_handler {
 static const struct gdb_handler gdb_handlers[] = {
 	{"?", gdb_handle_why},
 	{"g", gdb_handle_read_registers},
+	{"G", gdb_handle_write_registers},
+	{"m", gdb_handle_memory},
+	{"M", gdb_handle_memory},
+	{"p", gdb_handle_register},
+	{"P", gdb_handle_register},
+	{"qCRC", gdb_handle_q_crc},
+	{"qSearch:memory", gdb_handle_q_search_memory},
 	{"QStartNoAckMode", gdb_handle_q_start_no_ack_mode},
 	{"qSupported", gdb_handle_q_supported},
+	{"qXfer:features:read", gdb_handle_qxfer_features_read},
+	{"x", gdb_handle_binary_memory},
+	{"X", gdb_handle_binary_memory},
 	{ 0 },
 };
 

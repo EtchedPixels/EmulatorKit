@@ -49,6 +49,7 @@
 #include "amd9511.h"
 #include "ef9345.h"
 #include "ef9345_render.h"
+#define GDB_BACKEND_Z80
 #include "gdb-server.h"
 #include "ide.h"
 #include "ppide.h"
@@ -3443,7 +3444,7 @@ int main(int argc, char *argv[])
 	pio_reset();
 
 	if (gdb_bind) {
-		gdb = gdb_server_create(calloc(1, sizeof(struct gdb_backend)), gdb_bind, gdb_stopped);
+		gdb = gdb_server_create(gdb_backend_z80(&cpu_z80), gdb_bind, gdb_stopped);
 		if (!gdb) {
 			fprintf(stderr, "rc2014: could not bind gdb server to %s.\n", gdb_bind);
 			exit(EXIT_FAILURE);

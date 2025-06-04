@@ -50,4 +50,23 @@ bool _gdb_packet_scanfv(struct gdb_packet *p, int *end, const char *fmt, va_list
 struct gdb_backend {
 	void *ctx;
 	void (*free)(void *ctx);
+
+	/* target description xml */
+	const char *target_description;
+
+	/* get and set registers */
+	unsigned int register_max;
+	void (*get_reg)(void *ctx, struct gdb_server *gdb, unsigned int reg);
+	bool (*set_reg)(void *ctx, struct gdb_packet *p, unsigned int reg);
+
+	/* access memory */
+	uint8_t (*read_mem)(void *ctx, unsigned long addr);
+	void (*write_mem)(void *ctx, unsigned long addr, uint8_t val);
 };
+
+/* backend factories */
+
+#ifdef GDB_BACKEND_Z80
+#include "libz80/z80.h"
+struct gdb_backend *gdb_backend_z80(Z80Context *ctx);
+#endif
