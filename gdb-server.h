@@ -24,6 +24,7 @@ void gdb_server_notify(struct gdb_server *gdb, unsigned long addr, unsigned int 
 
 /* writef and friends write big-endian numbers. for little-endian, use swaps */
 #define gdb_swap_u16(v) (((v & 0xff) << 8) | ((v & 0xff00) >> 8))
+#define gdb_swap_u32(v) ((gdb_swap_u16(v & 0xffff) << 16) | gdb_swap_u16((v & 0xffff0000) >> 16))
 
 /* helpers for writing packets */
 
@@ -82,6 +83,16 @@ struct gdb_backend {
 };
 
 /* backend factories */
+
+#ifdef GDB_BACKEND_RV32
+struct MiniRV32IMAState;
+struct gdb_context_rv32 {
+	struct MiniRV32IMAState *cpu;
+	uint32_t (*read8)(uint32_t addr, uint32_t *trap, uint32_t *rval);
+	uint32_t (*write8)(uint32_t addr, uint32_t val, uint32_t *trap, uint32_t *rval);
+};
+struct gdb_backend *gdb_backend_rv32(struct gdb_context_rv32 *ctx);
+#endif
 
 #ifdef GDB_BACKEND_Z80
 #include "libz80/z80.h"

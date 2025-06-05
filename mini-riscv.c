@@ -17,6 +17,9 @@
 #include <unistd.h>
 #include <errno.h>
 
+#define GDB_BACKEND_RV32
+#include "gdb-server.h"
+
 #include "riscv-disas.h"
 
 #include "sdcard.h"
@@ -85,6 +88,8 @@ static void disassemble(uint32_t ir, uint32_t addr);
 struct MiniRV32IMAState cpu;
 
 static uint16_t lastch = 0xFFFF;
+
+static struct gdb_server *gdb;
 
 int check_chario(void)
 {
@@ -219,8 +224,12 @@ uint32_t rv32_glue(uint32_t pc, uint32_t ir, uint32_t trap)
 }
 
 /* FIXME: wrong for reads overlapping end */
-static uint8_t *mem_addr(uint32_t addr, uint32_t *trap, uint32_t *rval, unsigned is_write)
+static uint8_t *mem_addr(uint32_t addr, uint32_t *trap, uint32_t *rval, unsigned len, unsigned is_write)
 {
+	if (gdb) {
+		gdb_server_notify(gdb, addr, len, is_write);
+	}
+
 	if (addr >= 0x3FC80000 && addr <= 0x3FCE0000)
 		return ram + (addr & 0x3FFFF);
 	if (addr >= 0x4038000 && addr <= 0x403E0000 && !is_write) {
@@ -239,7 +248,7 @@ static uint8_t *mem_addr(uint32_t addr, uint32_t *trap, uint32_t *rval, unsigned
 
 static uint32_t mem_read_8(uint32_t addr, uint32_t *trap, uint32_t *rval)
 {
-	uint8_t *p = mem_addr(addr, trap, rval, 0);
+	uint8_t *p = mem_addr(addr, trap, rval, 1, 0);
 	if (p)
 		return *p;
 	else
@@ -248,7 +257,7 @@ static uint32_t mem_read_8(uint32_t addr, uint32_t *trap, uint32_t *rval)
 
 static uint32_t mem_read_16(uint32_t addr, uint32_t *trap, uint32_t *rval)
 {
-	uint8_t *p = mem_addr(addr, trap, rval, 0);
+	uint8_t *p = mem_addr(addr, trap, rval, 2, 0);
 	if (p == NULL)
 		return 0;
 	return *p + (p[1] << 8);
@@ -256,7 +265,7 @@ static uint32_t mem_read_16(uint32_t addr, uint32_t *trap, uint32_t *rval)
 
 static uint32_t mem_read_32(uint32_t addr, uint32_t *trap, uint32_t *rval)
 {
-	uint8_t *p = mem_addr(addr, trap, rval, 0);
+	uint8_t *p = mem_addr(addr, trap, rval, 4, 0);
 	if (p == NULL)
 		return 0;
 	return *p + (p[1] << 8) + (p[2] << 16) + (p[3] << 24);
@@ -264,7 +273,7 @@ static uint32_t mem_read_32(uint32_t addr, uint32_t *trap, uint32_t *rval)
 
 static uint32_t mem_write_8(uint32_t addr, uint32_t val, uint32_t *trap, uint32_t *rval)
 {
-	uint8_t *p = mem_addr(addr, trap, rval, 1);
+	uint8_t *p = mem_addr(addr, trap, rval, 1, 1);
 	if (p == NULL)
 		return 0;
 	*p = val;
@@ -273,7 +282,7 @@ static uint32_t mem_write_8(uint32_t addr, uint32_t val, uint32_t *trap, uint32_
 
 static unsigned mem_write_16(uint32_t addr, uint32_t val, uint32_t *trap, uint32_t *rval)
 {
-	uint8_t *p = mem_addr(addr, trap, rval, 1);
+	uint8_t *p = mem_addr(addr, trap, rval, 2, 1);
 	if (p == NULL)
 		return 0;
 	*p = val;
@@ -283,7 +292,7 @@ static unsigned mem_write_16(uint32_t addr, uint32_t val, uint32_t *trap, uint32
 
 static unsigned mem_write_32(uint32_t addr, uint32_t val, uint32_t *trap, uint32_t *rval)
 {
-	uint8_t *p = mem_addr(addr, trap, rval, 1);
+	uint8_t *p = mem_addr(addr, trap, rval, 4, 1);
 	if (p == NULL)
 		return 0;
 	*p = val;
@@ -329,15 +338,24 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "mini-riscv.rom";
 	char *sdpath = NULL;
+	char *gdb_bind = NULL;
+	bool gdb_stopped = false;
 //	unsigned int cycles = 0;
 
-	while ((opt = getopt(argc, argv, "r:d:S:")) != -1) {
+	while ((opt = getopt(argc, argv, "r:d:G:S:")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
 			break;
 		case 'd':
 			trace = atoi(optarg);
+			break;
+		case 'G':
+			if (strcmp(optarg, "s") == 0 || strcmp(optarg, "S") == 0) {
+				gdb_stopped = true;
+			} else {
+				gdb_bind = optarg;
+			}
 			break;
 		case 'S':
 			sdpath = optarg;
@@ -359,6 +377,15 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
+
+	if (gdb_bind) {
+		struct gdb_context_rv32 gdb_context = {&cpu, mem_read_8, mem_write_8};
+		gdb = gdb_server_create(gdb_backend_rv32(&gdb_context), gdb_bind, gdb_stopped);
+		if (!gdb) {
+			fprintf(stderr, "mini-riscv: could not bind gdb server to %s.\n", gdb_bind);
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	if (sdpath) {
 		sdcard = sd_create("sd0");
@@ -408,7 +435,14 @@ int main(int argc, char *argv[])
 		uint32_t elapsed = 0;
 
 		for (j = 0; j < 100; j++) {
-			uint32_t ret = MiniRV32IMAStep(&cpu, ram, 0, elapsed, 1024);
+			uint32_t ret;
+			if (gdb) {
+				gdb_server_step(gdb, &done);
+				ret = MiniRV32IMAStep(&cpu, ram, 0, elapsed, 1);
+			} else {
+				ret = MiniRV32IMAStep(&cpu, ram, 0, elapsed, 1024);
+			}
+
 			switch(ret) {
 			case 0:
 			case 1:
@@ -429,5 +463,10 @@ int main(int argc, char *argv[])
 		nanosleep(&tc, NULL);
 		/* poll_irq_event(); */
 	}
+
+	if (gdb) {
+		gdb_server_free(gdb);
+	}
+
 	exit(0);
 }

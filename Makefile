@@ -227,8 +227,8 @@ poly88: poly88.o intel_8080_emulator.o event_sdl2.o i8251.o ide.o ttycon.o ascii
 mini11: mini11.o 68hc11.o sdcard.o 6522.o
 	cc -g3 mini11.o sdcard.o 6522.o 68hc11.o -o mini11
 
-mini-riscv: mini-riscv.o riscv-disas.o sdcard.o
-	cc -g3 mini-riscv.o riscv-disas.o sdcard.o -o mini-riscv
+mini-riscv: mini-riscv.o gdb-backend-rv32.o gdb-server.o riscv-disas.o sdcard.o
+	cc -g3 mini-riscv.o gdb-backend-rv32.o gdb-server.o riscv-disas.o sdcard.o -o mini-riscv
 
 mini-riscv.o: mini-riscv.c riscv/mini-rv32ima.h riscv-disas.h
 	$(CC) -c $(CFLAGS) -std=gnu2x mini-riscv.c
