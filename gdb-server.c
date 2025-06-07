@@ -13,7 +13,8 @@
 
 #include "gdb-server.h"
 
-#define GDB_BUFFER_SIZE 512
+/* buffer must fit largest target.xml and largest monitor command output */
+#define GDB_BUFFER_SIZE 0x2000
 
 enum gdb_state {
 	GDB_STATE_STOP,
@@ -1282,6 +1283,112 @@ static void gdb_handle_q_crc(struct gdb_server *gdb, struct gdb_packet *p, bool 
 	gdb_write_end(gdb);
 }
 
+/* monitor command helpers, defined below */
+static bool gdb_monitor_cmd_iter(struct gdb_server *gdb, const struct gdb_monitor_cmd **cmd);
+static bool gdb_monitor_cmd_match(const struct gdb_monitor_cmd *cmd, struct gdb_packet *p);
+
+/* remote command: qRcmd, command */
+static void gdb_handle_q_rcmd(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
+{
+	int end;
+	uint8_t val;
+
+	/* if the backend has no monitor commands, this is unsupported */
+	if (!gdb->b->commands) {
+		gdb_write_unsupported(gdb);
+		return;
+	}
+
+	if (!gdb_packet_scanf(p, &end, ",")) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "command");
+		return;
+	}
+
+	/* command is a whole lotta hex-encoded bytes that we decode here.
+	   decoding into the same buffer is safe as it shrinks */
+	struct gdb_packet decoded = *p;
+	decoded.len = 0;
+	while (gdb_packet_scanf(p, &end, "%02hhx", &val)) {
+		decoded.buf[decoded.len] = val;
+		decoded.len++;
+	}
+
+	/* make sure the stored first character is up to date */
+	decoded.c = decoded.buf[0];
+
+	/* if that didn't eat everything, something went wrong */
+	if (!gdb_packet_end(p)) {
+		gdb_write_errf(gdb, GDB_ERR_ARGUMENT, "command");
+		return;
+	}
+
+	/* treat an empty command as "help" */
+	if (decoded.len == 0) {
+		decoded.len = 4;
+		memcpy(decoded.buf, "help", decoded.len);
+		decoded.c = decoded.buf[0];
+	}
+
+	/* response, even on failure, should be similarly-encoded string.
+	   start the response packet and store the start to encode later */
+	gdb_write_start(gdb);
+	char *output_start = gdb->output_next;
+
+	/* look for a matching command */
+	const struct gdb_monitor_cmd *cmd = NULL;
+	while (gdb_monitor_cmd_iter(gdb, &cmd)) {
+		if (gdb_monitor_cmd_match(cmd, &decoded)) {
+			cmd->handle(gdb->b->ctx, gdb, &decoded);
+			break;
+		}
+	}
+
+	/* if we never matched anything, write an error */
+	if (!cmd || !cmd->cmd) {
+		gdb_writef(gdb, "error: unknown command\n");
+	}
+
+	/* we'll encode the response in-place, expanding from the end */
+	char *raw = gdb->output_next;
+	char *encoded_end = raw + (raw - output_start);
+	gdb->output_next = encoded_end;
+	if (encoded_end >= gdb->output_buf + GDB_BUFFER_SIZE) {
+		/* not enough room for encoded output
+		   >= to account for 0 terminator swaps below */
+		gdb->output_overflow = true;
+		gdb->output_next = output_start;
+		gdb_write_end(gdb);
+		return;
+	}
+
+	/* zip back from raw/encoded, encoding as we go */
+	while (raw > output_start) {
+		/* store the character currently at output_next */
+		char c = gdb->output_next[0];
+
+		/* move back one */
+		raw--;
+		gdb->output_next -= 2;
+
+		/* write out the hex encoding */
+		gdb_writef(gdb, "%02x", *raw);
+
+		/* restore output_next and also the character at the end (now a 0) */
+		gdb->output_next[0] = c;
+		gdb->output_next -= 2;
+	}
+
+	/* reset output_next to point to the end of encoded data */
+	gdb->output_next = encoded_end;
+
+	/* if after all that there was no output, write ok instead */
+	if (gdb->output_next == output_start) {
+		gdb_write_str(gdb, "OK");
+	}
+
+	gdb_write_end(gdb);
+}
+
 /* memory search: qSearch:memory: address; length; pattern */
 static void gdb_handle_q_search_memory(struct gdb_server *gdb, struct gdb_packet *p, bool upper)
 {
@@ -1667,6 +1774,7 @@ static const struct gdb_handler gdb_handlers[] = {
 	{"P", gdb_handle_register},
 	{"qAttached", gdb_handle_q_attached},
 	{"qCRC", gdb_handle_q_crc},
+	{"qRcmd", gdb_handle_q_rcmd},
 	{"qSearch:memory", gdb_handle_q_search_memory},
 	{"QStartNoAckMode", gdb_handle_q_start_no_ack_mode},
 	{"qSupported", gdb_handle_q_supported},
@@ -1744,4 +1852,104 @@ static void gdb_server_check_for_stop(struct gdb_server *gdb)
 		/* anything tripped now is handled above */
 		bp->tripped = false;
 	}
+}
+
+/* ================ *
+ * Monitor Commands *
+ * ================ */
+
+static const char* const gdb_monitor_help_help =
+	"list commands, or print help for given command\n"
+	"Usage: monitor help [command]\n";
+
+static void gdb_monitor_help(void *ctx, struct gdb_server *gdb, struct gdb_packet *p)
+{
+	const struct gdb_monitor_cmd *cmd = NULL;
+
+	if (gdb_packet_end(p)) {
+		/* list commands */
+		gdb_writef(gdb, "Available monitor commands:\n\n");
+	}
+
+	while (gdb_monitor_cmd_iter(gdb, &cmd)) {
+		/* parse out the summary */
+		unsigned int summary_len;
+		const char *endline = strchr(cmd->help, '\n');
+		if (endline) {
+			summary_len = endline - cmd->help;
+		} else {
+			summary_len = strlen(cmd->help);
+		}
+
+		if (gdb_packet_end(p)) {
+			/* list commands, write the summary only */
+			gdb_writef(gdb, "  %-10s  %.*s\n", cmd->cmd, summary_len, cmd->help);
+		} else if (gdb_monitor_cmd_match(cmd, p)) {
+			/* detailed help, write the summary first */
+			gdb_writef(gdb, "%s: %.*s\n", cmd->cmd, summary_len, cmd->help);
+			if (cmd->help[summary_len + 1]) {
+				/* there is extended help, use it */
+				gdb_writef(gdb, "%s", &(cmd->help[summary_len + 1]));
+			}
+			break;
+		}
+	}
+}
+
+/* common monitor commands */
+static const struct gdb_monitor_cmd gdb_monitor_common[] = {
+	{"help", gdb_monitor_help_help, gdb_monitor_help},
+	{ 0 },
+};
+
+/* iterate over available commands. used like:
+   struct gdb_monitor_cmd *cmd = NULL;
+   while (gdb_monitor_cmd_iter(gdb, &cmd)) {
+       [...]
+   }
+ */
+static bool gdb_monitor_cmd_iter(struct gdb_server *gdb, const struct gdb_monitor_cmd **cmd)
+{
+	if (*cmd == NULL) {
+		/* initialize iterator */
+		*cmd = gdb_monitor_common;
+	} else {
+		/* go to next in array */
+		(*cmd)++;
+
+		/* if this is at the end, check to see if it's the end of common */
+		if (!(*cmd)->cmd) {
+			/* find the end of common */
+			const struct gdb_monitor_cmd *end = gdb_monitor_common;
+			while (end->cmd) {
+				end++;
+			}
+
+			/* if this is the end of common, move on to the backend */
+			if ((*cmd) == end) {
+				*cmd = gdb->b->commands;
+			}
+		}
+	}
+
+	/* consider the command valid if it's not null and cmd is set */
+	return (*cmd) && (*cmd)->cmd;
+}
+
+/* test a command definition for a match on the packet.
+   this consumes the part of the packet that matches. */
+static bool gdb_monitor_cmd_match(const struct gdb_monitor_cmd *cmd, struct gdb_packet *p)
+{
+	int end;
+	struct gdb_packet saved = *p;
+	if (gdb_packet_match(p, cmd->cmd)) {
+		/* prefix match, but we also need to check the end for either
+		   whitespace or end of packet */
+		if (gdb_packet_end(p) || (gdb_packet_scanf(p, &end, " ") && end)) {
+			/* a good match */
+			return true;
+		}
+	}
+	gdb_packet_restore(p, &saved);
+	return false;
 }

@@ -178,6 +178,52 @@ static void z80_write_mem(void *vctx, unsigned long addr, uint8_t val)
 	ctx->memWrite(ctx->memParam, addr, val);
 }
 
+static const char* const z80_ioread_help =
+	"read from an IO port\n"
+	"Usage: monitor ioread <hex-port>\n";
+
+static void z80_ioread(void *vctx, struct gdb_server *gdb, struct gdb_packet *p)
+{
+	Z80Context *ctx = vctx;
+	int end;
+	unsigned int port;
+
+	if (!gdb_packet_scanf(p, &end, "%x", &port) || !gdb_packet_end(p)) {
+		gdb_writef(gdb, "error: bad port\n");
+		return;
+	}
+
+	uint8_t val = ctx->ioRead(ctx->ioParam, port);
+
+	gdb_writef(gdb, "%02x\n", val);
+}
+
+static const char* const z80_iowrite_help =
+	"write to an IO port\n"
+	"Usage: monitor iowrite <hex-port> <hex-value>\n";
+
+static void z80_iowrite(void *vctx, struct gdb_server *gdb, struct gdb_packet *p)
+{
+	Z80Context *ctx = vctx;
+	int end;
+	unsigned int port;
+	unsigned int val;
+
+	if (!gdb_packet_scanf(p, &end, "%x %x", &port, &val) || !gdb_packet_end(p)) {
+		gdb_writef(gdb, "error: bad port or value\n");
+		return;
+	}
+
+	ctx->ioWrite(ctx->ioParam, port, val);
+}
+
+/* z80 specific monitor commands */
+static const struct gdb_monitor_cmd z80_commands[] = {
+	{"ioread", z80_ioread_help, z80_ioread},
+	{"iowrite", z80_iowrite_help, z80_iowrite},
+	{ 0 },
+};
+
 /* construct the z80 backend */
 struct gdb_backend *gdb_backend_z80(Z80Context *ctx)
 {
@@ -199,6 +245,8 @@ struct gdb_backend *gdb_backend_z80(Z80Context *ctx)
 
 	backend->read_mem = z80_read_mem;
 	backend->write_mem = z80_write_mem;
+
+	backend->commands = z80_commands;
 
 	return backend;
 }

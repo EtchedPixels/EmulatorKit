@@ -47,6 +47,15 @@ bool _gdb_packet_scanfv(struct gdb_packet *p, int *end, const char *fmt, va_list
 
 /* backend interface */
 
+struct gdb_monitor_cmd {
+	/* command name */
+	const char *cmd;
+	/* help text, first line should be summary */
+	const char *help;
+	/* handle command with arguments in p */
+	void (*handle)(void *ctx, struct gdb_server *gdb, struct gdb_packet *p);
+};
+
 struct gdb_backend {
 	void *ctx;
 	void (*free)(void *ctx);
@@ -67,6 +76,9 @@ struct gdb_backend {
 	/* access memory */
 	uint8_t (*read_mem)(void *ctx, unsigned long addr);
 	void (*write_mem)(void *ctx, unsigned long addr, uint8_t val);
+
+	/* monitor commands, 0-terminated */
+	const struct gdb_monitor_cmd *commands;
 };
 
 /* backend factories */
