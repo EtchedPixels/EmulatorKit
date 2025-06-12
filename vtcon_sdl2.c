@@ -138,10 +138,7 @@ static int vtcon_refresh(void *dev, void *evp)
             switch(ev->window.event) {
                 case SDL_WINDOWEVENT_SHOWN:
                 case SDL_WINDOWEVENT_SIZE_CHANGED:
-                    if (v->type == CON_DUMB)
-                        vtwipe(v);
-                    else
-                        vtraster(v);
+                    vtrender(v);
             }
         }
     }
@@ -188,6 +185,8 @@ static void vtput(struct vtcon *v, uint8_t c)
     v->video[80 * v->y + v->x] = c;
 }
 
+/* Yes we ought to have paper holes each side and scroll slowly off multiple
+   event timer ticks */
 static void vtscroll_dumb(struct vtcon *v)
 {
     uint32_t *p;
