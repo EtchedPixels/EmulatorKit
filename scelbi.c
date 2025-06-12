@@ -362,7 +362,8 @@ static void run_system(void)
 				dgvideo_render(dgrender);
 			if (swrender)
 				scopewriter_render(swrender);
-			dgvideo_rasterize(dgvideo);
+			if (dgvideo)
+				dgvideo_rasterize(dgvideo);
 		}
 		if (ui_event())
 			break;
