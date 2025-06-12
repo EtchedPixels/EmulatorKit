@@ -9,6 +9,9 @@
  *	WD1772 floppy
  *
  *	PLUS has an NCR5380
+ *
+ *	Emulation includes the third party MDISK board/mod that allows
+ *	port 0x30 to control up to 1MB of RAM.
  */
 
 #include <stdio.h>
@@ -32,7 +35,7 @@
 #include "wd17xx.h"
 
 
-static uint8_t ram[65536];
+static uint8_t ram[1048576];
 static uint8_t rom[32768];
 
 static uint8_t fast = 0;
@@ -47,6 +50,7 @@ struct sasi_bus *sasi;
 struct ncr5380 *ncr;
 struct wd17xx *wd;
 struct z80_sio *sio;
+static uint32_t mdisk_latch;	/* Pre shifted for convenience */
 
 static unsigned sector_base[4];
 
@@ -68,10 +72,18 @@ static volatile int done;
 #define TRACE_CPU	128
 #define TRACE_SCSI	256
 #define TRACE_FDC	512
+#define TRACE_BANK	1024
 
 static int trace = 0;
 
 static void reti_event(void);
+
+static uint8_t *mdisk(uint16_t addr)
+{
+	uint32_t pa = addr & 0x7FFF;
+	pa |= mdisk_latch;
+	return ram + pa;
+}
 
 static uint8_t mem_read(int unused, uint16_t addr)
 {
@@ -82,8 +94,11 @@ static uint8_t mem_read(int unused, uint16_t addr)
 		fprintf(stderr, "R");
 	if (addr < 0x8000 && !(bcr & 0x40))
 		r = rom[addr & eprom_mask];
-	else
+	else if (addr >= 0x8000)
 		r = ram[addr];
+	else
+		r = *mdisk(addr);
+
 	if (trace & TRACE_MEM)
 		fprintf(stderr, " %04X <- %02X\n", addr, r);
 
@@ -117,7 +132,10 @@ static void mem_write(int unused, uint16_t addr, uint8_t val)
 	}
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X -> %02X\n", addr, val);
-	ram[addr] = val;
+	if (addr >= 0x8000)
+		ram[addr] = val;
+	else
+		*mdisk(addr) = val;
 }
 
 static unsigned int nbytes;
@@ -518,6 +536,12 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		scsi_write(addr, val);
 		return;
 	}
+	if ((addr & 0xF0) == 0x30) {
+		if (trace & TRACE_BANK)
+			fprintf(stderr, "mdisk: bank set to %02X\n", val & 0x1F);
+		mdisk_latch = (val & 0x1F) << 15;
+		return;
+	}
 	if (addr == 0xF4) {	/* Secret trap door debug */
 		trace = val;
 		return;
@@ -696,7 +720,7 @@ int main(int argc, char *argv[])
 	if (fdpath[3])
 		insert_floppy(3, fdpath[3]);
 	wd17xx_trace(wd, trace & TRACE_FDC);
-		
+
 	if (diskpath) {
 		sasi = sasi_bus_create();
 		sasi_disk_attach(sasi, 0, diskpath, 512);
