@@ -1,7 +1,7 @@
 /*
  *	Platform features
  *
- *	6502 processor card for rcbus with I/O at $FExx 
+ *	6502 processor card for rcbus with I/O at $FExx
  *	Motorola 68B50
  *	IDE at 0x10-0x17 no high or control access
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)

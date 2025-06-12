@@ -1749,14 +1749,14 @@ static void fdc_write(uint8_t addr, uint8_t val)
 			fprintf(stderr, "DSEL0");
 		fprintf(stderr, "]\n");
 		fdc_write_dor(fdc, val);
-#if 0		
+#if 0
 		if ((val & 0x21) == 0x21)
 			fdc_set_motor(fdc, 2);
 		else if ((val & 0x11) == 0x10)
 			fdc_set_motor(fdc, 1);
 		else
 			fdc_set_motor(fdc, 0);
-#endif			
+#endif
 		break;
 	case 3:	/* DCR */
 		fprintf(stderr, "FDC DCR %02X [", val);
@@ -2008,7 +2008,7 @@ static uint8_t io_read_2014(uint16_t addr)
 
 	if (addr >= 0x80 && addr <= 0x9F && have_kio)
 		return kio_read(addr & 0x1F);
-	if (addr >= 0x48 && addr < 0x50) 
+	if (addr >= 0x48 && addr < 0x50)
 		return fdc_read(addr & 7);
 	if (addr == 0x46 && ef9345 && (ef_latch & 0xF0) == 0x20 && !extreme)
 		return ef9345_read(ef9345, ef_latch);
@@ -2600,7 +2600,7 @@ static void io_write_ez512(uint16_t addr, uint8_t val)
 		ez512_base |= (val & 0x40) ? 0x40000 : 0;
 		if (trace & TRACE_512)
 			fprintf(stderr, "base now %05X ", ez512_base);
-		
+
 	}
 	kio_write(addr, val);
 }
@@ -3151,7 +3151,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (rom && cpuboard != CPUBOARD_Z80SBC64 && cpuboard != CPUBOARD_ZRCC 
+	if (rom && cpuboard != CPUBOARD_Z80SBC64 && cpuboard != CPUBOARD_ZRCC
 		&& cpuboard != CPUBOARD_ZRC) {
 		fd = open(rompath, O_RDONLY);
 		if (fd == -1) {

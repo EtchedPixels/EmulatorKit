@@ -326,7 +326,7 @@ uint8_t tms9995_read_cru(struct tms9995 *tms, uint16_t addr)
 void tms9995_write_cru(struct tms9995 *tms, uint16_t addr, uint8_t bit)
 {
 	if (addr >= 0x1000 && addr <= 0x10ff)
-		tms9902_cru_write(tmsser, addr, bit); 
+		tms9902_cru_write(tmsser, addr, bit);
 }
 
 static struct termios saved_term, term;

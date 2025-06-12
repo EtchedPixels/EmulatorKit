@@ -237,7 +237,7 @@ void cpu_write_word(unsigned int address, unsigned int value)
 		fprintf(stderr, "WW %06X <- %04X\n", address, value);
 
 	/* Special case the ide as it matters */
-	if ((address & 0xF00000) == 0x900000) { 
+	if ((address & 0xF00000) == 0x900000) {
 		ide_write16(ide, (address & 0x0E) >> 1, value);
 		return;
 	}

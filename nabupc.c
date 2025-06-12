@@ -25,7 +25,7 @@
  *		5: framing error	}	HCC
  *		6: overrun		}
  *		7: unused
- *		
+ *
  *	High speed comms port (TR1863 + ctrl)	@0x80 (R/W)
  *	(fixed at 111K 8N1 RS422 to talk to the HCCA)
  *	Keyboard (serial 8251)			@0x90(data)/0x91(status)
@@ -35,7 +35,7 @@
  *	Four slots at C0, D0, E0 and F0		@C0-FF
  *
  *	Optional CF add on			@0xC0
- *	
+ *
  *	Interrupts are vectored IM2
  *	priority high->low 0-7 is
  *	0: HCCA receive
@@ -501,7 +501,7 @@ static void wd_step(struct wd17xx *fdc, int direction, unsigned t)
 	if (direction == -1) {
 		if (fdc->track)
 			fdc->track--;
-		if (fdc->trackpos) 
+		if (fdc->trackpos)
 			fdc->trackpos--;
 		return;
 	}
@@ -701,7 +701,7 @@ uint8_t io_read(int unused, uint16_t addr)
 	if (addr >= 0xC0 && addr <= 0xCF)
 		return fdc_read(addr);
 	if (addr == 0xA0 || addr == 0xA1)
-		return tms9918a_read(vdp, addr & 1);		
+		return tms9918a_read(vdp, addr & 1);
 	if (addr == 0x90||addr == 0x91)
 		return kbd_in(addr);
 	if (addr >= 0x80 && addr <= 0x8F)
@@ -962,7 +962,7 @@ int main(int argc, char *argv[])
 			nanosleep(&tc, NULL);
 		wd_timer(wdfdc);
 		kdog++;
-		if (kdog == 50) { 
+		if (kdog == 50) {
 			kbd_wdog = 1;
 			kdog = 0;
 		}

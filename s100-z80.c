@@ -1,6 +1,6 @@
 /*
  *	Z80Master S-100 Z80 at 4MHz with port 0xD2/0xD3 memory mapping
- *	0x30: Dual CF-Card/Hard Disk IDE S100 Bus Board 
+ *	0x30: Dual CF-Card/Hard Disk IDE S100 Bus Board
  *	0x00: Propellor Console I/O (interrupt not currently emulated)
  *	0XF8: Tarbell 8" floppy
  */
@@ -58,7 +58,7 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 		return ram + (addr & 0x3FFF) + ((port_d2 & 0xFC) << 12);
 	return ram + (addr & 0x3FFF) + ((port_d3 & 0xFC) << 12);
 }
-	
+
 static uint8_t mem_read(int unused, uint16_t addr)
 {
 	uint8_t r;
@@ -205,7 +205,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			idepath = optarg;
-			break;	
+			break;
 		case 'd':
 			trace = atoi(optarg);
 			break;

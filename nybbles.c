@@ -33,7 +33,7 @@ static const uint8_t iorom[] = {
 /* FD0A */	0xCA,0xF5,		/* ST A,-0B(P2)  again FCFF */
 /* FD0C */	0x5C			/* RET */
 };
-	
+
 #define TRACE_MEM	1
 #define TRACE_IO	2
 #define TRACE_CPU	4
@@ -89,9 +89,9 @@ uint8_t ns8070_read_op(struct ns8070 *cpu, uint16_t addr, int debug)
 	}
 	if (addr >= 0xFD00 && addr < 0xFD00 + sizeof(iorom))
 		return iorom[addr - 0xFD00];
-        if (addr >= 0x2000)
-            return 0xFF;
-        return ramrom[addr];
+	if (addr >= 0x2000)
+		return 0xFF;
+	return ramrom[addr];
 }
 
 uint8_t mem_debug_read(struct ns8070 *cpu, uint16_t addr)
@@ -106,15 +106,15 @@ uint8_t mem_read(struct ns8070 *cpu, uint16_t addr)
 
 void mem_write(struct ns8070 *cpu, uint16_t addr, uint8_t val)
 {
-    if (addr == 0xFCFF) {
-    	val &= 0x7F;
-    	write(1, &val, 1);
-    }
-    /* BASIC and spare ROM */
-    if (addr < 0x1000)
-        return;
-    if (addr < 0x2000)
-        ramrom[addr] = val;
+	if (addr == 0xFCFF) {
+		val &= 0x7F;
+		write(1, &val, 1);
+	}
+	/* BASIC and spare ROM */
+	if (addr < 0x1000)
+		return;
+	if (addr < 0x2000)
+		ramrom[addr] = val;
 }
 
 void flag_change(struct ns8070 *cpu, uint8_t fbits)
@@ -219,8 +219,8 @@ int main(int argc, char *argv[])
 	   is loaded though */
 
 	while (!done) {
-	        /* TODO: timing, ints etc */
-                ns8070_execute_one(cpu);
+		/* TODO: timing, ints etc */
+		ns8070_execute_one(cpu);
 		if (check_chario() & 1) {
 			pendc  = next_char();
 			/* The TinyBASIC expects break type conditions

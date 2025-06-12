@@ -327,7 +327,7 @@ int i8080_exec(int cycles) {
 				fprintf(i8080_log, "IRQ opcode %02X executed , PC was %04X\n",
 					opcode, reg_PC);
 		} else {
-			opcode = i8080_read(reg_PC); 
+			opcode = i8080_read(reg_PC);
 			if (i8080_log)
 				fprintf(i8080_log, "%04X : %02X %02X %02X : %6s %02X %04X %04X %04X %04X %s\n",
 					reg_PC, i8080_debug_read(reg_PC), i8080_debug_read(reg_PC + 1), i8080_debug_read(reg_PC + 2),

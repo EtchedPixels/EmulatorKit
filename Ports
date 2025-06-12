@@ -18,7 +18,7 @@ partial decode all over the place and clash with everyone.
 0x68-0x6B	SC103 Z80 PIO
 0x70-0x7F	RC2014 512K ROM/RAM paging registers
 0x80-0xBF	RC2014 ACIA (partial decode)
-0x80-0x83	RC2014 SIO 
+0x80-0x83	RC2014 SIO
 0x80-0x83	SC104 SIO
 0x80-0x83	Scott Baker SIO
 	(Scott Baker one has ports in different order to

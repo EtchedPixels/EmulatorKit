@@ -279,7 +279,7 @@ int wd_attach(struct wd17xx *fdc, int dev, const char *path)
 		else
 			fdc->sides[dev] = 1;
 		printf("[Mounted volume %d: %d tracks, %d sectors per track %d sides].\n",
-			dev, fdc->tracks[dev], fdc->spt[dev], fdc->sides[dev]);
+		       dev, fdc->tracks[dev], fdc->spt[dev], fdc->sides[dev]);
 	}
 	return fdc->fd[dev];
 }

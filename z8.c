@@ -73,7 +73,7 @@ static void z8_decode_rir(struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
 		sprintf(buf, "%s @%02X", p, r);
 	else
 		sprintf(buf, "%s %02X", p, r);
-	return;		
+	return;
 }
 
 static void z8_decode_r(char *i, struct z8 *z8, uint8_t opcode, char *buf)
@@ -145,7 +145,7 @@ static void z8_decode_al(char *i, struct z8 *z8, uint8_t opcode, uint16_t pc, ch
 }
 
 static void z8_decode_ldcei(struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf)
-{	
+{
 	uint8_t v = z8_read_code_debug(z8, pc++);
 	char c = (opcode & 0x40) ? 'C' : 'E';
 
@@ -259,7 +259,7 @@ static void z8_decode_djnz(struct z8 *z8, uint8_t opcode, uint16_t pc, char *buf
 void z8_disassemble(struct z8 *z8, uint16_t pc, char *buf)
 {
 	uint8_t opcode = z8_read_code_debug(z8, pc++);
-	
+
 /*	fprintf(stderr, "OP%X\n", opcode); */
 	/* xF : implicit instructions */
 	if ((opcode & 0x0F) == 0x0F) {
@@ -271,7 +271,7 @@ void z8_disassemble(struct z8 *z8, uint16_t pc, char *buf)
 		return;
 	}
 	/* x0-1 : R and IR forms with some oddities */
-	
+
 	/* The xN forms for x >= 8 */
 	switch (opcode & 0x0F) {
 		case 0x08:
@@ -297,7 +297,7 @@ void z8_disassemble(struct z8 *z8, uint16_t pc, char *buf)
 			return;
 		/* 0x0F is the implicit forms handed above */
 	}
-	/* Oddments */		
+	/* Oddments */
 	switch(opcode) {
 		case 0xD4:
 			z8_decode_irr("CALL", z8, pc, buf);
@@ -656,7 +656,7 @@ static void z8_inc16(struct z8 *z8, uint8_t reg)
 	setreg(z8, reg, v >> 8);
 	setreg(z8, reg + 1, v);
 }
-	
+
 /* 16bit inc and dec */
 
 static void z8_idop16(struct z8 *z8, uint8_t reg, int mod)
@@ -1170,7 +1170,7 @@ static void z8_execute_one(struct z8 *z8)
 			case 0x82:	/* LDE r,Irr */
 				r = z8_read_code(z8, z8->pc++);
 				setwreg(z8, r >> 4,
-				    z8_read_data(z8, getrr(z8, r & 0xF)));
+					z8_read_data(z8, getrr(z8, r & 0xF)));
 				z8->cycles += 12;
 				break;
 			case 0x83:	/* LDEI Ir,Irr*/
@@ -1189,7 +1189,7 @@ static void z8_execute_one(struct z8 *z8)
 				break;
 			case 0x93:	/* LDEI Irr,Ir*/
 				r = z8_read_code(z8, z8->pc++);
-				z8_write_data(z8, getrr(z8, r & 0x0F), 
+				z8_write_data(z8, getrr(z8, r & 0x0F),
 					getiwreg(z8, r >> 4));
 				setiwreg(z8, r >> 4, getiwreg(z8, r >> 4) + 1);
 				z8_inc16(z8, makereg(z8, r & 0x0F));
@@ -1197,7 +1197,7 @@ static void z8_execute_one(struct z8 *z8)
 				break;
 			case 0xC2:	/* LDC r,Irr*/
 				r = z8_read_code(z8, z8->pc++);
-				setwreg(z8, r >> 4, 
+				setwreg(z8, r >> 4,
 					z8_read_code(z8, getrr(z8, r & 0xF)));
 				z8->cycles += 12;
 				break;
@@ -1225,7 +1225,7 @@ static void z8_execute_one(struct z8 *z8)
 				break;
 			case 0xD3:	/* LDCI */
 				r = z8_read_code(z8, z8->pc++);
-				z8_write_data(z8, getrr(z8, r & 0x0F), 
+				z8_write_data(z8, getrr(z8, r & 0x0F),
 					getiwreg(z8, r >> 4));
 				setiwreg(z8, r >> 4, getiwreg(z8, r >> 4) + 1);
 				z8_inc16(z8, makereg(z8, r & 0x0F));

@@ -37,22 +37,22 @@ static void make_ps2_code(SDL_Event *ev, struct ps2 *ps2)
 
 static int ps2_sdlevent(void *ps, void *evp)
 {
-    SDL_Event *ev = evp;
-    struct ps2 *ps2 = ps;
+	SDL_Event *ev = evp;
+	struct ps2 *ps2 = ps;
 
-    switch(ev->type) {
-	case SDL_KEYDOWN:
-	case SDL_KEYUP:
-		if (ps2->window && ev->key.windowID != ps2->window)
-			return 0;
-		make_ps2_code(ev, ps2);
-		return 1;
-    }
-    return 0;
+	switch(ev->type) {
+		case SDL_KEYDOWN:
+		case SDL_KEYUP:
+			if (ps2->window && ev->key.windowID != ps2->window)
+				return 0;
+			make_ps2_code(ev, ps2);
+			return 1;
+	}
+	return 0;
 }
 
 void ps2_add_events(struct ps2 *ps2, uint32_t window)
 {
-    ps2->window = window;
-    add_ui_handler(ps2_sdlevent, ps2);
+	ps2->window = window;
+	add_ui_handler(ps2_sdlevent, ps2);
 }

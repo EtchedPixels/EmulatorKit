@@ -84,8 +84,8 @@ static void tms9902_recalc(struct tms9902 *tms)
 		tms->cru_rd |= (1 << XBRE);
 	}
 	tms->cru_rd &=
-	    ~((1 << FLAG) | (1 << INT) | (1 << DSCINT) | (1 << XBINT) |
-	      (1 << RBINT));
+		~((1 << FLAG) | (1 << INT) | (1 << DSCINT) | (1 << XBINT) |
+		  (1 << RBINT));
 
 	if ((tms->cru_rd & (1 << DSCH)) && (tms->cru_wr & (1 << DSCENB)))
 		tms->cru_rd |= (1 << DSCINT);

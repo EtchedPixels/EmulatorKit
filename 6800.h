@@ -3,68 +3,68 @@
  */
 
 struct prescaler {
-    uint16_t count;
-    uint16_t limit;
+	uint16_t count;
+	uint16_t limit;
 };
 
 struct  m68hc11 {
-    /* Timer chain */
-    struct prescaler pr_tcnt;
-    struct prescaler e13;
-    struct prescaler rti;
-    struct prescaler cop;
+	/* Timer chain */
+	struct prescaler pr_tcnt;
+	struct prescaler e13;
+	struct prescaler rti;
+	struct prescaler cop;
 
-    uint16_t lock;
-    uint16_t flags;
+	uint16_t lock;
+	uint16_t flags;
 #define CPUIO_HC811_CONFIG	1	/* Device has HC811 style CONFIG reg */
 
-    uint8_t *eerom;
-    const uint8_t *rom;
-    const uint8_t *bootrom;
+	uint8_t *eerom;
+	const uint8_t *rom;
+	const uint8_t *bootrom;
 
-    /* I/O ports */
-    uint16_t iobase;
-    uint16_t ioend;
-    uint16_t irambase;
-    uint16_t iramend;
-    uint16_t iramsize;
-    uint16_t erombase;
-    uint16_t eromend;
-    uint16_t rombase;
+	/* I/O ports */
+	uint16_t iobase;
+	uint16_t ioend;
+	uint16_t irambase;
+	uint16_t iramend;
+	uint16_t iramsize;
+	uint16_t erombase;
+	uint16_t eromend;
+	uint16_t rombase;
 
-    /* We don't model non expanded mode */
-    uint8_t padr;
-    uint8_t paddr;
-    uint8_t pioc;
-    uint8_t ddrc;
-    uint8_t pddr;
-    uint8_t ddrd;
-    uint8_t pedr;
+	/* We don't model non expanded mode */
+	uint8_t padr;
+	uint8_t paddr;
+	uint8_t pioc;
+	uint8_t ddrc;
+	uint8_t pddr;
+	uint8_t ddrd;
+	uint8_t pedr;
 
-    /* Timer control force */
-    uint8_t cforc;
+	/* Timer control force */
+	uint8_t cforc;
 
-    /* Output compare */
-    uint8_t oc1m;
-    uint8_t oc1d;
+	/* Output compare */
+	uint8_t oc1m;
+	uint8_t oc1d;
 
-    /* Timer events */
-    uint16_t tcnt;
-    uint16_t tic1;
-    uint16_t tic2;
-    uint16_t tic3;
+	/* Timer events */
+	uint16_t tcnt;
+	uint16_t tic1;
+	uint16_t tic2;
+	uint16_t tic3;
 
-    uint16_t toc1;
-    uint16_t toc2;
-    uint16_t toc3;
-    uint16_t toc4;
-    uint16_t toc5;
+	uint16_t toc1;
+	uint16_t toc2;
+	uint16_t toc3;
+	uint16_t toc4;
+	uint16_t toc5;
 
-    uint8_t tctl1;
-    uint8_t tctl2;
-    
-    uint8_t tmsk1;
-    uint8_t tflg1;
+	uint8_t tctl1;
+	uint8_t tctl2;
+
+	uint8_t tmsk1;
+	uint8_t tflg1;
 #define TF1_OC1F		0x80
 #define TF1_OC2F		0x40
 #define TF1_OC3F		0x20
@@ -74,34 +74,34 @@ struct  m68hc11 {
 #define TF1_IC2F		0x02
 #define TF1_IC3F		0x01
 
-    uint8_t tmsk2;
-    uint8_t tflg2;
+	uint8_t tmsk2;
+	uint8_t tflg2;
 #define TF2_TOF			0x80
 #define TF2_RTIF		0x40
 #define TF2_PAOVF		0x20
 #define TF2_PAIF		0x10
 
-    /* Pulse accumulator */
-    uint8_t pactl;
-    uint8_t pacnt;
+	/* Pulse accumulator */
+	uint8_t pactl;
+	uint8_t pacnt;
 
-    /* SPI */
-    uint8_t spcr;
+	/* SPI */
+	uint8_t spcr;
 #define SPCR_SPIE		0x80
 #define SPCR_SPE		0x40
 #define SPCR_MSTR		0x10
 #define SPCR_SPR		0x03
-    uint8_t spsr;
+	uint8_t spsr;
 #define SPSR_SPIF		0x80
-    uint8_t spdr_r;
-    uint8_t spdr_w;
-    /* our internal timer: not a real register */
-    uint16_t spi_ticks;
+	uint8_t spdr_r;
+	uint8_t spdr_w;
+	/* our internal timer: not a real register */
+	uint16_t spi_ticks;
 
-    /* Serial */
-    uint8_t baud;
-    uint8_t sccr1;
-    uint8_t sccr2;
+	/* Serial */
+	uint8_t baud;
+	uint8_t sccr1;
+	uint8_t sccr2;
 #define SCCR2_TIE		0x80
 #define SCCR2_TCIE		0x40
 #define SCCR2_RIE		0x20
@@ -110,43 +110,43 @@ struct  m68hc11 {
 #define SCCR2_RE		0x04
 #define SCCR2_RWU		0x02
 #define SCCR2_SBK		0x01
-    uint8_t scdr_w;
-    uint8_t scdr_r;
-    uint8_t scsr;
+	uint8_t scdr_w;
+	uint8_t scdr_r;
+	uint8_t scsr;
 #define SCSR_TDRE		0x80
 #define SCSR_TC			0x40
 #define SCSR_RDRF		0x20
 #define SCSR_OR			0x08
-    /* Internal implementation help value - not a register */
-    uint8_t last_scsr_read;
+	/* Internal implementation help value - not a register */
+	uint8_t last_scsr_read;
 
-    /* A2D convertors */    
-    uint8_t adctl;
-    uint8_t adr1;
-    uint8_t adr2;
-    uint8_t adr3;
-    uint8_t adr4;
+	/* A2D convertors */
+	uint8_t adctl;
+	uint8_t adr1;
+	uint8_t adr2;
+	uint8_t adr3;
+	uint8_t adr4;
 
-    /* System Control */
-    uint8_t bprot;
-    uint8_t eprog;
-    uint8_t option;
-    uint8_t coprst;		/* We use this to hold the last write */
-    uint8_t pprog;
-    uint8_t hprio;
+	/* System Control */
+	uint8_t bprot;
+	uint8_t eprog;
+	uint8_t option;
+	uint8_t coprst;		/* We use this to hold the last write */
+	uint8_t pprog;
+	uint8_t hprio;
 #define HPRIO_RBOOT	0x80
 #define HPRIO_SMOD	0x40
 #define HPRIO_MDA	0x20
 #define HPRIO_IRV	0x10
-    uint8_t init;
-    uint8_t config;
+	uint8_t init;
+	uint8_t config;
 #define CFG_NOSEC	0x08
 #define CFG_NOCOP	0x04
 #define CFG_ROMON	0x02
 #define CFG_EEON	0x01
 
-    uint8_t config_latch;	/* Actual boot latches we really use */
-};    
+	uint8_t config_latch;	/* Actual boot latches we really use */
+};
 
 #define HC11_VEC_SCI		0xFFD6
 #define HC11_VEC_SPI		0xFFD8
@@ -175,51 +175,51 @@ struct  m68hc11 {
  */
 
 struct m6800 {
-    uint8_t a;
-    uint8_t b;
-    uint8_t p;
-    uint16_t s;
-    uint16_t x;
-    uint16_t y;
-    uint16_t pc;
+	uint8_t a;
+	uint8_t b;
+	uint8_t p;
+	uint16_t s;
+	uint16_t x;
+	uint16_t y;
+	uint16_t pc;
 
-    /* Internal state */
-    int wait;
-    int oc_hold;
-    int type;
+	/* Internal state */
+	int wait;
+	int oc_hold;
+	int type;
 #define CPU_6800	0
 #define CPU_6803	1
 #define	CPU_6303	2
 #define CPU_6XA1	3	/* NAMCO 6301 variant with op 12/13 */
 #define	CPU_68HC11	4	/* May need a special type for some types */
-    int intio;
+	int intio;
 #define INTIO_NONE	0
 #define INTIO_6802	1
 #define INTIO_6803	2
 #define INTIO_HC11	3
-    uint32_t irq;
-    uint8_t mode;
-    int debug;
+	uint32_t irq;
+	uint8_t mode;
+	int debug;
 
-    /* I/O and memory */
-    uint8_t iram_base;
-    uint8_t iram[768];		/* Can be 192 bytes on late 6303, 768 on HC11 */
+	/* I/O and memory */
+	uint8_t iram_base;
+	uint8_t iram[768];	/* Can be 192 bytes on late 6303, 768 on HC11 */
 
-    uint8_t p1ddr;
-    uint8_t p2ddr;
-    uint8_t p1dr;
-    uint8_t p2dr;
-    uint8_t tcsr;
-    uint16_t counter;
-    uint16_t ocr;
-    uint8_t rmcr;
-    uint8_t trcsr;
-    uint8_t rdr;
-    uint8_t tdr;
-    uint8_t ramcr;
+	uint8_t p1ddr;
+	uint8_t p2ddr;
+	uint8_t p1dr;
+	uint8_t p2dr;
+	uint8_t tcsr;
+	uint16_t counter;
+	uint16_t ocr;
+	uint8_t rmcr;
+	uint8_t trcsr;
+	uint8_t rdr;
+	uint8_t tdr;
+	uint8_t ramcr;
 
-    struct m68hc11 io;		/* Need to make this a nice union of CPU
-                                   variants eventually */
+	struct m68hc11 io;	/* Need to make this a nice union of CPU
+				   variants eventually */
 };
 
 #define P_C		1

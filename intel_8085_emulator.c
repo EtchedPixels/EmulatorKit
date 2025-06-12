@@ -4,12 +4,12 @@
 
   Use this code for whatever you want. I don't care. It's officially public domain.
   Credit would be appreciated.
-  
+
   Modified to sort of emulate the Intel 8085, Alan Cox 2019.
-  
+
   The 8085 emulation is WIP and the 8085 undocumented instruction behaviour
   is exactly that so may not be entirely correct.
-  
+
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
   in the Software without restriction, including without limitation the rights
@@ -19,7 +19,7 @@
 
   The above copyright notice and this permission notice shall be included in all
   copies or substantial portions of the Software.
-  
+
   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -430,13 +430,13 @@ int i8085_exec(int cycles) {
 		halted = 0;
 
 		opcode = i8085_read(reg_PC);
-		
+
 		if (i8085_log)
 			fprintf(i8085_log, "%04X : %02X %02X %02X : %6s %02X %04X %04X %04X %04X %s\n",
 				reg_PC, i8085_debug_read(reg_PC), i8085_debug_read(reg_PC + 1), i8085_debug_read(reg_PC + 2),
 				i8085_flags(reg8[FLAGS]), reg8[A], reg16_BC, reg16_DE, reg16_HL, reg_SP,
 					i8085_disassemble(reg_PC));
-		
+
 		reg_PC++;
 
 		switch (opcode) {
@@ -699,7 +699,7 @@ int i8085_exec(int cycles) {
 				if (test_C())
 					calc_subAC_borrow(reg8[H], temp8);
 				else
-					calc_subAC(reg8[H], temp8);				
+					calc_subAC(reg8[H], temp8);
 				calc_Vsub(reg8[H], temp8, test_C());
 				if ((temp16 & 0x00FF) >= reg8[H] && (temp8 | test_C()))
 					set_C();
@@ -709,7 +709,7 @@ int i8085_exec(int cycles) {
 				calc_K(temp16);
 				reg8[H] = (uint8_t)temp16;
 				cycles -= 10;
-				break;					
+				break;
 			case 0x10: // ARHL
 				if (reg16_HL & 1)
 					set_C();

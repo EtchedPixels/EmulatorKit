@@ -17,7 +17,7 @@
  *	ESGG  EXRAM		port 0x7F, 0-15 banks (0 - base)
  *				switches between 16 x 48K banks max (may be less, and may
  *				be 0, 4, 8, 12 if using 64K chips)
- *	
+ *
  *	TODO:
  *	S100 expansion (and banked RAM etc)
  *		S100 hard disk (PPIDE @0x30-0x33), (Z100lifeline ?)
@@ -787,10 +787,10 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 	texture =
-	    SDL_CreateTexture(render,
-			      SDL_PIXELFORMAT_ARGB8888,
-			      SDL_TEXTUREACCESS_STREAMING,
-			      COLS * CWIDTH, ROWS * CHEIGHT);
+		SDL_CreateTexture(render,
+				  SDL_PIXELFORMAT_ARGB8888,
+				  SDL_TEXTUREACCESS_STREAMING,
+				  COLS * CWIDTH, ROWS * CHEIGHT);
 	if (texture == NULL) {
 		fprintf(stderr,
 			"sorceror: unable to create texture: %s\n",

@@ -8,15 +8,15 @@
 #include "i8251.h"
 
 struct i8251 {
-    uint8_t cmd;
-    uint8_t config;
-    uint8_t status;
+	uint8_t cmd;
+	uint8_t config;
+	uint8_t status;
 
-    unsigned int reset;
-    unsigned int pending;
-    unsigned int trace;
-    unsigned int irq;
-    struct serial_device *dev;
+	unsigned int reset;
+	unsigned int pending;
+	unsigned int trace;
+	unsigned int irq;
+	struct serial_device *dev;
 };
 
 
@@ -83,9 +83,9 @@ void i8251_attach(struct i8251 *i8251, struct serial_device *dev)
 
 void i8251_reset(struct i8251 *i8251)
 {
-    memset(i8251, 0, sizeof(struct i8251));
-    i8251->reset = 1;
-    i8251_irq_compute(i8251);
+	memset(i8251, 0, sizeof(struct i8251));
+	i8251->reset = 1;
+	i8251_irq_compute(i8251);
 }
 
 unsigned i8251_irq_pending(struct i8251 *i8251)
@@ -95,21 +95,21 @@ unsigned i8251_irq_pending(struct i8251 *i8251)
 
 struct i8251 *i8251_create(void)
 {
-    struct i8251 *i8251 = malloc(sizeof(struct i8251));
-    if (i8251 == NULL) {
-        fprintf(stderr, "Out of memory.\n");
-        exit(1);
-    }
-    i8251_reset(i8251);
-    return i8251;
+	struct i8251 *i8251 = malloc(sizeof(struct i8251));
+	if (i8251 == NULL) {
+		fprintf(stderr, "Out of memory.\n");
+		exit(1);
+	}
+	i8251_reset(i8251);
+	return i8251;
 }
 
 void i8251_free(struct i8251 *i8251)
 {
-    free(i8251);
+	free(i8251);
 }
 
 void i8251_trace(struct i8251 *i8251, int onoff)
 {
-    i8251->trace = onoff;
+	i8251->trace = onoff;
 }
