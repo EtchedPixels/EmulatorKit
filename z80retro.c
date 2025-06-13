@@ -611,7 +611,7 @@ static void usage(void)
 			"   sdpath:  Path to file containing SDCard data\n"
 			"   debug:   Comma separated list of: MEM,IO,INFO,UNK,CPU,BANK,SIO,CTC,IRQ,SPI,SD,I2C,RTC\n"
 			"   nvpath:  file to store DS1307+ RTC non-volatile memory\n"
-			);			
+			);
 	exit(EXIT_FAILURE);
 	/*
 		"   cpath:   Path to directory holding files to serve over SIO port B\n"
@@ -689,10 +689,10 @@ int main(int argc, char *argv[])
 	rtc_load(rtcdev, nvpath);
 
 	ui_init();
-	
+
 	sio = sio_create();
 	sio_reset(sio);
-	if (trace & TRACE_SIO) {	
+	if (trace & TRACE_SIO) {
 		sio_trace(sio, 0, 1);
 		sio_trace(sio, 1, 1);
 	}

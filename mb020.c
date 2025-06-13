@@ -7,7 +7,7 @@
  *	0x00000000-0x03FFFFFF	RC2014 bus 8bit
  *	0x04000000-0x0BFFFFFF	Up to 32MB of 60ns EDO/FP SIMM, zero wait
  *	0xFFFFF000-0xFFFFFFFF	RC2014 I/O space 4 wait, only low 12 address lines
- *	
+ *
  *	Swap register
  *	Poking FFFF8000 read or write swaps the 00000000-03FFFFFF range and
  *	04000000-07FFFFFF over. It can't be undone.
@@ -219,7 +219,7 @@ void cpu_write_byte(unsigned int address, unsigned int value)
 {
 	if (!flipped) {
 		/* Model the standard 8K ROM config */
-		if (address < 0x04000000) { 
+		if (address < 0x04000000) {
 			fprintf(stderr, "%x: write to ROM\n", address);
 			return;
 		}

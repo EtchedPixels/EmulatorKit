@@ -5,7 +5,7 @@
  *	Banked memory
  *	16550A @7.3728MHHz (only tx/rx rts/cts wired)
  *	Bitbang SD
- *	
+ *
  *	0000-7FFF	Paged (A15-A19 from U7)
  *	8000-DFFF	Fixed RAM (A16-A19 held low by U8, A15 held high)
  *	E000-E7FF
@@ -18,7 +18,7 @@
  *	ROM 1111XX
  *	WMAP 11101X
  *	Fixed RAM 1XXXX
- *	
+ *
  *	0000-DFFF	RAM
  *	E000-E7FF	I/O
  *	E800-EFFF	MAP register (W/O)
@@ -127,7 +127,7 @@ static void spi_clock_low(void)
 
 static uint8_t sd_input(void)
 {
-    return sd_in;
+	return sd_in;
 }
 
 /* Again poor design choices. 7 is /SS 6 is MOSI 5 is SCK */
@@ -160,22 +160,22 @@ void uart16x50_signal_change(struct uart16x50 *uart, uint8_t mcr)
 
 unsigned char do_e6809_read8(unsigned addr, unsigned debug)
 {
-        unsigned char r = 0xFF;
-        /* Stop the debugger causing side effects in the I/O window */
+	unsigned char r = 0xFF;
+	/* Stop the debugger causing side effects in the I/O window */
 	if ((addr >> 12) == 0xE && debug)
-	        return 0xFF;
-        if ((addr & 0xF000) == 0xF000)
-                r = rom[addr & 0xFFF];
-        else if ((addr & 0xF800) == 0xE000) {
-            if ((addr & 0x70) == 0x00)
-                r = uart16x50_read(uart, addr & 7);
-            else if ((addr & 0x70) == 0x10)
-                return sd_input(); 
-        }
-        else if (addr & 0x8000)
-            r = ram[addr];	/* Page 1 */
-        else
-            r = ram[(addr & 0x7FFF) | (page << 15)];
+		return 0xFF;
+	if ((addr & 0xF000) == 0xF000)
+		r = rom[addr & 0xFFF];
+	else if ((addr & 0xF800) == 0xE000) {
+		if ((addr & 0x70) == 0x00)
+			r = uart16x50_read(uart, addr & 7);
+		else if ((addr & 0x70) == 0x10)
+			return sd_input();
+	}
+	else if (addr & 0x8000)
+		r = ram[addr];		/* Page 1 */
+	else
+		r = ram[(addr & 0x7FFF) | (page << 15)];
 	if ((trace & TRACE_MEM) && !debug)
 		fprintf(stderr, "R %04X = %02X\n", addr, r);
 	return r;
@@ -195,28 +195,28 @@ void e6809_write8(unsigned addr, unsigned char val)
 {
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "W %04X = %02X\n", addr, val);
-        /* Stop the debugger causing side effects in the I/O window */
-        if ((addr & 0xF000) == 0xF000) {
-                if (trace & TRACE_MEM)
-                    fprintf(stderr, "W: *** ROM\n");
-                return;
-        } else if ((addr & 0xF800) == 0xE000) {
-            if ((addr & 0x70) == 0x00) {
-                uart16x50_write(uart, addr & 7, val);
-                return;
-            } else if ((addr & 0x70) == 0x10) {
-                sd_output(val);
-                return;
-            }
-        }
-        else if ((addr & 0xF800) == 0xE800) {
-            page = val & 0x1F;
-            return;
-        }
-        else if (addr & 0x8000)
-            ram[addr] = val;	/* Page 1 */
-        else
-            ram[(addr & 0x7FFF) | (page << 15)] = val;
+	/* Stop the debugger causing side effects in the I/O window */
+	if ((addr & 0xF000) == 0xF000) {
+		if (trace & TRACE_MEM)
+			fprintf(stderr, "W: *** ROM\n");
+		return;
+	} else if ((addr & 0xF800) == 0xE000) {
+		if ((addr & 0x70) == 0x00) {
+			uart16x50_write(uart, addr & 7, val);
+			return;
+		} else if ((addr & 0x70) == 0x10) {
+			sd_output(val);
+			return;
+		}
+	}
+	else if ((addr & 0xF800) == 0xE800) {
+		page = val & 0x1F;
+		return;
+	}
+	else if (addr & 0x8000)
+		ram[addr] = val;	/* Page 1 */
+	else
+		ram[(addr & 0x7FFF) | (page << 15)] = val;
 }
 
 static const char *make_flags(uint8_t cc)

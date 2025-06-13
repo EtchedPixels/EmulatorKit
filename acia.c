@@ -8,13 +8,13 @@
 #include "acia.h"
 
 struct acia {
-    uint8_t status;
-    uint8_t config;
-    uint8_t rxchar;
-    uint8_t inint;
-    uint8_t inreset;
-    uint8_t trace;
-    struct serial_device *dev;
+	uint8_t status;
+	uint8_t config;
+	uint8_t rxchar;
+	uint8_t inint;
+	uint8_t inreset;
+	uint8_t trace;
+	struct serial_device *dev;
 };
 
 

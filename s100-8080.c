@@ -68,7 +68,7 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 	}
 	return ram + (addr & 0x0FFF);
 }
-	
+
 uint8_t i8080_read(uint16_t addr)
 {
 	uint8_t r;
@@ -254,7 +254,7 @@ int main(int argc, char *argv[])
 		}
 		ide_attach(ide, 0, fd);
 	}
-		
+
 
 	/* 20ms - it's a balance between nice behaviour and simulation
 	   smoothness */

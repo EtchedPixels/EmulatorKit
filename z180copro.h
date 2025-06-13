@@ -1,17 +1,17 @@
 struct z180copro {
-    Z180Context cpu;
-    struct z180_io *io;
-    struct sdcard *sdcard;
-    int unit;
-    uint8_t shared[1024];
-    uint8_t ram[512 * 1024];
-    uint16_t state;
+	Z180Context cpu;
+	struct z180_io *io;
+	struct sdcard *sdcard;
+	int unit;
+	uint8_t shared[1024];
+	uint8_t ram[512 * 1024];
+	uint16_t state;
 #define COPRO_RESET	1
 #define COPRO_IRQ_IN	2
 #define COPRO_IRQ_OUT	4
-    int tstates;
-    int irq_pending;
-    int trace;
+	int tstates;
+	int irq_pending;
+	int trace;
 };
 
 #define MAX_COPRO	4

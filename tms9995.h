@@ -205,7 +205,7 @@ struct tms9995 {
 
 	// Pointer to the lookup table; the entry point for searching the command
 	std::unique_ptr<lookup_entry[]>   m_command_lookup_table;
-#endif	
+#endif
 
 	// Index of the interrupt program
 	int     interrupt_mp_index;

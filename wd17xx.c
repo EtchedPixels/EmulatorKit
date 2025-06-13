@@ -385,8 +385,8 @@ void wd17xx_command(struct wd17xx *fdc, uint8_t v)
 	case 0x80:	/* Read sector */
 		if (track >= fdc->tracks[fdc->drive] ||
 			fdc->sector - fdc->sector0[fdc->drive]
-				 >= fdc->spt[fdc->drive]) {
-			 if (fdc->trace)
+				>= fdc->spt[fdc->drive]) {
+			if (fdc->trace)
 				fprintf(stderr, "want track %d, max %d: want sector %d, spt %d s0 %d\n",
 					track, fdc->tracks[fdc->drive], fdc->sector, fdc->spt[fdc->drive],
 					fdc->sector0[fdc->drive]);

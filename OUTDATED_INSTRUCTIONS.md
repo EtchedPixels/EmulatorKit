@@ -35,15 +35,15 @@ To exit use ctrl-backslash
 
 ## To get actual hardware see
 
-https://rc2014.co.uk/  
-https://smallcomputercentral.wordpress.com/  
-https://www.retrobrewcomputers.org/forum/index.php?t=msg&th=368&start=0&  
+https://rc2014.co.uk/
+https://smallcomputercentral.wordpress.com/
+https://www.retrobrewcomputers.org/forum/index.php?t=msg&th=368&start=0&
 
 ## For ROM images see
 
-https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory  
-https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start  
-https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/  
+https://github.com/RC2014Z80/RC2014/tree/master/ROMs/Factory
+https://retrobrewcomputers.org/doku.php?id=software:firmwareos:romwbw:start
+https://smallcomputercentral.wordpress.com/projects/small-computer-monitor/
 
 ## Usage
 

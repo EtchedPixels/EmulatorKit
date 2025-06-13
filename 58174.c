@@ -45,7 +45,7 @@ uint8_t mm58174_read(struct mm58174 *rtc, uint8_t reg)
 	tm = gmtime(&t);
 	if (tm == NULL)
 		return 0xFF;
-		
+
 	switch(reg) {
 	case 0:
 		return 0xFF;	/* Test port */
@@ -89,7 +89,7 @@ uint8_t mm58174_read(struct mm58174 *rtc, uint8_t reg)
 	}
 	return 0xFF;
 }
-	
+
 
 void mm58174_write(struct mm58174 *rtc, uint8_t reg, uint8_t val)
 {

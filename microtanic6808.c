@@ -209,7 +209,7 @@ uint8_t do_read(uint16_t addr, unsigned debug)
 		return r;
 	}
 	/* Paged space */
-	if ((mem_be >> 4) < numpages)	
+	if ((mem_be >> 4) < numpages)
 		return paged[mem_be >> 4][addr];
 	return 0xFF;
 }

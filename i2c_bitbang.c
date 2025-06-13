@@ -31,7 +31,7 @@
 /* States for the i2c protocol */
 typedef enum {
 	IDLE = 1,  /* Waiting for start condition to be met */
-	ID,				 /* Receiving first input byte identifying target i2c device and read/write direction */
+	ID,        /* Receiving first input byte identifying target i2c device and read/write direction */
 	DATA_IN,   /* Data being sent *to* the i2c device */
 	DATA_OUT,  /* Data being sent *from* the i2c device */
 } I2C_STATE;
@@ -111,7 +111,7 @@ void i2c_register(struct i2c_bus *i2c, void *device, uint8_t id,
  * Read *always* returns the the current output bit, calculated on
  * the last low-going clock transition. The same value is returned
  * regardless of the number of reads until the next clock cycle.
- * 
+ *
  * Both lines are open collector, pulled high so the output is
  * a bitwise AND of the output from the i2c driver and the output
  * from the master. This emulation DOES NOT support slaves driving
@@ -129,12 +129,12 @@ uint8_t i2c_read(struct i2c_bus *i2c) {
  * Send data/control to a selected device, if there is one, and return data.
  */
 static uint8_t i2c_op(struct i2c_bus *i2c, I2C_OP op, uint8_t data) {
-	return (i2c->current == NULL) ? 
-	        0xFF :
-	        i2c->current->cb(i2c->current->device, op, data);
+	return (i2c->current == NULL) ?
+		0xFF :
+		i2c->current->cb(i2c->current->device, op, data);
 }
 
-/* i2c_byte 
+/* i2c_byte
  * Bit 8 of a data cycle. Byte is stored in i2c->byte. */
 static void i2c_byte(struct i2c_bus *i2c) {
 	if (i2c->state == ID) {
@@ -276,14 +276,14 @@ void i2c_write(struct i2c_bus *i2c, uint8_t clkdata) {
 					/* Start condition */
 					i2c_start(i2c);
 					if (i2c->trace)
-						fprintf(stderr, 
+						fprintf(stderr,
 							"i2c: ====================================================\n"
 							"i2c: START condition detected\n");
 				}
 				else {
 					/* End condition*/
 					if (i2c->trace)
-						fprintf(stderr, 
+						fprintf(stderr,
 						"i2c: ====================================================\n"
 						"i2c: END condition detected\n");
 					i2c_end(i2c);

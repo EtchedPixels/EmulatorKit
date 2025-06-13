@@ -40,11 +40,11 @@ static const uint8_t sd_csd[17] = {
 static const uint8_t sdhc_csd[17] = {
 
 	0xFE,		/* Sync byte before CSD */
-    /* Taken from unbranded 4GB SDHC card */
-    0x40, 0x0E, 0x00, 0x32,
-    0x5B, 0x59, 0x00, 0x00,
-    0x1D, 0xFF, 0x7F, 0x80,
-    0x0A, 0x40, 0x00, 0x7D
+	/* Taken from unbranded 4GB SDHC card */
+	0x40, 0x0E, 0x00, 0x32,
+	0x5B, 0x59, 0x00, 0x00,
+	0x1D, 0xFF, 0x7F, 0x80,
+	0x0A, 0x40, 0x00, 0x7D
 };
 
 static const uint8_t sd_cid[] = {
@@ -91,8 +91,8 @@ static uint8_t sd_process_command(struct sdcard *c)
 	case 0x40+9:		/* CMD 9 - read the CSD */
 		if (c->block)
 			memcpy(c->sd_out,sdhc_csd, 17);
-        else
-            memcpy(c->sd_out,sd_csd, 17);
+		else
+			memcpy(c->sd_out,sd_csd, 17);
 		c->sd_outlen = 17;
 		c->sd_outp = 0;
 		c->sd_mode = 2;
@@ -103,13 +103,13 @@ static uint8_t sd_process_command(struct sdcard *c)
 		c->sd_outp = 0;
 		c->sd_mode = 2;
 		return 0x00;
-    case 0x40+13:       /* CMD 13 - send status*/
+	case 0x40+13:		/* CMD 13 - send status*/
 		c->sd_out[0] = 0x00;	/* Return 2 0-Bytes */
 		c->sd_out[1] = 0x00;	/* To indicate no error */
 		c->sd_outlen = 1;
 		c->sd_outp = 0;
 		c->sd_mode = 2;
-        return 0x00;
+		return 0x00;
 	case 0x40+16:		/* CMD 16 - set block size */
 		/* Should check data is 512 !! FIXME */
 		return 0x00;	/* Sure */

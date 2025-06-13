@@ -66,17 +66,17 @@ static uint32_t mem_write_32(uint32_t addr, uint32_t val, uint32_t *trap, uint32
 static uint32_t mem_write_16(uint32_t addr, uint32_t val, uint32_t *trap, uint32_t *rval);
 static uint32_t mem_write_8(uint32_t addr, uint32_t val, uint32_t *trap, uint32_t *rval);
 
-#define MINIRV32WARN	printf
+#define MINIRV32WARN		printf
 #define MINIRV32_DECORATE	static
 #define MINIRV32_IMPLEMENTATION
 #define MINIRV32_POSTEXEC(pc, ir, retval) \
-                                trap = rv32_glue(pc, ir, trap)
+				trap = rv32_glue(pc, ir, trap)
 #define MINIRV32_HANDLE_MEM_STORE_CONTROL(addr, val)	\
-                                if (io_out(addr, val)) return val;
+				if (io_out(addr, val)) return val;
 #define MINIRV32_HANDLE_MEM_LOAD_CONTROL(addr, val) \
-                                val = io_in(addr)
+				val = io_in(addr)
 #define MINIRV32_OTHERCSR_WRITE(csr, value) \
-                                csr_out(csr, value)
+				csr_out(csr, value)
 
 static void disassemble(uint32_t ir, uint32_t addr);
 
@@ -408,22 +408,22 @@ int main(int argc, char *argv[])
 		uint32_t elapsed = 0;
 
 		for (j = 0; j < 100; j++) {
-                        uint32_t ret = MiniRV32IMAStep(&cpu, ram, 0, elapsed, 1024);
-                        switch(ret) {
-                        case 0:
-                        case 1:
-                        case 3:
-                            break;
-                        case 0x7777:
-                        case 0x5555:
-                            done = 1;
-                            break;
-                        default:
-                            fprintf(stderr, "invalid rv32 ret %x\n",
-                                ret);
-                            done = 1;
-                            break;
-                        }
+			uint32_t ret = MiniRV32IMAStep(&cpu, ram, 0, elapsed, 1024);
+			switch(ret) {
+			case 0:
+			case 1:
+			case 3:
+				break;
+			case 0x7777:
+			case 0x5555:
+				done = 1;
+				break;
+			default:
+				fprintf(stderr, "invalid rv32 ret %x\n",
+					ret);
+				done = 1;
+				break;
+			}
 		}
 		/* Do 5ms of I/O and delays */
 		nanosleep(&tc, NULL);

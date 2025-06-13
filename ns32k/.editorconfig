@@ -1,0 +1,4 @@
+# why does this one file use 3 space indentation
+[defs.h]
+indent_style = space
+indent_size = 3

@@ -222,7 +222,7 @@ void ns32016_write8(uint32_t addr, uint8_t val)
 		fprintf(stderr, "W %06X = %02X\n", addr, val);
 	if (addr > 0x8000)
 		ramrom[addr & 0xFFFFF] = val;
-	
+
 }
 
 static void poll_irq_event(void)

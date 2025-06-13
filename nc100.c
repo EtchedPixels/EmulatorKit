@@ -111,14 +111,14 @@ static uint8_t *mmu(uint16_t addr, bool write)
 			return NULL;
 		pa = ((bank & 0x3F) << 14) + addr;
 		if (pa >= pcmcia_size)
-			return NULL; 
+			return NULL;
 		return pcmcia + pa;
 	case 0xC0:
 		return NULL;
 	}
 	return NULL;
 }
-	
+
 uint8_t mem_read(int unused, uint16_t addr)
 {
 	uint8_t *p = mmu(addr, false);
@@ -503,7 +503,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 	case 0xE0:	/* Unused */
 		break;
 	case 0xF0:	/* Unused */
-		break;	
+		break;
 	}
 }
 
@@ -543,7 +543,7 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 	case 0xE0:	/* Unused */
 		break;
 	case 0xF0:	/* Unused */
-		break;	
+		break;
 	}
 	return 0xFF;
 }
@@ -581,7 +581,7 @@ static void nc100_rasterize(void)
 static void nc100_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = 480;
 	rect.h = 64;

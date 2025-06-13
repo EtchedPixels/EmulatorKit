@@ -1,20 +1,20 @@
 struct z80copro {
-    Z80Context cpu;
-    int unit;
-    uint8_t eprom[16384];
-    uint8_t ram[8][65536];
-    uint16_t latches;
+	Z80Context cpu;
+	int unit;
+	uint8_t eprom[16384];
+	uint8_t ram[8][65536];
+	uint16_t latches;
 #define MAINT	0x8000
 #define ROMEN	0x4000
-    uint16_t masterbits;
+	uint16_t masterbits;
 #define COIRQ		0x8000
 #define CONMI		0x4000
 #define CORESET		0x2000
-    uint8_t rambank;
-    int tstates;
-    int nmi_pending;
-    int irq_pending;
-    int trace;
+	uint8_t rambank;
+	int tstates;
+	int nmi_pending;
+	int irq_pending;
+	int trace;
 };
 
 #define MAX_COPRO	4

@@ -146,7 +146,7 @@ static void dw_csum_2(uint8_t c)
 	dw_mode = DW_ERR_OUT;
 	drivewire_byte_pending();
 }
-	
+
 static int dw_prepare(int *fd)
 {
 	uint32_t lsn;
@@ -184,7 +184,7 @@ static void dw_read(void)
 
 /* The block to write has arrived. Process it, set up for an error
    return and move to the err return state */
-static void dw_write(void)  
+static void dw_write(void)
 {
 	int fd;
 	dw_csum = dw_checksum(dw_buf + 4, 256);
@@ -201,7 +201,7 @@ static void dw_write(void)
 	}
 	dw_err = 0;
 }
-	
+
 /* We received the block we were supposed to */
 static void dw_in_done(void)
 {

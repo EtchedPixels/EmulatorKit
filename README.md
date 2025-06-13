@@ -13,7 +13,7 @@ RC2014 and Fuzix.
 ## Processors Supported
 
 - 1802 - initial model of 1802/4/5 processors
-- 6303 
+- 6303
 - 6502 - NMOS part (Mike Chambers)
 - 65C02 - CMOS part (derived from Mike Chambers code)
 - 65C816 (uses a slightly modified lib65816)
@@ -32,7 +32,7 @@ RC2014 and Fuzix.
 - Z8 - initial model
 - Z80 (libz80)
 - Z180 - dervied from libz80
-- Z280 
+- Z280
 
 ## RCbus / RC2014 / BP80 Processor Cards Emulated
 - Z80
@@ -266,4 +266,3 @@ A fairly standard Z80 retro build with Zilog peripherals and 4 x 16K memory
 banking.
 
 https://github.com/peterw8102/Z80-Retro/wiki
-

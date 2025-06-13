@@ -1,6 +1,6 @@
 /* license:BSD-3-Clause
    copyright-holders:Michael Zapf */
-   
+
 /*
  *	De-mamed and turned back into C for the RC2014 emulator set. Any bugs
  *	in this version should be assumed to be mine, Alan Cox 2022.
@@ -166,11 +166,11 @@ struct tms9995 *tms9995_create(bool is_mp9537, bool bstep)
 		return NULL;
 	memset(tms, 0, sizeof(*tms));
 	tms->mp9537 = is_mp9537;
-#if 0	
+#if 0
 		tms->external_operation(*this),
 		tms->clock_out_line(*this),
 		tms->holda_line(*this)
-#endif		
+#endif
 	tms->check_overflow = !bstep;
 	// Set up the lookup table for command decoding
 	tms9995_build_command_lookup_table(tms); return tms;
@@ -877,7 +877,7 @@ const tms9995_instruction s_command[] =
     16 entries, indexed by 4 consecutive bits in the opcode.
 
     See tms9900.c for a detailed description.
-    
+
     Would actually probably be better to just binary search the
     above with masks precomputed
 */
@@ -889,14 +889,14 @@ static struct tms_decode *decode_root;
  */
 static struct tms_decode *new_decode(void)
 {
-        struct tms_decode *d = malloc(sizeof(struct tms_decode));
+	struct tms_decode *d = malloc(sizeof(struct tms_decode));
 	unsigned int i;
 
 	if (d == NULL) {
 		fprintf(stderr, "Out of memory.\n");
 		exit(1);
 	}
-	for (i = 0; i < 16; i++) { 
+	for (i = 0; i < 16; i++) {
 		d->index[i] = NOPRG;
 		d->next_digit[i] = NULL;
 	}
@@ -919,7 +919,7 @@ static void insert_decode(const tms9995_instruction *inst, unsigned int inum)
 
 	while(bitcount < n) {
 		idx = (opcode >> 12) & 0x0F;
-		if (decode->next_digit[idx] == NULL) 
+		if (decode->next_digit[idx] == NULL)
 			decode->next_digit[idx] = new_decode();
 		decode = decode->next_digit[idx];
 		bitcount += 4;
@@ -933,8 +933,8 @@ static void insert_decode(const tms9995_instruction *inst, unsigned int inum)
 //		fprintf(stderr, "opcode=%04x at position %d\n", inst->opcode, idx);
 		decode->index[idx + i] = inum;
 	}
-	
-}		
+
+}
 
 /*
  *	Build the decode tree
@@ -943,13 +943,13 @@ static void tms9995_build_command_lookup_table(struct tms9995 *tms)
 {
 	int inum = 0;
 	const tms9995_instruction *inst = s_command;
-	
+
 	/* Built already ? */
 	if (decode_root)
 		return;
 
 	decode_root = new_decode();
-	
+
 	while(inst->opcode != 0) {
 		insert_decode(inst, inum);
 		inst++;
@@ -1358,7 +1358,7 @@ static void tms9995_next_command(struct tms9995 *tms)
 		tms->get_destination = false;
 		// This is a preset for opcodes which do not need an opcode address derivation
 		tms->address = tms->WP + ((tms->IR & 0x000f)<<1);
-		tms->MPC = -1; 
+		tms->MPC = -1;
 		if (tms->itrace) {
 			fprintf(stderr, "===== %04x: Op=%04x (%s)\n", tms->PC-2, tms->IR, opname[tms->command]);
 
@@ -2499,7 +2499,7 @@ static void tms9995_alu_external(struct tms9995 *tms)
 #if 0
 	if (!tms->external_operation.isnull(tms))
 		tms->external_operation((tms->IR >> 5) & 0x07, 1, 0xff);
-#endif		
+#endif
 }
 
 /*
@@ -3314,134 +3314,134 @@ static const ophandler s_microoperation[45] =
 /* Op decode table */
 
 static const char *opnames0[] = {
-    "SZC %s,%d",
-    "SZCB %s,%d",
-    "S %s,%d",
-    "SB %s,%d",
-    "C %s,%d",
-    "CB %s,%d",
-    "A %s,%d",
-    "AB %s,%d",
-    "MOV %s,%d",
-    "MOVB %s,%d",
-    "SOC %s,%d",
-    "SOCB %s,%d"
+	"SZC %s,%d",
+	"SZCB %s,%d",
+	"S %s,%d",
+	"SB %s,%d",
+	"C %s,%d",
+	"CB %s,%d",
+	"A %s,%d",
+	"AB %s,%d",
+	"MOV %s,%d",
+	"MOVB %s,%d",
+	"SOC %s,%d",
+	"SOCB %s,%d"
 };
 
 static const char *opnames1[] = {
-    "COC %s,%W",
-    "CZC %s,%W",
-    "XOR %s,%W",
-    "XOP %x,%s ",
-    "LDCR %x,%s",
-    "STCR %x,%s",
-    "MPY %s,%W",
-    "DIV %s,%W"
+	"COC %s,%W",
+	"CZC %s,%W",
+	"XOR %s,%W",
+	"XOP %x,%s ",
+	"LDCR %x,%s",
+	"STCR %x,%s",
+	"MPY %s,%W",
+	"DIV %s,%W"
 };
 
 static const char *opnames2[] = {
-    "JMP %8",
-    "JLT %8",
-    "JLE %8",
-    "JEQ %8",
-    "JHE %8",
-    "JGT %8",
-    "JNE %8",
-    "JNC %8",
-    "JOC %8",
-    "JNO %8",
-    "JL %8",
-    "JH %8",
-    "JOP %8",
-    "SBO %8",
-    "SBZ %8",
-    "TB %8"
+	"JMP %8",
+	"JLT %8",
+	"JLE %8",
+	"JEQ %8",
+	"JHE %8",
+	"JGT %8",
+	"JNE %8",
+	"JNC %8",
+	"JOC %8",
+	"JNO %8",
+	"JL %8",
+	"JH %8",
+	"JOP %8",
+	"SBO %8",
+	"SBZ %8",
+	"TB %8"
 };
 
 static const char *opnames8[] = {
-    "SRA %w,%S",
-    "SRL %w,%S",
-    "SLA %w,%S",
-    "SRC %w,%S"
+	"SRA %w,%S",
+	"SRL %w,%S",
+	"SLA %w,%S",
+	"SRC %w,%S"
 };
 
 static const char *opnames9[] = {
-    "BLWP %s",
-    "B %s",
-    "X %s",
-    "CLR %s",
-    "NEG %s",
-    "INV %s",
-    "INC %s",
-    "INCT %s",
-    "DEC %s",
-    "DECT %s",
-    "BL %s",
-    "SWPB %s",
-    "SETO %s",
-    "ABS %s",
-    NULL,
-    NULL
+	"BLWP %s",
+	"B %s",
+	"X %s",
+	"CLR %s",
+	"NEG %s",
+	"INV %s",
+	"INC %s",
+	"INCT %s",
+	"DEC %s",
+	"DECT %s",
+	"BL %s",
+	"SWPB %s",
+	"SETO %s",
+	"ABS %s",
+	NULL,
+	NULL
 };
 
 static const char *opnames10[] = {
-    "LI %w,%i",
-    "AI %w,%i",
-    "ANDI %w,%i",
-    "ORI %w,%i",
-    "CI %w,%i",
-    "STWP %w",
-    "STST %w",
-    "LWPI %i",
-    "LIMI %i",
-    NULL,
-    "IDLE",	/* No arguments */
-    "RSET",	/* No arguments */
-    "RTWP",	/* No arguments */
-    "CKON",	/* No arguments */
-    "CKOF",	/* No arguments */
-    "LREX"	/* No arguments */
+	"LI %w,%i",
+	"AI %w,%i",
+	"ANDI %w,%i",
+	"ORI %w,%i",
+	"CI %w,%i",
+	"STWP %w",
+	"STST %w",
+	"LWPI %i",
+	"LIMI %i",
+	NULL,
+	"IDLE",	/* No arguments */
+	"RSET",	/* No arguments */
+	"RTWP",	/* No arguments */
+	"CKON",	/* No arguments */
+	"CKOF",	/* No arguments */
+	"LREX"	/* No arguments */
 };
 
 static const char *opnames11[] = {
-    NULL,
-    NULL, //"BIND",
-    "DIVS %s",
-    "MPYS %s"
+	NULL,
+	NULL, //"BIND",
+	"DIVS %s",
+	"MPYS %s"
 };
 
 static const char *opnames12[] = {
-    "LST %w",
-    "LWP %w",
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+	"LST %w",
+	"LWP %w",
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
 };
 
 struct opset {
-    uint16_t min;
-    uint16_t shift;
-    const char **name;
+	uint16_t min;
+	uint16_t shift;
+	const char **name;
 };
 
 struct opset ops[] = {
-    {	0x4000, 12,	opnames0	},
-    {	0x2000,	10,	opnames1	},
-    {	0x1000, 8,	opnames2	},
-    {	0x0E40, 6,	NULL		},
-    {	0x0E00, 4,	NULL		},
-    {	0x0C40, 6,	NULL		},
-    {	0x0C10, 4,	NULL		},
-    {	0x0C00, 0,	NULL		},
-    {	0x0800, 8,	opnames8	},
-    {	0x0400,	6,	opnames9	},
-    {	0x0200,	5,	opnames10	},
-    {	0x0100, 6,	opnames11	},
-    {	0x0080,	4,	opnames12	},
-    {	0,		}
+	{	0x4000, 12,	opnames0	},
+	{	0x2000,	10,	opnames1	},
+	{	0x1000, 8,	opnames2	},
+	{	0x0E40, 6,	NULL		},
+	{	0x0E00, 4,	NULL		},
+	{	0x0C40, 6,	NULL		},
+	{	0x0C10, 4,	NULL		},
+	{	0x0C00, 0,	NULL		},
+	{	0x0800, 8,	opnames8	},
+	{	0x0400,	6,	opnames9	},
+	{	0x0200,	5,	opnames10	},
+	{	0x0100, 6,	opnames11	},
+	{	0x0080,	4,	opnames12	},
+	{	0,		}
 };
 
 
@@ -3450,133 +3450,133 @@ static uint16_t iptr;
 
 static struct opset *tms9995_get_op(uint16_t ip)
 {
-    struct opset *p = ops;
-    while(p->min) {
-        if (ip >= p->min)
-            return p;
-        p++;
-    }
-    return NULL;
+	struct opset *p = ops;
+	while(p->min) {
+		if (ip >= p->min)
+			return p;
+		p++;
+	}
+	return NULL;
 }
 
 static uint16_t next_word(void)
 {
-    return idata[iptr++];
+	return idata[iptr++];
 }
 
 static char *decode_addr(char *p, uint8_t bits)
 {
-    uint8_t v = bits & 0x0F;
-    switch(bits & 0x30) {
-    case 0x00:	/* R */
-        p += sprintf(p, "R%d", v);
-        break;
-    case 0x10:
-        p += sprintf(p, "*R%d", v);
-        break;
-    case 0x20:
-        p += sprintf(p, "@%04X", next_word());
-        if (v)
-            p += sprintf(p, "(R%d)", v);
-        break;
-    case 0x30:
-        p += sprintf(p, "*R%d+", v);
-        break;
-    }
-    return p;
+	uint8_t v = bits & 0x0F;
+	switch(bits & 0x30) {
+	case 0x00:	/* R */
+		p += sprintf(p, "R%d", v);
+		break;
+	case 0x10:
+		p += sprintf(p, "*R%d", v);
+		break;
+	case 0x20:
+		p += sprintf(p, "@%04X", next_word());
+		if (v)
+			p += sprintf(p, "(R%d)", v);
+		break;
+	case 0x30:
+		p += sprintf(p, "*R%d+", v);
+		break;
+	}
+	return p;
 }
 
 static char *decode_op(struct opset *op, uint16_t ip)
 {
-    static char buf[128];
-    char *out = buf;
-    uint16_t inst;
-    const char *name = NULL;
+	static char buf[128];
+	char *out = buf;
+	uint16_t inst;
+	const char *name = NULL;
 
-    if (op) {
-        inst = (ip - op->min) >> op->shift;
-        if (op->name)
-            name = op->name[inst];
-    }
+	if (op) {
+		inst = (ip - op->min) >> op->shift;
+		if (op->name)
+			name = op->name[inst];
+	}
 
-    if (name == NULL) {
-        sprintf(buf, "ILLEGAL %04X", ip);
-        return buf;
-    }
-    /* TODO; a first *name byte to say 'non inst must be zero' */
-    while(*name) {
-        if (*name != '%') {
-            *out++ = *name++;
-            continue;
-        }
-        switch(*++name) {
-            case 'w':
-                out += sprintf(out, "R%d", ip & 0x0F);
-                break;
-            case 'W':
-                out += sprintf(out, "R%d", (ip >> 6) & 0x0F);
-                break;
-            case 's':
-                out = decode_addr(out, ip);
-                break;
-            case 'd':
-                out = decode_addr(out, ip >> 6);
-                break;
-            case 'a':
-                out = decode_addr(out, ip >> 4);
-                break;
-            case 'x':
-                out += sprintf(out, "%d", (ip >> 6) & 0x0F);
-                break;
-            case '8':
-                out += sprintf(out, "%d", (int)(int8_t)ip);
-                break;
-            case 'S':
-                out += sprintf(out, "%d", (ip >> 4) & 0x0F);
-                break;
-            case 'i':
-                out += sprintf(out, "%04X", next_word());
-                break;
-        }
-        name++;
-    }
-    *out = 0;
-    return buf;
+	if (name == NULL) {
+		sprintf(buf, "ILLEGAL %04X", ip);
+		return buf;
+	}
+	/* TODO; a first *name byte to say 'non inst must be zero' */
+	while(*name) {
+		if (*name != '%') {
+			*out++ = *name++;
+			continue;
+		}
+		switch(*++name) {
+		case 'w':
+			out += sprintf(out, "R%d", ip & 0x0F);
+			break;
+		case 'W':
+			out += sprintf(out, "R%d", (ip >> 6) & 0x0F);
+			break;
+		case 's':
+			out = decode_addr(out, ip);
+			break;
+		case 'd':
+			out = decode_addr(out, ip >> 6);
+			break;
+		case 'a':
+			out = decode_addr(out, ip >> 4);
+			break;
+		case 'x':
+			out += sprintf(out, "%d", (ip >> 6) & 0x0F);
+			break;
+		case '8':
+			out += sprintf(out, "%d", (int)(int8_t)ip);
+			break;
+		case 'S':
+			out += sprintf(out, "%d", (ip >> 4) & 0x0F);
+			break;
+		case 'i':
+			out += sprintf(out, "%04X", next_word());
+			break;
+		}
+		name++;
+	}
+	*out = 0;
+	return buf;
 }
 
 static uint16_t tms9995_debug_read(struct tms9995 *tms, uint16_t addr)
 {
-    if (is_onchip(tms, addr))
-        return (tms->onchip_memory[addr & 0xFE] << 8) |
-                tms->onchip_memory[(addr & 0xFE) | 1];
-    return (tms9995_readb_debug(tms, addr & 0xFFFE) << 8) |
-                tms9995_readb_debug(tms, addr | 1);
+	if (is_onchip(tms, addr))
+		return (tms->onchip_memory[addr & 0xFE] << 8) |
+			tms->onchip_memory[(addr & 0xFE) | 1];
+	return (tms9995_readb_debug(tms, addr & 0xFFFE) << 8) |
+		tms9995_readb_debug(tms, addr | 1);
 }
 
 
 static void tms9995_disassemble(struct tms9995 *tms)
 {
-    struct opset *op;
-    uint16_t ir;
-    uint16_t addr = tms->PC_debug;
-    unsigned int i;
+	struct opset *op;
+	uint16_t ir;
+	uint16_t addr = tms->PC_debug;
+	unsigned int i;
 
-    iptr = 0;
-    idata[0] = tms9995_debug_read(tms, addr);
-    idata[1] = tms9995_debug_read(tms, addr + 2);
-    idata[2] = tms9995_debug_read(tms, addr + 4);
+	iptr = 0;
+	idata[0] = tms9995_debug_read(tms, addr);
+	idata[1] = tms9995_debug_read(tms, addr + 2);
+	idata[2] = tms9995_debug_read(tms, addr + 4);
 
-    ir = next_word();
-    op = tms9995_get_op(ir);
+	ir = next_word();
+	op = tms9995_get_op(ir);
 
-    for (i = 0; i < 16; i++) {
-        fprintf(stderr, "R%d %04x ", i, tms9995_read_workspace_register_debug(tms, i));
-        if ((i & 3) == 3) {
-            fprintf(stderr, "\n");
-            if (i != 15)
-                fprintf(stderr, "\t\t");
-        } else
-            fprintf(stderr, " | ");
-    }
-    fprintf(stderr, "%04X: %s\n\t\t", tms->PC_debug, decode_op(op, ir));
+	for (i = 0; i < 16; i++) {
+		fprintf(stderr, "R%d %04x ", i, tms9995_read_workspace_register_debug(tms, i));
+		if ((i & 3) == 3) {
+			fprintf(stderr, "\n");
+			if (i != 15)
+				fprintf(stderr, "\t\t");
+		} else
+			fprintf(stderr, " | ");
+	}
+	fprintf(stderr, "%04X: %s\n\t\t", tms->PC_debug, decode_op(op, ir));
 }

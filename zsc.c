@@ -176,8 +176,8 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 		if (trace & TRACE_BANK)
 			fprintf(stderr, "Bank set to %d, ROMEN %d.\n",
 				banknum, romen);
-	 } else if (addr == 0x11) {
-	 	wprotect = val;
+	} else if (addr == 0x11) {
+		wprotect = val;
 		if (trace & TRACE_BANK)
 			fprintf(stderr, "Wprotect set to %X\n", wprotect);
 	} else if (addr == 0xFD)

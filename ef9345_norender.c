@@ -14,7 +14,7 @@
 #include "ef9345_render.h"
 
 struct ef9345_renderer {
-    unsigned dummy;
+	unsigned dummy;
 };
 
 struct ef9345_renderer dummy;
@@ -30,5 +30,5 @@ void ef8345_renderer_free(struct ef9345_renderer *render)
 
 struct ef9345_renderer *ef9345_renderer_create(struct ef9345 *ef9345)
 {
-    return &dummy;
+	return &dummy;
 }

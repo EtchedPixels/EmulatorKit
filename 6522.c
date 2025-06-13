@@ -234,56 +234,56 @@ void via_write(struct via6522 *via, uint8_t addr, uint8_t val)
 
 int via_irq_pending(struct via6522 *via)
 {
-    return via->irq;
+	return via->irq;
 }
 
 void via_trace(struct via6522 *via, int onoff)
 {
-    via->trace = onoff;
+	via->trace = onoff;
 }
 
 void via_free(struct via6522 *via)
 {
-    free(via);
+	free(via);
 }
 
 struct via6522 *via_create(void)
 {
-    struct via6522 *v = malloc(sizeof(struct via6522));
-    if (v == NULL) {
-        fprintf(stderr, "Out of memory.\n");
-        exit(1);
-    }
-    memset(v, 0, sizeof(struct via6522));
-    return v;
+	struct via6522 *v = malloc(sizeof(struct via6522));
+	if (v == NULL) {
+		fprintf(stderr, "Out of memory.\n");
+		exit(1);
+	}
+	memset(v, 0, sizeof(struct via6522));
+	return v;
 }
 
 uint8_t via_get_direction_a(struct via6522 *via)
 {
-    return via->ddra;
+	return via->ddra;
 }
 
 uint8_t via_get_port_a(struct via6522 *via)
 {
-    return via->ora & via->ddra;
+	return via->ora & via->ddra;
 }
 
 void via_set_port_a(struct via6522 *via, uint8_t val)
 {
-    via->ira = val;
+	via->ira = val;
 }
 
 uint8_t via_get_direction_b(struct via6522 *via)
 {
-    return via->ddrb;
+	return via->ddrb;
 }
 
 uint8_t via_get_port_b(struct via6522 *via)
 {
-    return via->orb & via->ddrb;
+	return via->orb & via->ddrb;
 }
 
 void via_set_port_b(struct via6522 *via, uint8_t val)
 {
-    via->irb = val;
+	via->irb = val;
 }

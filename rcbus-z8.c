@@ -109,7 +109,7 @@ struct z8 *cpu;
  *	otherwise it is treated as a RAM data access
  *
  *	MMU board at I/O FE/FF
- *	
+ *
  *	FE	Bank low, bank high (low 56K, high 8K) 4bits
  *	FF	Ditto for code memory, starts 0
  *
@@ -122,7 +122,7 @@ static uint8_t zport[4];
 uint8_t z8_port_read(struct z8 *z8, uint8_t port)
 {
 	return 0xFF;
-} 
+}
 
 void z8_port_write(struct z8 *z8, uint8_t port, uint8_t val)
 {
@@ -180,7 +180,7 @@ static void int_event(void)
 	if (c & 2)
 		z8_tx_done(cpu);
 }
-	
+
 void recalc_interrupts(void)
 {
 	if (live_irq)
@@ -204,22 +204,22 @@ static void int_clear(int src)
 /* UART: very mimimal for the moment */
 
 struct uart16x50 {
-    uint8_t ier;
-    uint8_t iir;
-    uint8_t fcr;
-    uint8_t lcr;
-    uint8_t mcr;
-    uint8_t lsr;
-    uint8_t msr;
-    uint8_t scratch;
-    uint8_t ls;
-    uint8_t ms;
-    uint8_t dlab;
-    uint8_t irq;
+	uint8_t ier;
+	uint8_t iir;
+	uint8_t fcr;
+	uint8_t lcr;
+	uint8_t mcr;
+	uint8_t lsr;
+	uint8_t msr;
+	uint8_t scratch;
+	uint8_t ls;
+	uint8_t ms;
+	uint8_t dlab;
+	uint8_t irq;
 #define RXDA	1
 #define TEMT	2
 #define MODEM	8
-    uint8_t irqline;
+	uint8_t irqline;
 };
 
 static struct uart16x50 uart;
@@ -227,218 +227,218 @@ static unsigned int uart_16550a;
 
 static void uart_init(struct uart16x50 *uptr)
 {
-    uptr->dlab = 0;
+	uptr->dlab = 0;
 }
 
 /* Compute the interrupt indicator register from what is pending */
 static void uart_recalc_iir(struct uart16x50 *uptr)
 {
-    if (uptr->irq & RXDA)
-        uptr->iir = 0x04;
-    else if (uptr->irq & TEMT)
-        uptr->iir = 0x02;
-    else if (uptr->irq & MODEM)
-        uptr->iir = 0x00;
-    else {
-        uptr->iir = 0x01;	/* No interrupt */
-        uptr->irqline = 0;
-        int_clear(IRQ_16550A);
-        return;
-    }
-    /* Ok so we have an event, do we need to waggle the line */
-    if (uptr->irqline)
-        return;
-    uptr->irqline = uptr->irq;
-    int_set(IRQ_16550A);
+	if (uptr->irq & RXDA)
+		uptr->iir = 0x04;
+	else if (uptr->irq & TEMT)
+		uptr->iir = 0x02;
+	else if (uptr->irq & MODEM)
+		uptr->iir = 0x00;
+	else {
+		uptr->iir = 0x01;	/* No interrupt */
+		uptr->irqline = 0;
+		int_clear(IRQ_16550A);
+		return;
+	}
+	/* Ok so we have an event, do we need to waggle the line */
+	if (uptr->irqline)
+		return;
+	uptr->irqline = uptr->irq;
+	int_set(IRQ_16550A);
 }
 
 /* Raise an interrupt source. Only has an effect if enabled in the ier */
 static void uart_interrupt(struct uart16x50 *uptr, uint8_t n)
 {
-    if (uptr->irq & n)
-        return;
-    if (!(uptr->ier & n))
-        return;
-    uptr->irq |= n;
-    uart_recalc_iir(uptr);
+	if (uptr->irq & n)
+		return;
+	if (!(uptr->ier & n))
+		return;
+	uptr->irq |= n;
+	uart_recalc_iir(uptr);
 }
 
 static void uart_clear_interrupt(struct uart16x50 *uptr, uint8_t n)
 {
-    if (!(uptr->irq & n))
-        return;
-    uptr->irq &= ~n;
-    uart_recalc_iir(uptr);
+	if (!(uptr->irq & n))
+		return;
+	uptr->irq &= ~n;
+	uart_recalc_iir(uptr);
 }
 
 static void uart_event(struct uart16x50 *uptr)
 {
-    uint8_t r = check_chario();
-    uint8_t old = uptr->lsr;
-    uint8_t dhigh;
-    if (r & 1)
-        uptr->lsr |= 0x01;	/* RX not empty */
-    if (r & 2)
-        uptr->lsr |= 0x60;	/* TX empty */
-    dhigh = (old ^ uptr->lsr);
-    dhigh &= uptr->lsr;		/* Changed high bits */
-    if (dhigh & 1)
-        uart_interrupt(uptr, RXDA);
-    if (dhigh & 0x2)
-        uart_interrupt(uptr, TEMT);
+	uint8_t r = check_chario();
+	uint8_t old = uptr->lsr;
+	uint8_t dhigh;
+	if (r & 1)
+		uptr->lsr |= 0x01;	/* RX not empty */
+	if (r & 2)
+		uptr->lsr |= 0x60;	/* TX empty */
+	dhigh = (old ^ uptr->lsr);
+	dhigh &= uptr->lsr;		/* Changed high bits */
+	if (dhigh & 1)
+		uart_interrupt(uptr, RXDA);
+	if (dhigh & 0x2)
+		uart_interrupt(uptr, TEMT);
 }
 
 static void show_settings(struct uart16x50 *uptr)
 {
-    uint32_t baud;
+	uint32_t baud;
 
-    if (!(trace & TRACE_UART))
-        return;
+	if (!(trace & TRACE_UART))
+		return;
 
-    baud = uptr->ls + (uptr->ms << 8);
-    if (baud == 0)
-        baud = 1843200;
-    baud = 1843200 / baud;
-    baud /= 16;
-    fprintf(stderr, "[%d:%d",
-            baud, (uptr->lcr &3) + 5);
-    switch(uptr->lcr & 0x38) {
-        case 0x00:
-        case 0x10:
-        case 0x20:
-        case 0x30:
-            fprintf(stderr, "N");
-            break;
-        case 0x08:
-            fprintf(stderr, "O");
-            break;
-        case 0x18:
-            fprintf(stderr, "E");
-            break;
-        case 0x28:
-            fprintf(stderr, "M");
-            break;
-        case 0x38:
-            fprintf(stderr, "S");
-            break;
-    }
-    fprintf(stderr, "%d ",
-            (uptr->lcr & 4) ? 2 : 1);
+	baud = uptr->ls + (uptr->ms << 8);
+	if (baud == 0)
+		baud = 1843200;
+	baud = 1843200 / baud;
+	baud /= 16;
+	fprintf(stderr, "[%d:%d",
+		baud, (uptr->lcr &3) + 5);
+	switch(uptr->lcr & 0x38) {
+		case 0x00:
+		case 0x10:
+		case 0x20:
+		case 0x30:
+			fprintf(stderr, "N");
+			break;
+		case 0x08:
+			fprintf(stderr, "O");
+			break;
+		case 0x18:
+			fprintf(stderr, "E");
+			break;
+		case 0x28:
+			fprintf(stderr, "M");
+			break;
+		case 0x38:
+			fprintf(stderr, "S");
+			break;
+	}
+	fprintf(stderr, "%d ",
+		(uptr->lcr & 4) ? 2 : 1);
 
-    if (uptr->lcr & 0x40)
-        fprintf(stderr, "break ");
-    if (uptr->lcr & 0x80)
-        fprintf(stderr, "dlab ");
-    if (uptr->mcr & 1)
-        fprintf(stderr, "DTR ");
-    if (uptr->mcr & 2)
-        fprintf(stderr, "RTS ");
-    if (uptr->mcr & 4)
-        fprintf(stderr, "OUT1 ");
-    if (uptr->mcr & 8)
-        fprintf(stderr, "OUT2 ");
-    if (uptr->mcr & 16)
-        fprintf(stderr, "LOOP ");
-    fprintf(stderr, "ier %02x]\n", uptr->ier);
+	if (uptr->lcr & 0x40)
+		fprintf(stderr, "break ");
+	if (uptr->lcr & 0x80)
+		fprintf(stderr, "dlab ");
+	if (uptr->mcr & 1)
+		fprintf(stderr, "DTR ");
+	if (uptr->mcr & 2)
+		fprintf(stderr, "RTS ");
+	if (uptr->mcr & 4)
+		fprintf(stderr, "OUT1 ");
+	if (uptr->mcr & 8)
+		fprintf(stderr, "OUT2 ");
+	if (uptr->mcr & 16)
+		fprintf(stderr, "LOOP ");
+	fprintf(stderr, "ier %02x]\n", uptr->ier);
 }
 
 static void uart_write(struct uart16x50 *uptr, uint8_t addr, uint8_t val)
 {
-    switch(addr) {
-    case 0:	/* If dlab = 0, then write else LS*/
-        if (uptr->dlab == 0) {
-            if (uptr == &uart) {
-                putchar(val);
-                fflush(stdout);
-            }
-            uart_clear_interrupt(uptr, TEMT);
-            uart_interrupt(uptr, TEMT);
-        } else {
-            uptr->ls = val;
-            show_settings(uptr);
-        }
-        break;
-    case 1:	/* If dlab = 0, then IER */
-        if (uptr->dlab) {
-            uptr->ms= val;
-            show_settings(uptr);
-        }
-        else
-            uptr->ier = val;
-        break;
-    case 2:	/* FCR */
-        uptr->fcr = val & 0x9F;
-        break;
-    case 3:	/* LCR */
-        uptr->lcr = val;
-        uptr->dlab = (uptr->lcr & 0x80);
-        show_settings(uptr);
-        break;
-    case 4:	/* MCR */
-        uptr->mcr = val & 0x3F;
-        show_settings(uptr);
-        break;
-    case 5:	/* LSR (r/o) */
-        break;
-    case 6:	/* MSR (r/o) */
-        break;
-    case 7:	/* Scratch */
-        uptr->scratch = val;
-        break;
-    }
+	switch(addr) {
+	case 0:	/* If dlab = 0, then write else LS*/
+		if (uptr->dlab == 0) {
+			if (uptr == &uart) {
+				putchar(val);
+				fflush(stdout);
+			}
+			uart_clear_interrupt(uptr, TEMT);
+			uart_interrupt(uptr, TEMT);
+		} else {
+			uptr->ls = val;
+			show_settings(uptr);
+		}
+		break;
+	case 1:	/* If dlab = 0, then IER */
+		if (uptr->dlab) {
+			uptr->ms= val;
+			show_settings(uptr);
+		}
+		else
+			uptr->ier = val;
+		break;
+	case 2:	/* FCR */
+		uptr->fcr = val & 0x9F;
+		break;
+	case 3:	/* LCR */
+		uptr->lcr = val;
+		uptr->dlab = (uptr->lcr & 0x80);
+		show_settings(uptr);
+		break;
+	case 4:	/* MCR */
+		uptr->mcr = val & 0x3F;
+		show_settings(uptr);
+		break;
+	case 5:	/* LSR (r/o) */
+		break;
+	case 6:	/* MSR (r/o) */
+		break;
+	case 7:	/* Scratch */
+		uptr->scratch = val;
+		break;
+	}
 }
 
 static uint8_t uart_read(struct uart16x50 *uptr, uint8_t addr)
 {
-    uint8_t r;
+	uint8_t r;
 
-    switch(addr) {
-    case 0:
-	if (uptr->dlab)
-		return uptr->ls;
-        /* receive buffer */
-        if (uptr == &uart && uptr->dlab == 0) {
-            uart_clear_interrupt(uptr, RXDA);
-            return next_char();
-        }
-        break;
-    case 1:
-	if (uptr->dlab)
-		return uptr->ms;
-        /* IER */
-        return uptr->ier;
-    case 2:
-        /* IIR */
-        return uptr->iir;
-    case 3:
-        /* LCR */
-        return uptr->lcr;
-    case 4:
-        /* mcr */
-        return uptr->mcr;
-    case 5:
-        /* lsr */
-        r = check_chario();
-        uptr->lsr = 0;
-        if (r & 1)
-             uptr->lsr |= 0x01;	/* Data ready */
-        if (r & 2)
-             uptr->lsr |= 0x60;	/* TX empty | holding empty */
-        /* Reading the LSR causes these bits to clear */
-        r = uptr->lsr;
-        uptr->lsr &= 0xF0;
-        return r;
-    case 6:
-        /* msr */
-        r = uptr->msr;
-        /* Reading clears the delta bits */
-        uptr->msr &= 0xF0;
-        uart_clear_interrupt(uptr, MODEM);
-        return r;
-    case 7:
-        return uptr->scratch;
-    }
-    return 0xFF;
+	switch(addr) {
+	case 0:
+		if (uptr->dlab)
+			return uptr->ls;
+		/* receive buffer */
+		if (uptr == &uart && uptr->dlab == 0) {
+			uart_clear_interrupt(uptr, RXDA);
+			return next_char();
+		}
+		break;
+	case 1:
+		if (uptr->dlab)
+			return uptr->ms;
+		/* IER */
+		return uptr->ier;
+	case 2:
+		/* IIR */
+		return uptr->iir;
+	case 3:
+		/* LCR */
+		return uptr->lcr;
+	case 4:
+		/* mcr */
+		return uptr->mcr;
+	case 5:
+		/* lsr */
+		r = check_chario();
+		uptr->lsr = 0;
+		if (r & 1)
+			uptr->lsr |= 0x01;	/* Data ready */
+		if (r & 2)
+			uptr->lsr |= 0x60;	/* TX empty | holding empty */
+		/* Reading the LSR causes these bits to clear */
+		r = uptr->lsr;
+		uptr->lsr &= 0xF0;
+		return r;
+	case 6:
+		/* msr */
+		r = uptr->msr;
+		/* Reading clears the delta bits */
+		uptr->msr &= 0xF0;
+		uart_clear_interrupt(uptr, MODEM);
+		return r;
+	case 7:
+		return uptr->scratch;
+	}
+	return 0xFF;
 }
 
 static int ide = 0;
@@ -458,7 +458,7 @@ static void my_ide_write(uint16_t addr, uint8_t val)
 
    Give the host time and don't emulate time setting except for
    the 24/12 hour setting.
-   
+
  */
 
 uint8_t z8_inport(uint8_t addr)
@@ -596,7 +596,7 @@ void z8_do_write(struct z8 *cpu, unsigned space, uint16_t addr, uint8_t val)
 		higha |= (reg & 0x10) ? 2 : 0;
 		higha |= (reg & 0x4) ? 4 : 0;
 		higha |= (reg & 0x01) ? 8 : 0;	/* ROM/RAM */
-		
+
 		if (trace & TRACE_MEM) {
 			fprintf(stderr, "W %04X[%02X] = %02X\n",
 				(unsigned int)addr,

@@ -40,7 +40,7 @@
  *	bit 0 is now a battery good indicator (0 = good enough for disk)
  *	bit 1 and 3 are no longer used it seems
  *
- *		
+ *
  */
 
 #include <stdio.h>
@@ -142,14 +142,14 @@ static uint8_t *mmu(uint16_t addr, bool write)
 			return NULL;
 		pa = ((bank & 0x3F) << 14) + addr;
 		if (pa >= pcmcia_size)
-			return NULL; 
+			return NULL;
 		return pcmcia + pa;
 	case 0xC0:
 		return NULL;
 	}
 	return NULL;
 }
-	
+
 uint8_t mem_read(int unused, uint16_t addr)
 {
 	uint8_t *p = mmu(addr, false);
@@ -306,7 +306,7 @@ static uint8_t mc146818_read(uint8_t addr)
 	time_t t = time(NULL);
 	struct tm *rtc_tm = localtime(&t);
 
-	/* Should never occur but don't crash if we are in nonsenseville */	
+	/* Should never occur but don't crash if we are in nonsenseville */
 	if (rtc_tm == NULL)
 		return 0xFF;
 
@@ -535,7 +535,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		fdc_write(addr & 1, val);
 		break;
 	case 0xF0:	/* Unused */
-		break;	
+		break;
 	}
 }
 
@@ -576,7 +576,7 @@ static uint8_t do_io_read(int unused, uint16_t addr)
 		return fdc_read(addr & 1);
 		break;
 	case 0xF0:	/* Unused */
-		break;	
+		break;
 	}
 	return 0xFF;
 }
@@ -616,7 +616,7 @@ static void nc200_rasterize(void)
 static void nc200_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = 480;
 	rect.h = 128;

@@ -138,7 +138,7 @@ static void do_io_writeb(unsigned int address, unsigned int value)
 		if (trace & TRACE_CF)
 			printf("cf write: %x <- %x\n", address & 15, value);
 		ide_write8(ide, address & 15, value);
-	} 
+	}
 	else if (address & 0x80000000) {
 		p90_write(address, value);
 		/* Ensure the interrupt status is correct. We have no other

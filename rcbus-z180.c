@@ -127,7 +127,7 @@ uint8_t z180_phys_read(int unused, uint32_t addr)
 {
 	if (banked)
 		addr = bank_translate(addr);
-	if (mem_map == 1) { 
+	if (mem_map == 1) {
 		addr &= 0x7FFFF;	/* Only 19 bits on a DIP part */
 		if (addr & 0x40000) /* RAM is 128k and wraps */
 			addr &= 0x5FFFF;
@@ -140,7 +140,7 @@ void z180_phys_write(int unused, uint32_t addr, uint8_t val)
 	if (banked)
 		addr = bank_translate(addr);
 	addr &= 0xFFFFF;
-	if (mem_map == 1) { 
+	if (mem_map == 1) {
 		addr &= 0x7FFFF;	/* Only 19 bits on a DIP part */
 		if (addr & 0x40000) /* RAM is 128k and wraps */
 			addr &= 0x5FFFF;
@@ -504,7 +504,7 @@ static uint8_t io_read_2014(uint16_t addr)
 		return acia_read(acia, addr & 1);
 	if (addr >= 0xA0 && addr <= 0xA7 && uart)
 		return uart16x50_read(uart, addr & 7);
-	if (addr >= 0x48 && addr < 0x50 && cpuboard != CPUBOARD_DYNO) 
+	if (addr >= 0x48 && addr < 0x50 && cpuboard != CPUBOARD_DYNO)
 		return fdc_read(addr & 7);
 	if ((addr >= 0x10 && addr <= 0x17) && ide == 1)
 		return my_ide_read(addr & 7);

@@ -113,7 +113,7 @@ static uint8_t *mmu(uint16_t addr, bool write)
 		if (!(bank & 2))
 			return mem + addr;
 		return mem + 65536 + addr;
-				
+
 	}
 	/* I/O should never get here */
 	if (addr < 0x6FFF) {
@@ -123,7 +123,7 @@ static uint8_t *mmu(uint16_t addr, bool write)
 	/* For 7000 to 77FF we should generate noise based upon the cycle
 	   position relative to screen if we are outside blanking TODO */
 	if (addr < 0x7800) {
-		m6847_sparkle(video, video_line, cpu_z80.tstates);	
+		m6847_sparkle(video, video_line, cpu_z80.tstates);
 		if (hires == 0 || vdcbank == 0)
 			return mem + addr;
 		/* Graphics expander mods : we put the extra above 128K in our
@@ -179,7 +179,7 @@ static uint8_t keymatrix(uint8_t addr)
 {
 	return ~keymatrix_input(matrix, ~(addr & 0xFF));
 }
-	
+
 uint8_t mem_read(int unused, uint16_t addr)
 {
 	uint8_t *p;
@@ -366,7 +366,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 static uint8_t do_io_read(int unused, uint16_t addr)
 {
 	uint8_t dev = addr & 0xFF;
-	
+
 	if (sd != NULL) {
 		switch(dev) {
 		case 57:
@@ -402,7 +402,7 @@ uint8_t m6847_video_read(struct m6847 *video, uint16_t addr, uint8_t *cfg)
 	if (c & 0x80)
 		*cfg |= M6847_AS;
 	else
-               *cfg &= ~M6847_AS;
+		*cfg &= ~M6847_AS;
 
 	if (c & 0x40)
 		*cfg |= M6847_INV;
@@ -570,7 +570,7 @@ int main(int argc, char *argv[])
 
 	load_rom(rom_path, mem, 16384);
 	memset(mem + 65536, 0xFF, 8192);
-	if (sd_path) 
+	if (sd_path)
 		sd_init(sdrom_path, sd_path);
 
 	ui_init();

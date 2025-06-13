@@ -8,14 +8,14 @@
 #include "6551.h"
 
 struct m6551 {
-    uint8_t tdr;
-    uint8_t rdr;
-    uint8_t status;
-    uint8_t cmd;
-    uint8_t ctrl;
-    unsigned trace;
-    unsigned inint;
-    struct serial_device *dev;
+	uint8_t tdr;
+	uint8_t rdr;
+	uint8_t status;
+	uint8_t cmd;
+	uint8_t ctrl;
+	unsigned trace;
+	unsigned inint;
+	struct serial_device *dev;
 };
 
 

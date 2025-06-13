@@ -77,7 +77,7 @@ static uint8_t do_mem_read(uint16_t addr, unsigned quiet)
 	/* 8000-FFFF map 1:1 */
 	if (!quiet && (trace & TRACE_MEM))
 		fprintf(stderr, "@%05X ", va);
-	r = ram[va];	
+	r = ram[va];
 	if (!quiet && (trace & TRACE_MEM))
 		fprintf(stderr, "%02X\n", r);
 	return r;
@@ -260,7 +260,7 @@ static void ios_read_sector(void)
 	if (trace & TRACE_DISK)
 		fprintf(stderr, "IOS: Read.\n");
 	if (read(ios_fd, ios_buf, 512) != 512)
-		ios_error = 19; 
+		ios_error = 19;
 }
 
 static void ios_write_sector(void)
@@ -270,7 +270,7 @@ static void ios_write_sector(void)
 	if (trace & TRACE_DISK)
 		fprintf(stderr, "IOS: Write.\n");
 	if (write(ios_fd, ios_buf, 512) != 512)
-		ios_error = 19; 
+		ios_error = 19;
 }
 
 static void ios_op(uint8_t val)
@@ -376,12 +376,12 @@ static void ios_tx(uint8_t val)
 		break;
 	case 0x0A:
 		ios_track = ios_buf[0] + (((uint16_t)ios_buf[1]) << 8);
-                if (trace & TRACE_DISK)
+		if (trace & TRACE_DISK)
 			fprintf(stderr, "Track now %d.\n", ios_track);
 		break;
 	case 0x0B:
 		ios_sector = ios_buf[0];
-                if (trace & TRACE_DISK)
+		if (trace & TRACE_DISK)
 			fprintf(stderr, "Sector now %d.\n", ios_sector);
 		break;
 	case 0x0C:
@@ -391,11 +391,11 @@ static void ios_tx(uint8_t val)
 		if (ios_buf[0] < 3) {
 			bank = ios_buf[0];
 			/* 0 1 2 map to 0 2 3 */
-	                if (trace & TRACE_BANK)
+			if (trace & TRACE_BANK)
 				fprintf(stderr, "Bank set to %d: physical ", bank);
 			if (bank)
 				bank++;
-	                if (trace & TRACE_BANK)
+			if (trace & TRACE_BANK)
 				fprintf(stderr, "%d.\n", bank);
 		}
 		break;

@@ -10,7 +10,7 @@
 /* Parallel Port Propellor */
 
 /* TODO
-	- keyboard input(kwait) 
+	- keyboard input(kwait)
 	- correct error returns
 	- emulate 82C55 bitops and register behaviour
  */

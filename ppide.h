@@ -3,9 +3,9 @@
 #include "ide.h"
 
 struct ppide {
-    uint8_t pioreg[4];
-    struct ide_controller *ide;
-    unsigned int trace;
+	uint8_t pioreg[4];
+	struct ide_controller *ide;
+	unsigned int trace;
 };
 
 extern void ppide_write(struct ppide *ppide, uint8_t addr, uint8_t val);

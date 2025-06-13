@@ -254,7 +254,7 @@ void z280_debug(device_t *device, offs_t curpc)
 	if(trace & TRACE_CPU) {
 		cpu_string_export_z280(device,STATE_GENFLAGS,fbuf);
 		fprintf(stderr, "%s AF=%04X BC=%04X DE=%04X HL=%04X IX=%04X IY=%04X SSP=%04X USP=%04X MSR=%04X\n",fbuf,
-		    cpu_get_state_z280(device,Z280_AF),
+			cpu_get_state_z280(device,Z280_AF),
 			cpu_get_state_z280(device,Z280_BC),
 			cpu_get_state_z280(device,Z280_DE),
 			cpu_get_state_z280(device,Z280_HL),

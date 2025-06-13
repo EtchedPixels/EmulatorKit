@@ -239,7 +239,7 @@ static uint8_t *mmu_map(uint16_t addr, int write)
 		return NULL;
 	return ramrom + (addr & 0x3FFF) + (page << 14);
 }
-		
+
 uint8_t m6800_read_op(struct m6800 *cpu, uint16_t addr, int debug)
 {
 	uint8_t r;

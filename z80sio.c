@@ -27,27 +27,27 @@ struct z80_sio_chan {
 };
 
 struct z80_sio {
-    struct z80_sio_chan chan[2];
-    struct z80_sio_chan *irqchan;	/* Pointer to channel currently running the live interrupt */
-    uint8_t vector;			/* Pending vector if channel interrupting */
+	struct z80_sio_chan chan[2];
+	struct z80_sio_chan *irqchan;	/* Pointer to channel currently running the live interrupt */
+	uint8_t vector;			/* Pending vector if channel interrupting */
 };
 
 static void sio_clear_int(struct z80_sio_chan *chan, uint8_t m)
 {
-        struct z80_sio *sio = chan->sio;
+	struct z80_sio *sio = chan->sio;
 	chan->intbits &= ~m;
 	/* Check me - does it auto clear down or do you have to reti it ? */
 	if (!(sio->chan[0].intbits | sio->chan[1].intbits)) {
 		sio->chan[0].rr[1] &= ~0x02;
 		chan->irq = 0;
 		if (sio->irqchan == chan)
-		    sio->irqchan = NULL;
+			sio->irqchan = NULL;
 	}
 }
 
 static void sio_raise_int(struct z80_sio_chan *chan, uint8_t m, unsigned recalc)
 {
-        struct z80_sio *sio = chan->sio;
+	struct z80_sio *sio = chan->sio;
 	uint8_t new = (chan->intbits ^ m) & m;
 	uint8_t vector;
 	chan->intbits |= m;
@@ -81,17 +81,17 @@ static void sio_recalc_interrupts(struct z80_sio *sio)
 	sio_raise_int(sio->chan, 0, 1);
 	sio_raise_int(sio->chan + 1, 0, 1);
 }
-	
+
 static int sio_check_im2_chan(struct z80_sio_chan *chan)
 {
-        struct z80_sio *sio = chan->sio;
-        uint8_t vector = sio->chan[1].wr[2];	/* B R2 */
-        /* One is in progress still */
-        if (sio->irqchan)
-        	return -1;
+	struct z80_sio *sio = chan->sio;
+	uint8_t vector = sio->chan[1].wr[2];	/* B R2 */
+	/* One is in progress still */
+	if (sio->irqchan)
+		return -1;
 	/* See if we have an IRQ pending and if so deliver it and return 1 */
 	if (chan->irq) {
-	        /* The vector seems to take the port B register value when it is deliverable */
+		/* The vector seems to take the port B register value when it is deliverable */
 		if (sio->chan[1].wr[1] & 0x04) {
 			vector &= 0xF1;
 			/* TODO: external status change */
@@ -107,7 +107,7 @@ static int sio_check_im2_chan(struct z80_sio_chan *chan)
 		} else {
 			chan->vector = vector;
 		}
-			
+
 		if (chan->trace)
 			fprintf(stderr, "New live interrupt pending is sio%c (%02X).\n",
 				chan->unit, chan->vector);
@@ -115,8 +115,8 @@ static int sio_check_im2_chan(struct z80_sio_chan *chan)
 		   when empty. Be careful of the order as this will clear chan->irq and irqchan
 		   potentially */
 		sio_clear_int(chan, INT_TX);
-                sio->vector = chan->vector;
-                sio->irqchan = chan;
+		sio->vector = chan->vector;
+		sio->irqchan = chan;
 		return chan->vector;
 	}
 	return -1;
@@ -134,8 +134,8 @@ static void sio_queue(struct z80_sio_chan *chan, uint8_t c)
 			chan->unit, c);
 	/* Receive disabled */
 	if (!(chan->wr[3] & 1)) {
-	        if (chan->trace)
-		    fprintf(stderr, "RX disabled.\n");
+		if (chan->trace)
+			fprintf(stderr, "RX disabled.\n");
 		return;
 	}
 	/* Overrun */
@@ -283,7 +283,7 @@ void sio_write(struct z80_sio *sio, uint8_t addr, uint8_t val)
 				break;
 			case 050:	/* Reset transmitter interrupt pending */
 				chan->txint = 0;
-                                sio_clear_int(chan, INT_TX);
+				sio_clear_int(chan, INT_TX);
 				break;
 			case 060:	/* Reset the error latches */
 				chan->rr[1] &= 0x8F;
@@ -331,7 +331,7 @@ void sio_write(struct z80_sio *sio, uint8_t addr, uint8_t val)
 		if (chan->trace)
 			fprintf(stderr, "sio%c write data %d\n",
 				(addr & 2) ? 'b' : 'a', val);
-                chan->dev->put(chan->dev, val);
+		chan->dev->put(chan->dev, val);
 	}
 }
 
@@ -360,7 +360,7 @@ void sio_reset(struct z80_sio *sio)
 
 void sio_reti(struct z80_sio *sio)
 {
-        struct z80_sio_chan *chan = sio->irqchan;
+	struct z80_sio_chan *chan = sio->irqchan;
 	/* Recalculate the pending state and vectors */
 	sio->irqchan = NULL;
 	if (chan)
@@ -369,33 +369,33 @@ void sio_reti(struct z80_sio *sio)
 
 struct z80_sio *sio_create(void)
 {
-        struct z80_sio *sio = malloc(sizeof(struct z80_sio));
-        if (sio == NULL) {
-            fprintf(stderr, "sio: out of memory.\n");
-            exit(1);
-        }
-        memset(sio, 0, sizeof(*sio));
-        sio->chan[0].unit = 'a';
-        sio->chan[1].unit = 'b';
-        sio->chan[0].sio = sio;
-        sio->chan[1].sio = sio;
-        sio_reset(sio);
-        return sio;
+	struct z80_sio *sio = malloc(sizeof(struct z80_sio));
+	if (sio == NULL) {
+		fprintf(stderr, "sio: out of memory.\n");
+		exit(1);
+	}
+	memset(sio, 0, sizeof(*sio));
+	sio->chan[0].unit = 'a';
+	sio->chan[1].unit = 'b';
+	sio->chan[0].sio = sio;
+	sio->chan[1].sio = sio;
+	sio_reset(sio);
+	return sio;
 }
 
 void sio_destroy(struct z80_sio *sio)
 {
-    free(sio);
+	free(sio);
 }
 
 void sio_trace(struct z80_sio *sio, unsigned chan, unsigned trace)
 {
-    sio->chan[chan].trace = trace;
+	sio->chan[chan].trace = trace;
 }
 
 void sio_attach(struct z80_sio *sio, unsigned chan, struct serial_device *dev)
 {
-    sio->chan[chan].dev = dev;
+	sio->chan[chan].dev = dev;
 }
 
 int sio_check_im2(struct z80_sio *sio)

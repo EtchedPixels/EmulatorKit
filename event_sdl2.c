@@ -6,8 +6,8 @@
 
 struct sdl_handler
 {
-    int (*handler)(void *priv, void *ev);
-    void *private;
+	int (*handler)(void *priv, void *ev);
+	void *private;
 };
 
 #define MAX_HANDLER	64
@@ -17,30 +17,30 @@ static unsigned next_handler;
 
 void add_ui_handler(int (*handler)(void *priv, void *ev), void *private)
 {
-    if (next_handler == MAX_HANDLER) {
-        fprintf(stderr, "event: too many event handlers.\n");
-        exit(1);
-    }
-    sdl_handler[next_handler].handler = handler;
-    sdl_handler[next_handler].private = private;
-    next_handler++;
+	if (next_handler == MAX_HANDLER) {
+		fprintf(stderr, "event: too many event handlers.\n");
+		exit(1);
+	}
+	sdl_handler[next_handler].handler = handler;
+	sdl_handler[next_handler].private = private;
+	next_handler++;
 }
 
 void remove_ui_handler(int (*handler)(void *priv, void *ev), void *private)
 {
-    fprintf(stderr, "event: event removal not yet supported.\n");
-    exit(1);
+	fprintf(stderr, "event: event removal not yet supported.\n");
+	exit(1);
 }
 
 static void handler(SDL_Event *ev)
 {
-    struct sdl_handler *f = sdl_handler;
-    unsigned n = 0;
-    while (n++ < next_handler) {
-        if (f->handler(f->private, ev))
-            break;
-        f++;
-    }
+	struct sdl_handler *f = sdl_handler;
+	unsigned n = 0;
+	while (n++ < next_handler) {
+		if (f->handler(f->private, ev))
+			break;
+		f++;
+	}
 }
 
 unsigned ui_event(void)
@@ -49,7 +49,7 @@ unsigned ui_event(void)
 	while (SDL_PollEvent(&ev)) {
 		switch(ev.type) {
 		case SDL_QUIT:
-		    return 1;
+			return 1;
 		}
 		handler(&ev);
 	}
@@ -58,9 +58,9 @@ unsigned ui_event(void)
 
 void ui_init(void)
 {
-    if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-        fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
-        exit(1);
-    }
+	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
+		fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
+		exit(1);
+	}
 }
 

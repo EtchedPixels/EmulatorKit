@@ -14,9 +14,9 @@ void e6809_reset (int trace);
 unsigned e6809_sstep (unsigned irq_i, unsigned irq_f);
 
 struct reg6809 {
-    uint16_t pc;
-    uint16_t x,y,u,s;
-    uint8_t a,b,dp,cc;
+	uint16_t pc;
+	uint16_t x,y,u,s;
+	uint8_t a,b,dp,cc;
 };
 
 struct reg6809 *e6809_get_regs(void);

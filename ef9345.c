@@ -10,9 +10,9 @@
     and DCAlice released by Daniel Coulom under GPL license
 
     TS9347 variant support added by Jean-François DEL NERO
-    
+
     Turned into C, hacked about a bit and de-mamed - Alan Cox
-    
+
 *********************************************************************/
 
 #include <stdio.h>

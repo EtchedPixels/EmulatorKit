@@ -62,12 +62,12 @@ uint8_t rtc_read(struct ds1307 *rtc) {
 /* rtc_write
  * Write a byte into memory at the current 'bp' position then
  * increment the counter. Pull out the 12/24 clock marker.
- * 
+ *
  * NOTE: Writes to the first 8 bytes *should* set the time but
  * the current implementation ignores this. The values are
  * stored in rtc->ram but will be overwritten on the next read
  * with the current system time.
- * 
+ *
  * Increment the 'bp' pointer after the write.
  */
 static void rtc_write(struct ds1307 *rtc, uint8_t byte) {
@@ -180,7 +180,7 @@ const char *opdesc[] = {
 
 /* rtc_callback
  * Entry point from the i2c_bitbang implementation. This
- * function gets called at each major state transition 
+ * function gets called at each major state transition
  * in the i2c state machine,.
  */
 uint8_t rtc_callback(void *client, I2C_OP op, uint8_t data) {

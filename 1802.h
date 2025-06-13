@@ -3,36 +3,36 @@
  */
 
 struct cp1802 {
-    uint8_t d;
-    uint16_t r[16];
-    uint8_t p;
-    uint8_t x;
-    uint8_t df;
-    uint8_t ie;
-    uint8_t q;
-    uint8_t t;
-    uint8_t event;
-    uint8_t ipend;
-    unsigned int mcycles;
-    uint16_t type;
+	uint8_t d;
+	uint16_t r[16];
+	uint8_t p;
+	uint8_t x;
+	uint8_t df;
+	uint8_t ie;
+	uint8_t q;
+	uint8_t t;
+	uint8_t event;
+	uint8_t ipend;
+	unsigned int mcycles;
+	uint16_t type;
 
-    /* 1804 : counter */
-    uint8_t ct_mode;
-    uint8_t ct_pre;
-    uint8_t ct_stop;
-    uint8_t ct_ef;
-    uint8_t ct_count;
-    uint8_t ct_val;
-    uint8_t ct_step;		/* For prescaling */
-    uint8_t ct_etq;
-    uint8_t ct_int;
+	/* 1804 : counter */
+	uint8_t ct_mode;
+	uint8_t ct_pre;
+	uint8_t ct_stop;
+	uint8_t ct_ef;
+	uint8_t ct_count;
+	uint8_t ct_val;
+	uint8_t ct_step;		/* For prescaling */
+	uint8_t ct_etq;
+	uint8_t ct_int;
 
-    uint8_t oldef;		/* Old EF1-EF4 for edge detection */
+	uint8_t oldef;			/* Old EF1-EF4 for edge detection */
 
-    uint8_t xie;
-    uint8_t cie;
+	uint8_t xie;
+	uint8_t cie;
 
-    /* 1805 needs no extra bits over 1804 */
+	/* 1805 needs no extra bits over 1804 */
 };
 
 
