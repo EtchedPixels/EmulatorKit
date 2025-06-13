@@ -11,7 +11,7 @@
 
     TS9347 variant support added by Jean-François DEL NERO
     
-    Turned into C, hacked about a bit and de-mamed
+    Turned into C, hacked about a bit and de-mamed - Alan Cox
     
 *********************************************************************/
 
@@ -35,13 +35,29 @@ static void set_video_mode(struct ef9345 *ef);
 //**************************************************************************
 
 // calculate the internal RAM offset
+//
+//	Reworked from the original as the Mame one didn't handle
+//	the upper bits
+//
+//	R6 is encoded as	D1 D'1 D0 YYYYY
+//	R4 is decoded as	- - D'0 YYYYY
+//
+//
 static uint16_t indexram(struct ef9345 *ef, uint8_t r)
 {
 	uint8_t x = ef->reg[r];
 	uint8_t y = ef->reg[r - 1];
+	uint16_t off;
 	if (y < 8)
 		y &= 1;
-	return ((x&0x3f) | ((x & 0x40) << 6) | ((x & 0x80) << 4) | ((y & 0x1f) << 6) | ((y & 0x20) << 8));
+	/* Y 7:6 should be Z3:Z2 bank ? */
+	off = (x&0x3f) | ((x & 0x40) << 6) | ((x & 0x80) << 4);
+	off |= ((y & 0x1f) << 6) | ((y & 0x20) << 8);
+	if (r == 7)
+		off += (y & 0x80) << 6;
+	else
+		off += (ef->reg[6] & 0x40) << 7;
+	return off;
 }
 
 // calculate the internal ROM offset
@@ -75,7 +91,6 @@ static void inc_y(struct ef9345 *ef, uint8_t r)
 	ef->reg[r] = (ef->reg[r] & 0xe0) | i;
 }
 
-/* Write me TODO */
 void vram_writeb(struct ef9345 *ef, uint16_t addr, uint8_t val)
 {
 	ef->m_videoram[addr & ef->vram_mask] = val;
@@ -222,7 +237,15 @@ static void set_video_mode(struct ef9345 *ef)
 	ef->m_ram_base[3] = ef->m_ram_base[2] + 0x0800;
 
 	//address of the current memory block
-	ef->m_block = 0x0800 * ((((ef->m_ror & 0xf0) >> 4) | ((ef->m_ror & 0x40) >> 5) | ((ef->m_ror & 0x20) >> 3)) & 0x0c);
+	// ROR bits are permuted 7/5/6 for Z3 Z1 Z2 forming 8x 2K blocks
+	ef->m_block = 0;
+	if (ef->m_ror & 0x40)
+		ef->m_block += 0x0800;
+	if (ef->m_ror & 0x20)
+		ef->m_block += 0x1000;
+	if (ef->m_ror & 0x40)
+		ef->m_block += 0x2000;
+//	ef->m_block = 0x0800 * ((((ef->m_ror & 0x80/*WAS F0 */) >> 4) | ((ef->m_ror & 0x40) >> 5) | ((ef->m_ror & 0x20) >> 3)) & 0x0c);
 }
 
 
@@ -764,10 +787,12 @@ void ef9345_exec(struct ef9345 *ef, uint8_t cmd)
 			break;
 		case 0x50:  //KRL: 80 uint8_t - 12 bits write
 		case 0x51:  //KRL: 80 uint8_t - 12 bits write + inc
-			fprintf(stderr, "KRL X %d Y %d C '%c' A %02x.\n", 
-				ef->reg[7], ef->reg[6], ef->reg[1], ef->reg[3]);
+			if (ef->trace)
+				fprintf(stderr, "KRL X %d Y %d C '%c' A %02x.\n",
+					ef->reg[7], ef->reg[6], ef->reg[1], ef->reg[3]);
 			set_busy_flag(ef, 12500);
-			fprintf(stderr, "KRL to %x\n", a);
+			if (ef->trace)
+				fprintf(stderr, "KRL to %x\n", a);
 			vram_writeb(ef, a, ef->reg[1]);
 			switch((a / 0x0800) & 1)
 			{
@@ -990,7 +1015,10 @@ void ef9345_update_scanline(struct ef9345 *ef, uint16_t scanline)
 void ef9345_rasterize(struct ef9345 *ef)
 {
 	unsigned i;
-	for (i = 0; i < 300; i++)
+	/* No real renderer attached */
+	if (ef->m_palette == NULL)
+		return;
+	for (i = 0; i < 250; i++)
 		ef9345_update_scanline(ef, i);
 }
 

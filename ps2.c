@@ -11,6 +11,13 @@
 #define PS2_INTERNAL
 #include "ps2.h"
 
+static void ps2_idle(struct ps2 *ps2);
+static void ps2_abort(struct ps2 *ps2);
+static void ps2_poll(struct ps2 *ps2);
+static void ps2_byte_received(struct ps2 *ps2, uint8_t byte);
+static void ps2_byte_sent(struct ps2 *ps2);
+static int ps2_receive_byte(struct ps2 *ps2, int clocks);
+
 /* Replace with a table */
 static int parity_even(uint8_t b)
 {

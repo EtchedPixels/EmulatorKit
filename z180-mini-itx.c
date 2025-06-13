@@ -59,6 +59,7 @@
 #include <errno.h>
 
 #include "system.h"
+#include "event.h"
 #include "serialdevice.h"
 #include "libz180/z180.h"
 #include "lib765/include/765.h"
@@ -695,11 +696,15 @@ int main(int argc, char *argv[])
 	fdc_setdrive(fdc, 0, drive_a);
 	fdc_setdrive(fdc, 1, drive_b);
 
+	ui_init();
+
 	ps2 = ps2_create(18);
 	ps2_trace(ps2, trace & TRACE_PS2);
+	ps2_add_events(ps2, 0);
 
 	ppi = i82c55a_create();
 	i82c55a_trace(ppi, trace & TRACE_PPI);
+
 
 	if (have_tms) {
 		vdp = tms9918a_create();
@@ -764,7 +769,8 @@ int main(int argc, char *argv[])
 			}
 			fdc_tick(fdc);
 			/* We want to run UI events regularly it seems */
-			ui_event();
+			if (ui_event())
+				emulator_done = 1;
 		}
 
 		/* Do 20ms of I/O and delays */

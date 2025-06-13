@@ -11,8 +11,6 @@
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 
-extern int sdl_live;
-
 static uint32_t vdp_ctab[16] = {
     0xFF000000,		/* transparent (we render as black) */
     0xFF000000,		/* black */
@@ -74,17 +72,6 @@ void tms9918a_renderer_free(struct tms9918a_renderer *render)
 struct tms9918a_renderer *tms9918a_renderer_create(struct tms9918a *vdp)
 {
     struct tms9918a_renderer *render;
-
-    /* We will need a nicer way to do this once we have multiple SDL using
-       devices */
-    if (sdl_live == 0) {
-        sdl_live = 1;
-        if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-            fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
-            exit(1);
-        }
-        atexit(SDL_Quit);
-    }
 
     render = malloc(sizeof(struct tms9918a_renderer));
     if (render == NULL) {

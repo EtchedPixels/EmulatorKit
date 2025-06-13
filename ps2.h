@@ -35,14 +35,8 @@ struct ps2 {
     unsigned int divider;
 
     unsigned int trace;
+    uint32_t window;
 };
-
-static void ps2_idle(struct ps2 *ps2);
-static void ps2_abort(struct ps2 *ps2);
-static void ps2_poll(struct ps2 *ps2);
-static void ps2_byte_received(struct ps2 *ps2, uint8_t byte);
-static void ps2_byte_sent(struct ps2 *ps2);
-static int ps2_receive_byte(struct ps2 *ps2, int clocks);
 
 #endif
 
@@ -54,3 +48,6 @@ unsigned int ps2_get_data(struct ps2 *ps2);
 void ps2_event(struct ps2 *ps2, unsigned int clocks);
 void ps2_trace(struct ps2 *ps2, int onoff);
 void ps2_queue_byte(struct ps2 *ps2, uint8_t byte);
+
+void ps2_add_events(struct ps2 *ps2, uint32_t window);
+

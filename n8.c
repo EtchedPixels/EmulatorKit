@@ -50,6 +50,7 @@
 #include <errno.h>
 
 #include "system.h"
+#include "event.h"
 #include "libz180/z180.h"
 #include "lib765/include/765.h"
 #include "serialdevice.h"
@@ -640,6 +641,8 @@ int main(int argc, char *argv[])
 
 	rtc_trace(rtc, trace & TRACE_RTC);
 
+	ui_init();
+
 	vdp = tms9918a_create();
 	tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 	vdprend = tms9918a_renderer_create(vdp);
@@ -647,6 +650,8 @@ int main(int argc, char *argv[])
 	/* Divider for a microsecond clock */
 	ps2 = ps2_create(18);
 	ps2_trace(ps2, trace & TRACE_PS2);
+	ps2_add_events(ps2, 0);
+
 	fdc = fdc_new();
 
 	lib765_register_error_function(fdc_log);
@@ -728,7 +733,8 @@ int main(int argc, char *argv[])
 				states -= tstate_steps;
 			}
 			/* We want to run UI events regularly it seems */
-			ui_event();
+			if (ui_event())
+				emulator_done = 1;
 		}
 
 		/* 50Hz which is near enough */

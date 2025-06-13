@@ -513,6 +513,11 @@ struct i8008 *i8008_create(void)
 	return cpu;
 }
 
+void i8008_free(struct i8008 *cpu)
+{
+	free(cpu);
+}
+
 void i8008_trace(struct i8008 *cpu, unsigned int trace)
 {
 	cpu->trace = trace;

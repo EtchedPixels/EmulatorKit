@@ -11,6 +11,7 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "event.h"
 #include "keymatrix.h"
 #include "zxkey.h"
 
@@ -71,6 +72,12 @@ void zxkey_reset(struct zxkey *zx)
     keymatrix_reset(zx->matrix);
 }
 
+static int zxkey_SDL2event(void *dev, void *evp)
+{
+    struct zxkey *zx = dev;
+    return keymatrix_SDL2event(zx->matrix, evp);
+}
+
 struct zxkey *zxkey_create(unsigned type)
 {
     struct zxkey *zx = malloc(sizeof(struct zxkey));
@@ -83,6 +90,8 @@ struct zxkey *zxkey_create(unsigned type)
     else
         zx->matrix = keymatrix_create(8, 5, speckeys);
     zx->type = type;
+
+    add_ui_handler(zxkey_SDL2event, zx); 
     return zx;
 }
 
@@ -91,7 +100,3 @@ void zxkey_trace(struct zxkey *zx, int onoff)
     keymatrix_trace(zx->matrix, onoff);
 }
 
-bool zxkey_SDL2event(struct zxkey *zx, SDL_Event *ev)
-{
-   return keymatrix_SDL2event(zx->matrix, ev);
-}

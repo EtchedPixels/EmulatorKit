@@ -14,8 +14,6 @@
 #include "tft_dumb.h"
 #include "tft_dumb_render.h"
 
-extern int sdl_live;
-
 struct tft_renderer {
     struct tft_dumb *tft;
     SDL_Renderer *render;
@@ -49,17 +47,6 @@ void tft_renderer_free(struct tft_renderer *render)
 struct tft_renderer *tft_renderer_create(struct tft_dumb *tft)
 {
     struct tft_renderer *render;
-
-    /* We will need a nicer way to do this once we have multiple SDL using
-       devices */
-    if (sdl_live == 0) {
-        sdl_live = 1;
-        if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-            fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
-            exit(1);
-        }
-        atexit(SDL_Quit);
-    }
 
     render = malloc(sizeof(struct tft_renderer));
     if (render == NULL) {

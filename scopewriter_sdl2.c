@@ -7,8 +7,6 @@
 #include "scopewriter.h"
 #include "scopewriter_render.h"
 
-extern int sdl_live;
-
 struct scopewriter_renderer {
     struct scopewriter *sw;
     SDL_Renderer *render;
@@ -41,17 +39,6 @@ void scopewriter_renderer_free(struct scopewriter_renderer *render)
 struct scopewriter_renderer *scopewriter_renderer_create(struct scopewriter *sw)
 {
     struct scopewriter_renderer *render;
-
-    /* We will need a nicer way to do this once we have multiple SDL using
-       devices */
-    if (sdl_live == 0) {
-        sdl_live = 1;
-        if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-            fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
-            exit(1);
-        }
-        atexit(SDL_Quit);
-    }
 
     render = malloc(sizeof(struct scopewriter_renderer));
     if (render == NULL) {

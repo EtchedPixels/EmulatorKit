@@ -29,24 +29,14 @@
  *	different set of port toggles and the BRG bit controls which "user"
  *	side of the machine (RAM bank, keyboard, video) is mapped.
  *
- *	For I/O we emulate the tarbell FDC, this is fine for CP/M but
- *	the Poly88 DOS would require we emulated the original Polymorphic
- *	single sided FDC, which is a complex beast.
- *
  *	TODO:
  *	- 8251 interrupt emulation
  *	- Tape load as serial dev plugin
  *	- Correct the few differing font symbols
  *	- How did the keyboard interrupt work with two keyboards
  *	- Support two keyboards
- *
- *	Mysteries:
- *	- The Poly88 twin mode is untested with real software. It's not
- *	  clear if the original software exists any more as it would have
- *	  only been on a small number of machines.
- *	- The hard disk controller is a complete unknown. It appears to have
- *	  been a PRIAM "intelligent" controller and a simple interface card
- *	  so quite possibly SASI.
+ *	- The Poly88 twin mode is untested with real software.
+ *	- What is the SASI controller story
  */
 
 #include <stdio.h>
@@ -63,6 +53,7 @@
 #include <SDL2/SDL.h>
 
 #include "intel_8080_emulator.h"
+#include "event.h"
 #include "serialdevice.h"
 #include "ttycon.h"
 #include "i8251.h"
@@ -117,6 +108,11 @@ static unsigned cpmflipflop;
 static unsigned rtc_int;
 static uint8_t vram[2][1024];	/* 512byte or 1K video RAM */
 
+static uint8_t polyms_ctrl[16];	/* DPRAM on the smart dd controller */
+static uint8_t polyms_ram[2048];
+
+static uint8_t pdd_ram[768];	/* Shared memory for DD 5.25" driver */
+
 /* 7 x 9 for char matrix in a 10 x 15 field */
 #define CWIDTH 10
 #define CHEIGHT 15
@@ -151,6 +147,14 @@ static uint8_t *mem_map(uint16_t addr, bool wr)
 			}
 			return iram + (addr & 0x01FF);
 		}
+	}
+	if (twinsys) {
+		if (addr >= 0x1000 && addr <= 0x17FF)
+			return polyms_ram + (addr & 0x07FF);
+		if (addr >= 0x1FE0 && addr <= 0x1FEF)
+			return polyms_ctrl + (addr & 0x0F);
+		if (addr >= 0x1C00 && addr < 0x1FE0)
+			return pdd_ram + (addr & 0x03FF);
 	}
 	/* TODO: base system brg latch doesn't affect video. Later setups
 	   it is paged with internal I/O, twin system two videos are paged
@@ -263,7 +267,7 @@ static void onboard_out(uint8_t addr, uint8_t val)
 {
 	if (addr < 4)
 		i8251_write(uart, addr & 1, val);
-	else if (addr < 8) { 
+	else if (addr < 8) {
 		brg_latch = val;
 		if (twinsys)
 			twin = (brg_latch & 0x20) ? 1: 0;
@@ -551,7 +555,589 @@ static void polyfd_attach(unsigned drive, const char *path)
 }
 
 /*
- *	First guesses at the Priam controller: untested
+ *	Poly88 double density control. Memory mapped
+ *	0x1000-0x17FF	transfer buffer (2K)
+ *	0x1FE0	sector number (word)
+ *	0x1FE2  memory address for transfer
+ *	0x1FE4	disk (4-7)
+ *	0x1FE5	sectors to transfer (1-8)
+ *	0x1FE6	controller command
+ *		0 write
+ *		1 read
+ *		2 initialize (writes preambles to all of disk and then does
+ *		  a media pattern test)
+ *		3 read cache (unclear)
+ *		4 buffer command
+ *		5 disk size (handled in driver)
+ *	0x1FE7	status (write FF to start I/O)
+ *		Once written poll over 660us and see if it's not FF
+ *		When it stops being FF copy the status and clear if nonzero
+ *		0 OK
+ *		1 Bad Parameters
+ *		2 Preamble bad
+ *		3 CRC error
+ *		4 Verify error
+ *		5 Write protected
+ *		6 Not ready
+ *		(Diagnostics)
+ *		80 - checksum error on root
+ *		81 - SDLC self test
+ *		82-89 Memory error
+ *		8A - Data loop back test failure
+ *	0x1FEE  0x40 = single sided
+ *	0x1FEF autodetect (writeable to 0 if controller) FF if idle bus
+ *	0x1FF0-1FFF left clear for North Star FPU option
+ */
+
+/* Fake the behaviour of the disk side CPU */
+
+static int polyms_fd[4] = { -1, -1, -1. -1 };
+
+static void polyms_xfer_in(uint8_t *tmpbuf)
+{
+	unsigned addr = polyms_ctrl[0x02] | (polyms_ctrl[0x03] << 8);
+	unsigned n;
+	addr &= 0x7FF;	/* 2K */
+	if (addr <= 0x0700) {	/* Will 256 bytes fit ? */
+		memcpy(tmpbuf, polyms_ram + addr, 256);
+		polyms_ctrl[0x03]++;	/* Move on 256 */
+		/* Does the firmware wrap this - unknown */
+	}
+	/* Partial blocks needed */
+	n = 0x0800 - addr;
+	memcpy(tmpbuf, polyms_ram + addr, n);
+	memcpy(tmpbuf + n, polyms_ram, 256 - n);
+	polyms_ctrl[0x03]++;
+}
+
+static void polyms_xfer_out(uint8_t *tmpbuf)
+{
+	unsigned addr = polyms_ctrl[0x02] | (polyms_ctrl[0x03] << 8);
+	unsigned n;
+	addr &= 0x7FF;	/* 2K */
+	if (addr <= 0x0700) {	/* Will 256 bytes fit ? */
+		memcpy(polyms_ram + addr, tmpbuf, 256);
+		polyms_ctrl[0x03]++;	/* Move on 256 */
+		/* Does the firmware wrap this - unknown */
+	}
+	/* Partial blocks needed */
+	n = 0x0800 - addr;
+	memcpy(polyms_ram + addr, tmpbuf, n);
+	memcpy(polyms_ram, tmpbuf + n, 256 - n);
+	polyms_ctrl[0x03]++;
+}
+
+static void polyms_action(void)
+{
+	int drive;
+	unsigned block;
+	uint8_t tmpbuf[256];
+	unsigned ct = polyms_ctrl[0x05];
+	if (polyms_ctrl[0x07] != 0xFF)
+		return;
+	drive = polyms_ctrl[0x04] - 4;
+	if (drive < 0 || drive > 3) {
+		polyms_ctrl[0x07] = 0x01;
+		return;
+	}
+	block = polyms_ctrl[0x00] | (polyms_ctrl[0x01] << 8);
+
+	/* We've been told to do something */
+	switch(polyms_ctrl[0x06]) {
+	case 0:	/* Write */
+		if (lseek(polyms_fd[drive], block * 256, 0) < 0) {
+			polyms_ctrl[0x07] = 2;
+			break;
+		}
+		while(ct--) {
+			polyms_xfer_out(tmpbuf);
+			if (write(polyms_fd[drive], tmpbuf, 256) != 256) {
+				polyms_ctrl[0x07] = 0x04;
+				return;
+			}
+		}
+		polyms_ctrl[0x07] = 0x00;
+		return;
+	case 1:	/* Read */
+		if (lseek(polyms_fd[drive], block * 256, 0) < 0) {
+			polyms_ctrl[0x07] = 0x02;
+			return;
+		}
+		while(ct--) {
+			if (read(polyms_fd[drive], tmpbuf, 256) != 256) {
+				polyms_ctrl[0x07] = 0x03;
+				return;
+			}
+			polyms_xfer_in(tmpbuf);
+		}
+		polyms_ctrl[0x07] = 0x00;
+		return;
+	case 2:
+		polyms_ctrl[0x07] = 0x00;	/* Initialize just works right */
+		return;
+	case 4:;
+		/* "buffer command"  - unknown */
+	}
+	polyms_ctrl[0x07] = 0x01;
+	/* Driver seems to juse use 0/NZ */
+}
+
+static void polyms_attach(unsigned unit, const char *path)
+{
+	if (path) {
+		polyms_fd[unit] = open(path, O_RDWR);
+		if (polyms_fd[unit] == -1) {
+			perror(path);
+			exit(1);
+		}
+	}
+}
+
+/*
+ *	DD 5.25" driver. Very similar to the DD driver. Again shared
+ *	memory based
+ *
+ *	1C00	Sector address
+ *	1C02	Drive number
+ *	1C03	Number of pages to transfer
+ *	1C04	Status / Control
+ *		FF absent
+ *		FE reset controller
+ *		FD reports whilst powering up
+ *		FC written by 8080 -> read sector
+ *		FB written by 8080 -> write sector
+ *		FA written by 8080 -> media size
+ *		F9 begin read sequence
+ *		F8 begin write sequence
+ *		F7 execute the code at 1D00 on Z80 side
+ *		CF response once Z80 sees a command
+ *		00 response once completed
+ *	1C05	Page Switch
+ *	1C06	Retry limit
+ *	1C07	Number of seek retries
+ *	1C08	XOR of good/bad RAM bytes
+ *	1C09	Soft error counter
+ *	1C0A	Checksum error counter
+ *	1C0B	Verify error counter
+ *	1C0C	Seek error counter
+ *	1CFE	Page 0 (256 data and checksum) ?
+ *	1DFF	Page 1 ditto
+ *
+ *	When the F8 command is executed the CPU has written the
+ *	sector addres, drive number and pages to transfer. It's selected
+ *	the page to use. This does not start the I/O instead a write command
+ *
+ *	The real hardware is very asynchronous. The write of the first sector
+ *	reports 0xCF (working), and the host writes the next page into
+ *	the other buffer whilst the controller is writing the first. Similar
+ *	in reverse when reading.
+ *
+ *	TODO: properly track sector counting
+ *
+ *	Returned error codes are added to 0x100 to give the OS error
+ */
+
+static int pdd_fd[4] = { -1, - 1, -1, -1 };
+static unsigned pdd_pages;
+static unsigned pdd_pageoff[2] = { 0x00FE, 0x1FF };
+
+static void polydd_seek(void)
+{
+	unsigned sec = pdd_ram[0] | (pdd_ram[1] << 8);
+	unsigned drive = pdd_ram[2] & 3;
+
+	if (pdd_fd[drive] == -1) {
+		pdd_ram[4] = 0x06;	/* No disk in drive */
+		return;
+	}
+
+	if (lseek(pdd_fd[drive], 256 * sec, 0) < 0) {
+		perror("polydd");
+		pdd_ram[4] = 0x0B;	/* Seek error */
+		return;
+	}
+}
+
+/* Add the checksum byte */
+static void pdd_csum(void)
+{
+	unsigned i;
+	unsigned page = pdd_ram[5] & 1;
+	uint8_t *p = pdd_ram + pdd_pageoff[page];
+	uint8_t n = 0;
+
+	for (i = 0; i < 256; i++)
+		n += *p++;
+	*p = ~n;
+}
+
+static void polydd_action(void)
+{
+	unsigned page = pdd_ram[5] & 1;
+	unsigned drive = pdd_ram[2] & 3;
+
+	if (pdd_ram[4] >= 0xD0 && pdd_ram[4] <= 0xFC) {
+		/* We've ben asked to do something */
+		switch(pdd_ram[4]) {
+		case 0xF8:	/* Begin write sequence */
+		case 0xF9:	/* Begin read sequence */
+			pdd_pages = pdd_ram[3];
+			pdd_ram[4] = 0;	/* Done */
+			polydd_seek();
+			break;
+		case 0xFA:	/* Media size (TODO) report 1.2MB for now */
+			pdd_ram[0] = 0xC0;
+			pdd_ram[1] = 0x12;
+			pdd_ram[4] = 0;
+			break;
+		case 0xFB:	/* Write sector */
+			/* The page has been loaded, so begin the write */
+			if (write(pdd_fd[drive], pdd_ram + pdd_pageoff[page], 256) != 256) {
+				pdd_ram[4] = 0x08;	/* Data transfer error */
+				break;
+			}
+			pdd_pages--;
+			pdd_ram[4] = 0;	/* Done */
+			/* TODO: send working and send DONE shortly after */
+			break;
+		case 0xFC:	/* Read sector */
+			if (read(pdd_fd[drive], pdd_ram + pdd_pageoff[page], 256) != 256) {
+				pdd_ram[4] = 0x02;	/* Hard error / preamble bad */
+				break;
+			}
+			pdd_pages--;
+			pdd_csum();
+			pdd_ram[4] = 0;
+			break;
+		case 0xFE:	/* Reset */
+			pdd_ram[4] = 0;
+			break;
+		default:
+		}
+	}
+}
+
+/*
+ *	PRIAM hard disk controller
+ *	0x38-0x3F
+ *
+ *	0x38	Status
+ *	0x39	Data R/W
+ *	0x3A	Status	R	Param 0 W
+ *		0: data bus enable
+ *		1: read/write 1 = input (only valid if drq)
+ *		2: drq
+ *		3: busy
+ *		6: cont completion
+ *		7: rejected
+ *	0x3B	Result 0 R	Param 1 W
+ *	0x3C	Result 1 R	Param 2 W
+ *	0x3D	Result 2 R	Param 3 W
+ *	0x3E	Result 3 R	Param 4 W
+ *	0x3F	Result 4 R	Param 5 W  (presumably - not observed)
+ *
+ *	There is good documentation for this fortunately.
+ *
+ *	http://bitsavers.informatik.uni-stuttgart.de/pdf/priam/Peritek_PRM-Q_Programming_Jan81.pdf
+ *	http://bitsavers.informatik.uni-stuttgart.de/pdf/priam/SMART_Interface_Product_Specification_Sep80.pdf
+ *
+ *	We only care about a tiny subset
+ *
+ *	command
+ *	0x50 (write data, with retries)
+ *	0x53 (read data, with retries)
+ *
+ *	For these
+ *	param0: drive 0-3
+ *	param1: head << 3 | cyl upper nybble
+ *	param2: cyl low
+ *	param3: sector
+ *	param4: count
+ *
+ *	results: rr1 as param1
+ *		 rr2: as param2
+ *		 rr3: as param3
+ *		 rr4: as param4
+ *
+ *	The actual PRIAM interface is extremely complex and powerful
+ *	so we just fake the bits that are actually used for now.
+ */
+
+
+static uint8_t priam_reg[6];
+static uint8_t priam_status = 0x03;
+static uint8_t priam_tsr;
+static uint8_t priam_cmd;
+static uint8_t priam_data[256];
+static uint8_t *priam_rxptr;
+static uint8_t *priam_txptr;
+static unsigned priam_rxct;
+static unsigned priam_txct;
+static int priam_fd[4];
+
+static int priam_seek(void)
+{
+	unsigned c = ((priam_reg[1] & 0x0F) << 8) | priam_reg[2];
+	unsigned h = priam_reg[1] >> 4;
+	unsigned s = priam_reg[3];
+	unsigned block = (c * 4 + h) * 16 + s;
+
+	if (lseek(priam_fd[priam_reg[0] & 3], block * 256, 0) < 0) {
+		perror("priam_seek");
+		return -1;
+	}
+	return 0;
+}
+
+static void priam_data_out(uint8_t v)
+{
+	if (priam_txct) {
+		*priam_txptr++ = v;
+		priam_txct--;
+		if (priam_txct == 0) {
+			priam_status |= 0x40;
+			priam_status &= ~0x0E;
+			if (priam_cmd == 0x42 || priam_cmd == 0x52) {
+				if (priam_seek() < 0)
+					priam_tsr |= 0x12;
+				else if (write(priam_fd[priam_reg[0]], priam_data, 256) != 256)
+					priam_tsr |= 0x13;
+				else {
+					priam_reg[4]--;
+					priam_reg[3]++;
+					if (priam_reg[4]) {
+						priam_txct = 256;
+						priam_txptr = priam_data;
+					} else {
+						priam_status |= 0x40;
+						priam_status &= ~0x0E;
+					}
+				}
+			}
+		}
+	}
+}
+
+static uint8_t priam_data_in(void)
+{
+	if (priam_rxct) {
+		uint8_t r = *priam_rxptr++;
+		priam_rxct--;
+		if (priam_rxct == 0) {
+			switch(priam_cmd) {
+			case 0x03:
+				/* Read buffer */
+				priam_status |= 0x40;
+				priam_status &= ~0x0E;
+				break;
+			case 0x43:
+			case 0x53:
+				/* Disk read */
+				priam_reg[4]--;
+				priam_reg[3]++;
+				priam_tsr = priam_reg[0] << 6;
+				if (priam_reg[4]) {
+					if (priam_seek() < 0)
+						priam_tsr = 0x12;
+					else if (read(priam_fd[priam_reg[0] & 3], priam_data, 256) != 256)
+						priam_tsr |= 0x30;
+					else {
+						priam_rxct = 256;
+						priam_rxptr = priam_data;
+						break;
+					}
+				}
+				priam_status |= 0x40;
+				priam_status &= ~0x0E;
+				break;
+			}
+		}
+		return r;
+	}
+	return 0xFF;
+}
+
+static void priam_begin(uint8_t v)
+{
+	priam_cmd = v;
+	priam_rxct = priam_txct = 0;
+	priam_rxptr = priam_txptr = priam_data;
+	priam_reg[0] &= 3;
+	priam_tsr = priam_reg[0] << 6;
+
+
+	if (priam_fd[priam_reg[0]] == -1 && v != 0x80) {
+		priam_tsr |= 0x22;
+		priam_status |= 0x40;
+		priam_status &= ~0x0E;
+		return;
+	}
+
+	switch(v) {
+	case 0x00:
+		/* Completion request */
+		priam_status = 0x03;	/* Check */
+		break;
+	case 0x03:
+		/* Read buffer */
+		priam_rxct = 256;
+		break;
+	case 0x04:
+		/* Write buffer */
+		priam_txct = 256;
+		break;
+	case 0x80:
+		/* Read drive status */
+	case 0x82:
+		/* Sequence up wait */
+	case 0x83:
+		/* Sequence up return */
+		if (priam_fd[priam_reg[3]])
+			priam_reg[1] = 0x03;
+		else
+			priam_reg[1] = 0x00;
+		break;
+	case 0x81:
+		/* Sequence down (park) */
+		break;
+	case 0x85:
+		/* Get parameters */
+		priam_reg[2] = 0x10;	/* Sectors per track */
+		priam_reg[1] = 0x42;	/* 4 heads 512 cylinders */
+		priam_reg[0] = 0x00;	/* low of cylinders */
+	case 0x40:
+		/* Restore */
+		priam_reg[1] = 0x00;
+		priam_reg[2] = 0x00;
+		break;
+	case 0x41:
+		/* Seek */
+	case 0x51:
+		/* Seek with retry */
+		break;
+	case 0x42:
+		/* Write data */
+	case 0x52:
+		/* Write data with retry */
+		priam_txptr = priam_data;
+		priam_txct = 256;
+		break;
+	case 0x43:
+		/* Read data */
+	case 0x53:
+		/* Read data with retry */
+		if (priam_seek() < 0) {
+			priam_tsr |= 0x12;	/* Seek fault */
+			break;
+		}
+		if (read(priam_fd[priam_reg[0]], priam_data, 256) != 256) {
+			priam_tsr |= 0x30;	/* Sector not found */
+			break;
+		}
+		priam_rxptr = priam_data;
+		priam_rxct = 256;
+		break;
+	case 0x45:
+		/* Write ID */
+	case 0x55:
+		/* Write ID with retry */
+	case 0x46:
+		/* Read ID */
+	case 0x56:
+		/* Read ID with retry */
+	case 0x47:
+		/* Read ID immediate */
+	case 0x57:
+		/* Read ID immediate with retry */
+	case 0x48:
+		/* Verify ID */
+	case 0x49:
+		/* Read defect field */
+	case 0x59:
+		/* Read defect field with retry */
+	case 0x4A:
+		/* Write defect field */
+	case 0x5A:
+		/* Write defect field with retry */
+	case 0xA0:
+		/* Format disk */
+	case 0xA1:
+		/* Format cylinder */
+	case 0xA2:
+		/* Format track */
+	case 0xA3:
+		/* Verify disc */
+	case 0xA4:
+		/* Verify cylinder */
+	case 0xA5:
+		/* Verify track */
+	case 0xA8:
+		/* Format disk with defect maping */
+	case 0xA9:
+		/* Specify bad track */
+	case 0xAA:
+		/* Specify bad sector */
+	default:
+		/* Bad command */
+		priam_status |= 0x80;	/* Rejected */
+		priam_tsr |= 0x31;
+		break;
+	case 0x44:
+		/* Verify */
+		/* TODO: should leave buffer holding data in case a
+		   read buffer is done */
+		break;
+	}
+	/* Figure out status bits */
+	if (priam_rxct || priam_txct)
+		priam_status |= 0x0C;	/* DRQ, busy */
+	if (!priam_txct)
+		priam_status |= 0x02;	/* Direction */
+	if (priam_rxct == 0 && priam_txct == 0) {
+		/* Command finished as we don't emulate time yet */
+		priam_status |= 0x40;
+		/* Not busy, no DRQ */
+		priam_status &= ~0x0E;
+	}
+}
+
+static void priam_write(uint8_t addr, uint8_t v)
+{
+	/* 2-6 are param 0-4 */
+	if (addr > 1)
+		priam_reg[addr - 2] = v;
+	else if (addr == 1)
+		priam_data_out(v);
+	else
+		priam_begin(v);
+}
+
+static uint8_t priam_read(uint8_t addr)
+{
+	/* 3-6 are result 0-3 */
+	if (addr > 2)
+		return priam_reg[addr - 3];
+	if (addr == 1)
+		return priam_data_in();
+	if (addr == 2)
+		return priam_tsr;
+	return priam_status;
+}
+
+static void priam_attach(unsigned unit, const char *path)
+{
+	if (path) {
+		priam_fd[unit] = open(path, O_RDWR);
+		if (priam_fd[unit] == -1) {
+			perror(path);
+			exit(1);
+		}
+	}
+}
+
+
+/*
+ *	First guesses at the later disk controller
  *
  *	It seems to be sort of SASI but without much of the bus logic
  *	skipped. This should be sufficient code to start poking around
@@ -577,176 +1163,176 @@ static void polyfd_attach(unsigned drive, const char *path)
  *	1:	}	driver masks out
  *	0;	}
  */
- 
-static uint8_t priam_bus;
-static uint8_t priam_cmd[6];
-static uint8_t priam_status[2];
-static uint8_t priam_data[256];
+
+static uint8_t sasi_bus;
+static uint8_t sasi_cmd[6];
+static uint8_t sasi_status[2];
+static uint8_t sasi_data[256];
 /* For now just hand back illegal request with no block address */
-static uint8_t priam_sense[4] = { 0x05, 0x00, 0x00, 0x00 };
-static uint8_t *priam_rptr;
-static uint8_t *priam_wptr;
-static unsigned priam_rxc;
-static unsigned priam_txc;
-static int priam_fd = -1;
+static uint8_t sasi_sense[4] = { 0x05, 0x00, 0x00, 0x00 };
+static uint8_t *sasi_rptr;
+static uint8_t *sasi_wptr;
+static unsigned sasi_rxc;
+static unsigned sasi_txc;
+static int sasi_fd = -1;
 
 /*
  *	A read of a block of data has finished. Right now that has
  *	to be
  */
-static void priam_read_done(void)
+static void sasi_read_done(void)
 {
 	/* Read command in progress ? */
-	if (!(priam_bus & 0x08) && priam_cmd[0] == 0x08) {
+	if (!(sasi_bus & 0x08) && sasi_cmd[0] == 0x08) {
 		/* Count through blocks */
-		if (priam_cmd[4]) {
-			priam_cmd[4]--;
-			if (read(priam_fd, priam_data, 256) == 256) {
-				priam_rptr = priam_data;
-				priam_rxc = 256;
+		if (sasi_cmd[4]) {
+			sasi_cmd[4]--;
+			if (read(sasi_fd, sasi_data, 256) == 256) {
+				sasi_rptr = sasi_data;
+				sasi_rxc = 256;
 				return;
 			}
-			priam_status[0] = 0x02;
-			priam_bus |= 0x08;
+			sasi_status[0] = 0x02;
+			sasi_bus |= 0x08;
 			/* TODO: sense data */
 		} else {
 			if (trace & TRACE_PRIAM)
-				fprintf(stderr, "priam: read completed go to status\n");
-			priam_status[0] = 0x00;
-			priam_status[1] = 0x00;
+				fprintf(stderr, "sasi: read completed go to status\n");
+			sasi_status[0] = 0x00;
+			sasi_status[1] = 0x00;
 		}
 		/* Status so set up for status read */
-		priam_bus |= 0x08;
-		priam_rptr = priam_status;
-		priam_rxc = 2;
+		sasi_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
 		return;
 	}
 	/* Sense completing ? */
-	if (priam_rptr >= priam_sense && priam_rptr <= priam_sense + 4) {
-		priam_bus |= 0x08;
-		priam_rptr = priam_status;
-		priam_status[0] = 0x00;
-		priam_status[1] = 0x00;
-		priam_rxc = 2;
+	if (sasi_rptr >= sasi_sense && sasi_rptr <= sasi_sense + 4) {
+		sasi_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_status[0] = 0x00;
+		sasi_status[1] = 0x00;
+		sasi_rxc = 2;
 		return;
 	}
 	/* Status so now go idle */
-	priam_bus = 0x00;
+	sasi_bus = 0x00;
 	/* Wait for command */
-	priam_wptr = priam_cmd;
-	priam_txc = 6;
+	sasi_wptr = sasi_cmd;
+	sasi_txc = 6;
 }
 
 /* A SASI READ command was issued */
 /* TODO: check disk size properly esp for write */
-static void priam_do_read(void)
+static void sasi_do_read(void)
 {
 	unsigned block;
 
-	block = (priam_cmd[1] & 0x0F) << 16;
-	block |= priam_cmd[2] << 8;
-	block |= priam_cmd[3];
+	block = (sasi_cmd[1] & 0x0F) << 16;
+	block |= sasi_cmd[2] << 8;
+	block |= sasi_cmd[3];
 
 	if (trace & TRACE_PRIAM)
-		fprintf(stderr, "priam: reading block %u\n", block);
+		fprintf(stderr, "sasi: reading block %u\n", block);
 
-	if (lseek(priam_fd, block * 256, 0) == -1 ||
-		read(priam_fd, priam_data, 256) != 256) {
-		priam_status[0] = 0x02;
-		priam_status[1] = 0x00;
-		priam_bus |= 0x08;
-		priam_rptr = priam_status;
-		priam_rxc = 2;
+	if (lseek(sasi_fd, block * 256, 0) == -1 ||
+		read(sasi_fd, sasi_data, 256) != 256) {
+		sasi_status[0] = 0x02;
+		sasi_status[1] = 0x00;
+		sasi_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam read failed\n");
+			fprintf(stderr, "sasi read failed\n");
 	} else {
-		priam_rptr = priam_data;
-		priam_rxc = 256;
-		priam_bus &= ~0x08;
+		sasi_rptr = sasi_data;
+		sasi_rxc = 256;
+		sasi_bus &= ~0x08;
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam read begins (%u blocks)\n", priam_cmd[4]);
-		priam_cmd[4]--;
+			fprintf(stderr, "sasi read begins (%u blocks)\n", sasi_cmd[4]);
+		sasi_cmd[4]--;
 	}
 }
 
 /* A disk write of a block has completed writing. Push it to disk and
    see what to do next */
-static void priam_write_block(void)
+static void sasi_write_block(void)
 {
 	/* Count through blocks */
-	if (priam_cmd[4]) {
-		priam_cmd[4]--;
-		if (write(priam_fd, priam_data, 256) == 256) {
-			priam_wptr = priam_data;
-			priam_txc = 256;
+	if (sasi_cmd[4]) {
+		sasi_cmd[4]--;
+		if (write(sasi_fd, sasi_data, 256) == 256) {
+			sasi_wptr = sasi_data;
+			sasi_txc = 256;
 			return;
 		}
-		perror("priam_write_block");
-		priam_status[0] = 0x02;
+		perror("sasi_write_block");
+		sasi_status[0] = 0x02;
 		/* TODO: sense data */
 	} else {
-		priam_status[0] = 0x00;
-		priam_status[1] = 0x00;
+		sasi_status[0] = 0x00;
+		sasi_status[1] = 0x00;
 	}
 	/* Status so set up for status read */
-	priam_bus |= 0x08;
-	priam_rptr = priam_status;
-	priam_rxc = 2;
+	sasi_bus |= 0x08;
+	sasi_rptr = sasi_status;
+	sasi_rxc = 2;
 }
 
 /* Begin a SASI WRITE command: TODO check disk size */
-static void priam_write_begin(void)
+static void sasi_write_begin(void)
 {
 	unsigned block;
 
-	block = (priam_cmd[1] & 0x0F) << 16;
-	block |= priam_cmd[2] << 8;
-	block |= priam_cmd[3];
+	block = (sasi_cmd[1] & 0x0F) << 16;
+	block |= sasi_cmd[2] << 8;
+	block |= sasi_cmd[3];
 
 	if (trace & TRACE_PRIAM)
-		fprintf(stderr, "priam: writing block %u\n", block);
+		fprintf(stderr, "sasi: writing block %u\n", block);
 
-	if (lseek(priam_fd, block * 256, 0) == -1) {
-		priam_status[0] = 0x02;
-		priam_status[1] = 0x00;
-		priam_bus |= ~0x08;
-		priam_rptr = priam_status;
-		priam_rxc = 2;
+	if (lseek(sasi_fd, block * 256, 0) == -1) {
+		sasi_status[0] = 0x02;
+		sasi_status[1] = 0x00;
+		sasi_bus |= ~0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
 	} else {
-		priam_wptr = priam_data;
-		priam_txc = 256;
-		priam_bus &= ~0x08;
+		sasi_wptr = sasi_data;
+		sasi_txc = 256;
+		sasi_bus &= ~0x08;
 	}
 }
 
 /* We've finished writing the expected block. That might be a command or
    SASI write data */
-static void priam_write_done(void)
+static void sasi_write_done(void)
 {
 	/* Six bytes written to the command buffer */
-	if (priam_wptr == priam_cmd + 6) {
+	if (sasi_wptr == sasi_cmd + 6) {
 		/* Issue a command */
-		priam_status[0] = 0;
-		priam_status[1] = 0;
-		priam_bus |= 0x80;
+		sasi_status[0] = 0;
+		sasi_status[1] = 0;
+		sasi_bus |= 0x80;
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam_cmd: %02X %02X %02X %02X %02X %02X\n",
-				priam_cmd[0], priam_cmd[1], priam_cmd[2], priam_cmd[3],
-				priam_cmd[4], priam_cmd[5]);
+			fprintf(stderr, "sasi_cmd: %02X %02X %02X %02X %02X %02X\n",
+				sasi_cmd[0], sasi_cmd[1], sasi_cmd[2], sasi_cmd[3],
+				sasi_cmd[4], sasi_cmd[5]);
 		/* TODO: sense etc */
-		switch(priam_cmd[0]) {
+		switch(sasi_cmd[0]) {
 		case 0x00: /* TUR */
 		case 0x01: /* REZERO */
 			break;
 		case 0x03: /* REQUEST SENSE */
-			priam_rptr = priam_sense;
-			priam_rxc = 4;
+			sasi_rptr = sasi_sense;
+			sasi_rxc = 4;
 			return;
 		case 0x08: /* READ */
-			priam_do_read();
+			sasi_do_read();
 			return;
 		case 0x0A: /* WRITE */
-			priam_write_begin();
+			sasi_write_begin();
 			return;
 		case 0x04:	/* FORMAT UNIT */
 		case 0x06:	/* FORMAT TRACK */
@@ -755,93 +1341,93 @@ static void priam_write_done(void)
 		case 0xE4:
 			break;
 		default:
-			priam_status[0] = 0x02;
+			sasi_status[0] = 0x02;
 			break;
 		}
-		priam_rptr = priam_status;
-		priam_rxc = 2;
-		priam_bus |= 0x08;
+		sasi_rptr = sasi_status;
+		sasi_rxc = 2;
+		sasi_bus |= 0x08;
 		return;
 	}
 	/* Data block */
-	if (priam_cmd[0]  == 0x0A && !(priam_bus & 0x08)) {
-		priam_write_block();	/* Updates status etc itself */
+	if (sasi_cmd[0]  == 0x0A && !(sasi_bus & 0x08)) {
+		sasi_write_block();	/* Updates status etc itself */
 		return;
 	} else {
 		/* Fudge up an error code - may need to implement sense */
-		priam_status[0] = 0x02;	/* Sense available */
-		priam_status[1] = 0x00;
-	} 
-	priam_rptr = priam_status;
-	priam_rxc = 2;
-	priam_bus |= 0x08;
+		sasi_status[0] = 0x02;	/* Sense available */
+		sasi_status[1] = 0x00;
+	}
+	sasi_rptr = sasi_status;
+	sasi_rxc = 2;
+	sasi_bus |= 0x08;
 }
 
-static uint8_t priam_read(uint8_t addr)
+static uint8_t sasi_read(uint8_t addr)
 {
 	uint8_t r;
 
-	if (priam_fd == -1)
+	if (sasi_fd == -1)
 		return 0xFF;
 
 	switch(addr) {
 	case 0:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: read bus state %02X\n", priam_bus);
-		return priam_bus;
+			fprintf(stderr, "sasi: read bus state %02X\n", sasi_bus);
+		return sasi_bus;
 	case 1:
-		if (priam_rxc) {
-			priam_rxc--;
-			r = *priam_rptr++;
+		if (sasi_rxc) {
+			sasi_rxc--;
+			r = *sasi_rptr++;
 			if (trace & TRACE_PRIAM)
-				fprintf(stderr, "priam: read data %u\n", r);
-			if (priam_rxc == 0)
-				priam_read_done();
+				fprintf(stderr, "sasi: read data %u\n", r);
+			if (sasi_rxc == 0)
+				sasi_read_done();
 			return r;
 		}
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam read data: no data\n");
+			fprintf(stderr, "sasi read data: no data\n");
 		return 0xFF;	/* >?? */
 	}
 	return 0xFF;
 }
 
-static void priam_write(uint8_t addr, uint8_t val)
+static void sasi_write(uint8_t addr, uint8_t val)
 {
 	switch(addr) {
 	case 0:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: write bus %u\n", val);
+			fprintf(stderr, "sasi: write bus %u\n", val);
 		/* Write bus: only known case is write 1 if bus 0x80 */
-		priam_bus |= 0x40;	/* Until we figure this out */
+		sasi_bus |= 0x40;	/* Until we figure this out */
 		break;
 	case 1:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: write data %u (txc %u)\n", val, priam_txc);
+			fprintf(stderr, "sasi: write data %u (txc %u)\n", val, sasi_txc);
 		/* Write data */
-		if (priam_txc) {
-			priam_txc--;
-			*priam_wptr++ = val;
-			if (priam_txc == 0)
-				priam_write_done();
+		if (sasi_txc) {
+			sasi_txc--;
+			*sasi_wptr++ = val;
+			if (sasi_txc == 0)
+				sasi_write_done();
 		}
 		break;
 	case 3:
 		if (trace & TRACE_PRIAM)
-			fprintf(stderr, "priam: write reset %u\n", val);
+			fprintf(stderr, "sasi: write reset %u\n", val);
 		/* Reset ? Write of 0 done initially */
-		priam_bus = 0x00;
-		priam_txc = 6;	/* Command block wait */
-		priam_wptr = priam_cmd;
-		priam_rxc = 0;
+		sasi_bus = 0x00;
+		sasi_txc = 6;	/* Command block wait */
+		sasi_wptr = sasi_cmd;
+		sasi_rxc = 0;
 		break;
 	}
 }
 
-static void priam_attach(const char *path)
+static void sasi_attach(const char *path)
 {
-	priam_fd = open(path, O_RDWR);
-	if (priam_fd == -1) {
+	sasi_fd = open(path, O_RDWR);
+	if (sasi_fd == -1) {
 		perror(path);
 		exit(1);
 	}
@@ -858,6 +1444,8 @@ uint8_t i8080_inport(uint8_t addr)
 	if (addr >= 0x20 && addr <= 0x2F)
 		return polyfd_read(addr & 0x0F);
 	if (addr >= 0x34 && addr <= 0x37)
+		return sasi_read(addr & 3);
+	if (addr >= 0x38 && addr <= 0x3F)
 		return priam_read(addr & 3);
 	if (ide && addr >= 0xC0 && addr <= 0xC7)
 		return ide_read8(ide, addr);
@@ -879,7 +1467,9 @@ void i8080_outport(uint8_t addr, uint8_t val)
 	else if (addr >= 0x20 && addr <= 0x2F)
 		polyfd_write(addr & 0x0F, val);
 	else if (addr >= 0x34 && addr <= 0x37)
-		priam_write(addr & 3, val);
+		sasi_write(addr & 3, val);
+	else if (addr >= 0x38 && addr <= 0x3F)
+		priam_write(addr & 7, val);
 	else if (ide && addr >= 0xC0 && addr <= 0xC7)
 		ide_write8(ide, addr, val);
 	else if (fdc && addr >= 0xE8 && addr <= 0xEF)
@@ -1027,7 +1617,7 @@ static void exit_cleanup(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "poly88: [-A disk] [-B disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-h hd] [-i ide] [-p] [-t]\n");
+	fprintf(stderr, "poly88: [-A|B|C|D disk] [-f] [-r path] [-m mem Kb] [-v vidbase] [-d debug] [-h hd] [-s sasi] [-i ide] [-p] [-t]\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1038,17 +1628,26 @@ int main(int argc, char *argv[])
 	int fd;
 	char *rompath = "poly88.rom";
 	char *drive_a = NULL, *drive_b = NULL;
-	char *priampath = NULL;
+	char *drive_c = NULL, *drive_d = NULL;
+	char *sasipath = NULL;
+	char *hdpath = NULL;
 	char *idepath = NULL;
 	unsigned n;
 	unsigned polyfdc = 0;
+	unsigned tarbell = 0;
 
-	while ((opt = getopt(argc, argv, "A:B:d:F:fh:i:m:pr:tv:")) != -1) {
+	while ((opt = getopt(argc, argv, "A:B:C:D:d:F:fh:i:m:pr:s:tTv:")) != -1) {
 		switch (opt) {
 		case 'A':
 			drive_a = optarg;
 			break;
 		case 'B':
+			drive_b = optarg;
+			break;
+		case 'C':
+			drive_a = optarg;
+			break;
+		case 'D':
 			drive_b = optarg;
 			break;
 		case 'r':
@@ -1061,7 +1660,7 @@ int main(int argc, char *argv[])
 			fast = 1;
 			break;
 		case 'h':
-			priampath = optarg;
+			hdpath = optarg;
 			break;
 		case 'i':
 			idepath = optarg;
@@ -1072,8 +1671,14 @@ int main(int argc, char *argv[])
 		case 'p':
 			polyfdc = 1;
 			break;
-		case 't':
+		case 's':
+			sasipath = optarg;
+			break;
+		case 'T':
 			twinsys = 1;
+			break;
+		case 't':
+			tarbell = 1;
 			break;
 		case 'v':
 			vidbase = strtoul(optarg, NULL, 0) & 0xFFC0;
@@ -1098,11 +1703,11 @@ int main(int argc, char *argv[])
 	close(fd);
 
 	if (polyfdc) {
-		if (drive_a)
-			polyfd_attach(0, drive_a);
-		if (drive_b)
-			polyfd_attach(1, drive_b);
-	} else {
+		polyfd_attach(0, drive_a);
+		polyfd_attach(1, drive_b);
+		polyms_attach(0, drive_c);
+		polyms_attach(1, drive_d);
+	} else if (tarbell) {
 		if (drive_a || drive_b) {
 			fdc = tbfdc_create();
 			if (trace & TRACE_FDC)
@@ -1112,10 +1717,17 @@ int main(int argc, char *argv[])
 			if (drive_b)
 				wd17xx_attach(fdc, 0, drive_b, 1, 80, 26, 128);
 		}
+	} else {
+		polyms_attach(0, drive_a);
+		polyms_attach(1, drive_b);
+		polyms_attach(2, drive_c);
+		polyms_attach(3, drive_d);
 	}
 
-	if (priampath)
-		priam_attach(priampath);
+	if (sasipath)
+		sasi_attach(sasipath);
+
+	priam_attach(0, hdpath);
 
 	/* TODO so for now make it look like bus idle */
 	memset(highrom, 0xFF, sizeof(highrom));
@@ -1198,8 +1810,11 @@ int main(int argc, char *argv[])
 	i8251_attach(uart, &console);
 
 	kbd[0] = asciikbd_create();
-	if (twinsys)
+	asciikbd_bind(kbd[0], SDL_GetWindowID(window[0]));
+	if (twinsys) {
 		kbd[1] = asciikbd_create();
+		asciikbd_bind(kbd[1], SDL_GetWindowID(window[1]));
+	}
 
 	i8080_reset();
 	if (trace & TRACE_CPU)
@@ -1212,16 +1827,17 @@ int main(int argc, char *argv[])
 			i8080_exec(256);
 			i8251_timer(uart);
 			poll_irq_event();
+			polyms_action();
+			polydd_action();
 		}
 		/* We want to run UI events regularly it seems */
 		poly_rasterize(0);
 		poly_render(0);
-		asciikbd_event(kbd[0]);
+		if (ui_event())
+			break;
 		if (twinsys) {
 			poly_rasterize(1);
 			poly_render(1);
-			/* FIXME */
-/* Not yet possible without fixing our SDL layer asciikbd_event(kbd[1]); */
 		}
 		/* Do 20ms of I/O and delays */
 		if (!fast)

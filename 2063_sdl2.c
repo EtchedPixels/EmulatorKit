@@ -5,6 +5,7 @@
 
 #define WITH_SDL
 
+#include "event.h"
 #include "system.h"
 #include "joystick.h"
 
@@ -26,26 +27,29 @@ static const uint8_t button_map[SDL_CONTROLLER_BUTTON_MAX] = {
     1 << 5,  // SDL_CONTROLLER_BUTTON_DPAD_RIGHT
 };
 
-void ui_event(void)
+static int js2063_event(void *dev, void *evp)
 {
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch(ev.type) {
+	SDL_Event *ev = evp;
+	while (SDL_PollEvent(ev)) {
+		switch(ev->type) {
 		case SDL_JOYDEVICEADDED:
-			joystick_add(ev.jdevice.which);
+			joystick_add(ev->jdevice.which);
 			break;
 		case SDL_JOYDEVICEREMOVED:
-			joystick_remove(ev.jdevice.which);
+			joystick_remove(ev->jdevice.which);
 			break;
 		case SDL_CONTROLLERBUTTONDOWN:
-			joystick_button_down(ev.cbutton.which, ev.cbutton.button, button_map);
+			joystick_button_down(ev->cbutton.which, ev->cbutton.button, button_map);
 			break;
 		case SDL_CONTROLLERBUTTONUP:
-			joystick_button_up(ev.cbutton.which, ev.cbutton.button, button_map);
-			break;
-		case SDL_QUIT:
-			emulator_done = 1;
+			joystick_button_up(ev->cbutton.which, ev->cbutton.button, button_map);
 			break;
 		}
 	}
+	return 0;
+}
+
+void js2063_add_events(void)
+{
+	add_ui_handler(js2063_event, NULL);
 }

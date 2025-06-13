@@ -2,6 +2,8 @@
  *	Very basic ZX Spectrum set up for debugging stuff. This does not
  *	do all the timing related magic required to run games correctly
  *	with effects and stuff.
+ *
+ *	TODO: ZXCF, Simple CF cards
  */
 
 #include <stdio.h>
@@ -23,6 +25,7 @@
 #include "lib765/include/765.h"
 
 #include <SDL2/SDL.h>
+#include "event.h"
 #include "keymatrix.h"
 
 static SDL_Window *window;
@@ -605,22 +608,6 @@ static SDL_Keycode keyboard[] = {
 	SDLK_SPACE, SDLK_RSHIFT, SDLK_m, SDLK_n, SDLK_b
 };
 
-static void ui_event(void)
-{
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch (ev.type) {
-		case SDL_QUIT:
-			emulator_done = 1;
-			break;
-		case SDL_KEYDOWN:
-		case SDL_KEYUP:
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
-}
-
 static void run_scanlines(unsigned lines, unsigned blank)
 {
 	unsigned i;
@@ -636,7 +623,8 @@ static void run_scanlines(unsigned lines, unsigned blank)
 		if (!blanked)
 			drawline++;
 	}
-	ui_event();
+	if (ui_event())
+		emulator_done = 1;
 
 	if (int_recalc) {
 		/* If there is no pending Z80 vector IRQ but we think
@@ -802,13 +790,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr,
-			"spectrum: unable to initialize SDL: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
+	ui_init();
+
 	window = SDL_CreateWindow("ZX Spectrum",
 				  SDL_WINDOWPOS_UNDEFINED,
 				  SDL_WINDOWPOS_UNDEFINED,
@@ -846,6 +829,7 @@ int main(int argc, char *argv[])
 
 	matrix = keymatrix_create(8, 5, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
+	keymatrix_add_events(matrix);
 
 	tc.tv_sec = 0;
 	tc.tv_nsec = 20000000L;	/* 20ms (50Hz frame rate) */

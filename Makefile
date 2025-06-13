@@ -29,11 +29,11 @@ lib765/lib/lib765.a:
 am9511/libam9511.a:
 	$(MAKE) --directory am9511
 
-rc2014:	rc2014.o rc2014_noui.o acia.o 16x50.o ttycon.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o zxkey_none.o z180_io.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
-	cc -g3 rc2014.o rc2014_noui.o zxkey_none.o 16x50.o acia.o ttycon.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o z80dis.o z180_io.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
+rc2014:	rc2014.o event_noui.o 16x50.o acia.o z80sio.o ttycon.o vtcon_noui.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o ps2event_noui.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o zxkey_none.o z180_io.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o event_noui.o zxkey_none.o 16x50.o acia.o z80sio.o ttycon.o vtcon_noui.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o ps2event_noui.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o z80dis.o z180_io.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
 
-rc2014_sdl2: rc2014.o rc2014_sdlui.o acia.o 16x50.o ttycon.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
-	cc -g3 rc2014.o rc2014_sdlui.o acia.o 16x50.o ttycon.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
+rc2014_sdl2: rc2014.o event_sdl2.o acia.o 16x50.o z80sio.o ttycon.o vtcon_sdl2.o asciikbd_sdl2.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o ps2event_sdl2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o event_sdl2.o acia.o 16x50.o z80sio.o ttycon.o vtcon_sdl2.o asciikbd_sdl2.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o ps2event_sdl2.o rtc_bitbang.o sasi.o sdcard.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
 
 rb-mbc:	rb-mbc.o 16x50.o ttycon.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 	cc -g3 rb-mbc.o 16x50.o ttycon.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
@@ -41,8 +41,8 @@ rb-mbc:	rb-mbc.o 16x50.o ttycon.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/li
 rbcv2:	rbcv2.o 16x50.o ttycon.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o
 	cc -g3 rbcv2.o 16x50.o ttycon.o ide.o ppide.o propio.o ramf.o rtc_bitbang.o w5100.o z80dis.o libz80/libz80.o -o rbcv2
 
-searle:	searle.o ide.o z80dis.o libz80/libz80.o
-	cc -g3 searle.o ide.o z80dis.o libz80/libz80.o -o searle
+searle:	searle.o event_noui.o z80sio.o ttycon.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 searle.o event_noui.o z80sio.o ttycon.o ide.o z80dis.o libz80/libz80.o -o searle
 
 linc80:	linc80.o ide.o sdcard.o z80sio.o ttycon.o z80dis.o libz80/libz80.o
 	cc -g3 linc80.o ide.o sdcard.o z80sio.o ttycon.o z80dis.o libz80/libz80.o -o linc80
@@ -103,11 +103,11 @@ m68k/lib68k.a:
 rcbus-68008.o: rcbus-68008.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c rcbus-68008.c
 
-rcbus-8085: rcbus-8085.o rcbus_noui.o intel_8085_emulator.o ide.o acia.o ttycon.o tms9918a.o tms9918a_norender.o w5100.o ppide.o rtc_bitbang.o 16x50.o sasi.o ncr5380.o
-	cc -g3 rcbus-8085.o rcbus_noui.o acia.o ttycon.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_norender.o w5100.o sasi.o ncr5380.o intel_8085_emulator.o -o rcbus-8085
+rcbus-8085: rcbus-8085.o event_noui.o intel_8085_emulator.o ide.o acia.o ttycon.o tms9918a.o tms9918a_norender.o w5100.o ppide.o rtc_bitbang.o 16x50.o sasi.o ncr5380.o
+	cc -g3 rcbus-8085.o event_noui.o acia.o ttycon.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_norender.o w5100.o sasi.o ncr5380.o intel_8085_emulator.o -o rcbus-8085
 
-rcbus-8085_sdl2: rcbus-8085.o rcbus_sdlui.o intel_8085_emulator.o ide.o acia.o ttycon.o tms9918a.o tms9918a_sdl2.o w5100.o ppide.o rtc_bitbang.o 16x50.o sasi.o ncr5380.o
-	cc -g3 rcbus-8085.o rcbus_sdlui.o acia.o ttycon.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_sdl2.o w5100.o sasi.o ncr5380.o intel_8085_emulator.o -o rcbus-8085_sdl2 -lSDL2
+rcbus-8085_sdl2: rcbus-8085.o event_sdl2.o intel_8085_emulator.o ide.o acia.o ttycon.o tms9918a.o tms9918a_sdl2.o w5100.o ppide.o rtc_bitbang.o 16x50.o sasi.o ncr5380.o
+	cc -g3 rcbus-8085.o event_sdl2.o acia.o ttycon.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_sdl2.o w5100.o sasi.o ncr5380.o intel_8085_emulator.o -o rcbus-8085_sdl2 -lSDL2
 
 rcbus-80c188: rcbus-80c188.o 16x50.o ttycon.o ide.o w5100.o ppide.o rtc_bitbang.o
 	$(MAKE) --directory 80x86 && \
@@ -126,14 +126,14 @@ rcbus-z280: rcbus-z280.o ide.o libz280/libz80.o
 rcbus-z8: rcbus-z8.o z8.o ide.o acia.o w5100.o ppide.o rtc_bitbang.o
 	cc -g3 rcbus-z8.o acia.o ide.o ppide.o rtc_bitbang.o w5100.o z8.o -o rcbus-z8
 
-rcbus-z180:	rcbus-z180.o rc2014_noui.o z180_io.o 16x50.o acia.o ttycon.o ide.o ppide.o piratespi.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o zxkey_none.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 rcbus-z180.o rc2014_noui.o z180_io.o zxkey_none.o 16x50.o acia.o ttycon.o ide.o piratespi.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o rcbus-z180
+rcbus-z180:	rcbus-z180.o event_noui.o z180_io.o 16x50.o acia.o ttycon.o ide.o ppide.o piratespi.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o zxkey_none.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 rcbus-z180.o event_noui.o z180_io.o zxkey_none.o 16x50.o acia.o ttycon.o ide.o piratespi.o ppide.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_norender.o w5100.o z80dis.o libz180/libz180.o lib765/lib/lib765.a -o rcbus-z180
 
 smallz80: smallz80.o ide.o libz80/libz80.o
 	cc -g3 smallz80.o ide.o libz80/libz80.o -o smallz80
 
-sbc2g:	sbc2g.o ide.o libz80/libz80.o
-	cc -g3 sbc2g.o ide.o z80dis.o libz80/libz80.o -o sbc2g
+sbc2g:	sbc2g.o event_noui.o z80sio.o ttycon.o ide.o libz80/libz80.o
+	cc -g3 sbc2g.o event_noui.o z80sio.o ttycon.o ide.o z80dis.o libz80/libz80.o -o sbc2g
 
 tiny68k: tiny68k.o ide.o duart.o m68k/lib68k.a
 	cc -g3 tiny68k.o ide.o duart.o m68k/lib68k.a -o tiny68k
@@ -183,38 +183,38 @@ sbc08k.o: sbc08k.c m68k/lib68k.a
 z80mc:	z80mc.o 16x50.o ttycon.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z80mc.o 16x50.o ttycon.o sdcard.o z80dis.o libz80/libz80.o -o z80mc
 
-z180-mini-itx_sdl2: z180-mini-itx.o rc2014_sdlui.o z180_io.o ttycon.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 z180-mini-itx.o rc2014_sdlui.o z180_io.o ttycon.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a -lSDL2  -o z180-mini-itx_sdl2
+z180-mini-itx_sdl2: z180-mini-itx.o event_sdl2.o ps2event_sdl2.o z180_io.o ttycon.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 z180-mini-itx.o event_sdl2.o ps2event_sdl2.o z180_io.o ttycon.o i82c55a.o ide.o keymatrix.o ps2.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o zxkey_sdl2.o libz180/libz180.o lib765/lib/lib765.a -lSDL2  -o z180-mini-itx_sdl2
 
 flexbox: flexbox.o 6800.o acia.o ttycon.o ide.o
 	cc -g3 flexbox.o 6800.o acia.o ttycon.o ide.o -o flexbox
 
-simple80: simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o
-	cc -g3 simple80.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o -o simple80
+simple80: simple80.o event_noui.o z80sio.o ttycon.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o
+	cc -g3 simple80.o event_noui.o z80sio.o ttycon.o ide.o rtc_bitbang.o libz80/libz80.o z80dis.o -o simple80
 
 zsc: zsc.o ide.o acia.o libz80/libz80.o
 	cc -g3 zsc.o acia.o ide.o libz80/libz80.o -o zsc
 
-nc100: nc100.o keymatrix.o libz80/libz80.o z80dis.o
-	cc -g3 nc100.o keymatrix.o libz80/libz80.o z80dis.o -o nc100 -lSDL2
+nc100: nc100.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o
+	cc -g3 nc100.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o -o nc100 -lSDL2
 
-nc200: nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
-	cc -g3 nc200.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
+nc200: nc200.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a
+	cc -g3 nc200.o event_sdl2.o keymatrix.o libz80/libz80.o z80dis.o lib765/lib/lib765.a -o nc200 -lSDL2
 
 markiv:	markiv.o z180_io.o ttycon.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o
 	cc -g3 markiv.o z180_io.o ttycon.o ide.o rtc_bitbang.o propio.o sdcard.o z80dis.o libz180/libz180.o -o markiv
 
-n8_sdl2: n8.o n8_sdlui.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
-	cc -g3 n8.o n8_sdlui.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a  -o n8_sdl2 -lSDL2
+n8_sdl2: n8.o event_sdl2.o ps2event_sdl2.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a
+	cc -g3 n8.o event_sdl2.o ps2event_sdl2.o z180_io.o ttycon.o ide.o ppide.o ps2.o rtc_bitbang.o sdcard.o tms9918a.o tms9918a_sdl2.o z80dis.o libz180/libz180.o lib765/lib/lib765.a  -o n8_sdl2 -lSDL2
 
-s100-z80:	s100-z80.o acia.o ppide.o ide.o tarbell_fdc.o wd17xx.o libz80/libz80.o
+s100-z80: s100-z80.o acia.o ppide.o ide.o tarbell_fdc.o wd17xx.o libz80/libz80.o
 	cc -g3 s100-z80.o acia.o ppide.o ide.o tarbell_fdc.o wd17xx.o libz80/libz80.o -o s100-z80
 
 s100-8080: s100-8080.o intel_8080_emulator.o mits1.o ide.o tarbell_fdc.o wd17xx.o ttycon.o
 	cc -g3 s100-8080.o mits1.o ttycon.o ide.o tarbell_fdc.o wd17xx.o intel_8080_emulator.o -o s100-8080
 
-poly88: poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o
-	cc -g3 poly88.o intel_8080_emulator.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o -o poly88 -lSDL2
+poly88: poly88.o intel_8080_emulator.o event_sdl2.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o
+	cc -g3 poly88.o intel_8080_emulator.o event_sdl2.o i8251.o ide.o ttycon.o asciikbd_sdl2.o tarbell_fdc.o wd17xx.o -o poly88 -lSDL2
 
 mini11: mini11.o 68hc11.o sdcard.o 6522.o
 	cc -g3 mini11.o sdcard.o 6522.o 68hc11.o -o mini11
@@ -228,20 +228,20 @@ mini-riscv.o: mini-riscv.c riscv/mini-rv32ima.h riscv-disas.h
 riscv-disas.o: riscv-disas.c riscv-disas.h
 	$(CC) -c $(CFLAGS) -std=gnu2x riscv-disas.c
 
-scelbi: scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o
-	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o -o scelbi
+scelbi: scelbi.o i8008.o event_noui.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o
+	cc -g3 scelbi.o i8008.o event_noui.o dgvideo.o dgvideo_norender.o scopewriter.o scopewriter_norender.o asciikbd_none.o -o scelbi
 
-scelbi_sdl2: scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o
-	cc -g3 scelbi.o i8008.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o -o scelbi_sdl2 -lSDL2
+scelbi_sdl2: scelbi.o i8008.o event_sdl2.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o
+	cc -g3 scelbi.o i8008.o event_sdl2.o dgvideo.o dgvideo_sdl2.o scopewriter.o scopewriter_sdl2.o asciikbd_sdl2.o -o scelbi_sdl2 -lSDL2
 
-nascom: nascom.o keymatrix.o 58174.o libz80/libz80.o z80dis.o wd17xx.o sasi.o ide.o
-	cc -g3 nascom.o keymatrix.o 58174.o ide.o sasi.o wd17xx.o libz80/libz80.o z80dis.o -lSDL2 -o nascom
+nascom: nascom.o event_sdl2.o keymatrix.o 58174.o libz80/libz80.o z80dis.o wd17xx.o sasi.o ide.o
+	cc -g3 nascom.o event_sdl2.o keymatrix.o 58174.o ide.o sasi.o wd17xx.o libz80/libz80.o z80dis.o -lSDL2 -o nascom
 
-uk101: uk101.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o
-	cc -g3 uk101.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o -lSDL2 -o uk101
+uk101: uk101.o event_sdl2.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o
+	cc -g3 uk101.o event_sdl2.o keymatrix.o acia.o ttycon.o 6502.o 6502dis.o -lSDL2 -o uk101
 
-vz300: vz300.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o
-	cc -g3 vz300.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o -lSDL2 -o vz300
+vz300: vz300.o event_sdl2.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o
+	cc -g3 vz300.o event_sdl2.o 6847.o 6847_sdl2.o keymatrix.o sdcard.o libz80/libz80.o z80dis.o -lSDL2 -o vz300
 
 rhyophyre:rhyophyre.o z180_io.o ttycon.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o
 	cc -g3 rhyophyre.o z180_io.o ttycon.o ppide.o ide.o rtc_bitbang.o z80dis.o libz180/libz180.o -o rhyophyre
@@ -260,14 +260,14 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 
 68hc11.o: 6800.c
 
-z80retro: z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
-	cc -g3 z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
+z80retro: z80retro.o event_noui.o z80sio.o ttycon.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
+	cc -g3 z80retro.o event_noui.o z80sio.o ttycon.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
-2063: 2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
-	cc -g3 2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
+2063: 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o z80sio.o vtcon_noui.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
+	cc -g3 2063.o event_noui.o 2063_noui.o sdcard.o 16x50.o z80sio.o vtcon_noui.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
 
-2063_sdl2: 2063.o 2063_sdlui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o
-	cc -g3 2063.o 2063_sdlui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
+2063_sdl2: 2063.o event_sdl2.o 2063_sdl2.o sdcard.o 16x50.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o
+	cc -g3 2063.o event_sdl2.o 2063_sdl2.o sdcard.o 16x50.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
 
 zeta-v2: zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a
 	cc -g3 zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a -o zeta-v2
@@ -303,20 +303,20 @@ nybbles: nybbles.o ns807x.o
 scmp2: scmp2.o ns806x.o
 	cc -g3 scmp2.o ns806x.o -o scmp2
 
-max80: max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
-	cc -g3 max80.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
+max80: max80.o event_sdl2.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o
+	cc -g3 max80.o event_sdl2.o z80sio.o vtcon_sdl2.o asciikbd_sdl2.o keymatrix.o wd17xx.o sasi.o z80dis.o libz80/libz80.o -lm -o max80 -lSDL2
 
 microtan: microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o
-	cc -g3 microtan.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o -lSDL2 -o microtan
+	cc -g3 microtan.o event_sdl2.o asciikbd_sdl2.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6502.o 6502dis.o -lSDL2 -o microtan
 
 microtanic6808: microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o
 	cc -g3 microtanic6808.o ttycon.o 6551.o 6522.o ide.o wd17xx.o 58174.o 6800.o -o microtanic6808
 
-sorceror: sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
-	cc -g3 sorceror.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
+sorceror: sorceror.o event_sdl2.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o
+	cc -g3 sorceror.o event_sdl2.o keymatrix.o wd17xx.o drivewire.o ppide.o ide.o z80dis.o libz80/libz80.o -lm -o sorceror -lSDL2
 
-spectrum: spectrum.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o
-	cc -g3 spectrum.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o -lm -o spectrum -lSDL2
+spectrum: spectrum.o event_sdl2.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o
+	cc -g3 spectrum.o event_sdl2.o keymatrix.o ide.o z80dis.o lib765/lib/lib765.a libz80/libz80.o -lm -o spectrum -lSDL2
 
 z80all: z80all.o 16x50.o ttycon.o ide.o z80dis.o libz80/libz80.o
 	cc -g3 z80all.o 16x50.o ttycon.o ide.o z80dis.o libz80/libz80.o -lSDL2 -o z80all

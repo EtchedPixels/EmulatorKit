@@ -899,6 +899,8 @@ int main(int argc, char *argv[])
 	if (hccipath)
 		hcci_connect(hccipath);
 
+	ui_init();
+
 	vdp = tms9918a_create();
 	tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
 	vdprend = tms9918a_renderer_create(vdp);

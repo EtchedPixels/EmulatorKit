@@ -526,13 +526,13 @@ uint8_t wd17xx_status(struct wd17xx *fdc)
 
 uint8_t wd17xx_status_noclear(struct wd17xx *fdc)
 {
-	fprintf(stderr, "fdc busy %u\n", fdc->busy);
 	if (fdc->busy) {
 		fdc->busy--;
 		if (!fdc->busy) {
 			fdc->status &= ~BUSY;
 			fdc->intrq = 1;
-			fprintf(stderr, "INTRQ goes high.\n");
+			if (fdc->trace)
+				fprintf(stderr, "INTRQ goes high.\n");
 		}
 	}
 	return fdc->status | (fdc->motor ? 0x80 : 0x00);

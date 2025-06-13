@@ -39,9 +39,8 @@
 #include "dgvideo_render.h"
 #include "scopewriter.h"
 #include "scopewriter_render.h"
+#include "event.h"
 #include "asciikbd.h"
-
-int sdl_live;
 
 static struct i8008 *cpu;
 static struct dgvideo *dgvideo;
@@ -363,9 +362,11 @@ static void run_system(void)
 				dgvideo_render(dgrender);
 			if (swrender)
 				scopewriter_render(swrender);
-			dgvideo_rasterize(dgvideo);
+			if (dgvideo)
+				dgvideo_rasterize(dgvideo);
 		}
-		asciikbd_event(kbd);
+		if (ui_event())
+			break;
 		nanosleep(&tc, NULL);
 		if (i8008_halted(cpu)) {
 			tcsetattr(0, TCSADRAIN, &saved_term);
@@ -473,6 +474,8 @@ int main(int argc, char *argv[])
 	}
 	if (optind < argc)
 		usage();
+
+	ui_init();
 
 	if (has_dg) {
 		dgvideo = dgvideo_create();

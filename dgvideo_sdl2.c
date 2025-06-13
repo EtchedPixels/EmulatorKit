@@ -7,8 +7,6 @@
 #include "dgvideo.h"
 #include "dgvideo_render.h"
 
-extern int sdl_live;
-
 struct dgvideo_renderer {
     struct dgvideo *dg;
     SDL_Renderer *render;
@@ -41,17 +39,6 @@ void dgvideo_renderer_free(struct dgvideo_renderer *render)
 struct dgvideo_renderer *dgvideo_renderer_create(struct dgvideo *dg)
 {
     struct dgvideo_renderer *render;
-
-    /* We will need a nicer way to do this once we have multiple SDL using
-       devices */
-    if (sdl_live == 0) {
-        sdl_live = 1;
-        if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-            fprintf(stderr, "SDL init failed: %s.\n", SDL_GetError());
-            exit(1);
-        }
-        atexit(SDL_Quit);
-    }
 
     render = malloc(sizeof(struct dgvideo_renderer));
     if (render == NULL) {

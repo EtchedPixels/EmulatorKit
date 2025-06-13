@@ -29,11 +29,16 @@
 #include <errno.h>
 #include <sys/select.h>
 
+#include "event.h"
 #include "serialdevice.h"
 #include "ttycon.h"
+#include "vtcon.h"
 #include "16x50.h"
+#include "z80sio.h"
 #include "sdcard.h"
 #include "system.h"
+#include "event.h"
+#include "2063ui.h"
 #include "joystick.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
@@ -49,8 +54,7 @@ static struct sdcard *sdcard;
 static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct uart16x50 *uart;
-
-int sdl_live;
+static struct z80_sio *sio;
 
 static uint8_t ram[16 * 32768];
 static uint8_t rom[65536];
@@ -61,8 +65,7 @@ static uint16_t tstate_steps = 50;	/* 10MHz speed */
 /* IRQ source that is live in IM2 */
 static uint8_t live_irq;
 
-#define IRQ_SIOA	1
-#define IRQ_SIOB	2
+#define IRQ_SIO		1
 #define IRQ_CTC		3	/* 3 4 5 6 */
 #define INT_UART	4
 /* TOOD: PIO */
@@ -186,44 +189,6 @@ static void z80_trace(unsigned unused)
 		cpu_z80.R1.wr.IX, cpu_z80.R1.wr.IY, cpu_z80.R1.wr.SP);
 }
 
-unsigned int check_chario(void)
-{
-	fd_set i, o;
-	struct timeval tv;
-	unsigned int r = 0;
-
-	FD_ZERO(&i);
-	FD_SET(0, &i);
-	FD_ZERO(&o);
-	FD_SET(1, &o);
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
-
-	if (select(2, &i, &o, NULL, &tv) == -1) {
-		if (errno == EINTR)
-			return 0;
-		perror("select");
-		exit(1);
-	}
-	if (FD_ISSET(0, &i))
-		r |= 1;
-	if (FD_ISSET(1, &o))
-		r |= 2;
-	return r;
-}
-
-unsigned int next_char(void)
-{
-	char c;
-	if (read(0, &c, 1) != 1) {
-		printf("(tty read without ready byte)\n");
-		return 0xFF;
-	}
-	if (c == 0x0A)
-		c = '\r';
-	return c;
-}
-
 void recalc_interrupts(void)
 {
 	int_recalc = 1;
@@ -231,329 +196,6 @@ void recalc_interrupts(void)
 
 void uart16x50_signal_change(struct uart16x50 *uart, uint8_t bits)
 {
-}
-
-struct z80_sio_chan {
-	uint8_t wr[8];
-	uint8_t rr[3];
-	uint8_t data[3];
-	uint8_t dptr;
-	uint8_t irq;
-	uint8_t rxint;
-	uint8_t txint;
-	uint8_t intbits;
-#define INT_TX	1
-#define INT_RX	2
-#define INT_ERR	4
-	uint8_t pending;	/* Interrupt bits pending as an IRQ cause */
-	uint8_t vector;		/* Vector pending to deliver */
-};
-
-static int sio2_input;
-static struct z80_sio_chan sio[2];
-
-/*
- *	Interrupts. We don't handle IM2 yet.
- */
-
-static void sio2_clear_int(struct z80_sio_chan *chan, uint8_t m)
-{
-	if (trace & TRACE_IRQ) {
-		fprintf(stderr, "Clear intbits %d %x\n",
-			(int)(chan - sio), m);
-	}
-	chan->intbits &= ~m;
-	chan->pending &= ~m;
-	/* Check me - does it auto clear down or do you have to reti it ? */
-	if (!(sio->intbits | sio[1].intbits)) {
-		sio->rr[1] &= ~0x02;
-		chan->irq = 0;
-	}
-	recalc_interrupts();
-}
-
-static void sio2_raise_int(struct z80_sio_chan *chan, uint8_t m)
-{
-	uint8_t new = (chan->intbits ^ m) & m;
-	chan->intbits |= m;
-	if ((trace & TRACE_SIO) && new)
-		fprintf(stderr, "SIO raise int %x new = %x\n", m, new);
-	if (new) {
-		if (!sio->irq) {
-			chan->irq = 1;
-			sio->rr[1] |= 0x02;
-			recalc_interrupts();
-		}
-	}
-}
-
-static void sio2_reti(struct z80_sio_chan *chan)
-{
-	/* Recalculate the pending state and vectors */
-	/* FIXME: what really goes here */
-	sio->irq = 0;
-	recalc_interrupts();
-}
-
-static int sio2_check_im2(struct z80_sio_chan *chan)
-{
-	uint8_t vector = sio[1].wr[2];
-	/* See if we have an IRQ pending and if so deliver it and return 1 */
-	if (chan->irq) {
-		/* Do the vector calculation in the right place */
-		/* FIXME: move this to other platforms */
-		if (sio[1].wr[1] & 0x04) {
-			/* This is a subset of the real options. FIXME: add
-			   external status change */
-			if (sio[1].wr[1] & 0x04) {
-				vector &= 0xF1;
-				if (chan == sio)
-					vector |= 1 << 3;
-				if (chan->intbits & INT_RX)
-					vector |= 4;
-				else if (chan->intbits & INT_ERR)
-					vector |= 2;
-			}
-			if (trace & TRACE_SIO)
-				fprintf(stderr, "SIO2 interrupt %02X\n", vector);
-			chan->vector = vector;
-		} else {
-			chan->vector = vector;
-		}
-		if (trace & (TRACE_IRQ|TRACE_SIO))
-			fprintf(stderr, "New live interrupt pending is SIO (%d:%02X).\n",
-				(int)(chan - sio), chan->vector);
-		if (chan == sio)
-			live_irq = IRQ_SIOA;
-		else
-			live_irq = IRQ_SIOB;
-		Z80INT(&cpu_z80, chan->vector);
-		return 1;
-	}
-	return 0;
-}
-
-/*
- *	The SIO replaces the last character in the FIFO on an
- *	overrun.
- */
-static void sio2_queue(struct z80_sio_chan *chan, uint8_t c)
-{
-	if (trace & TRACE_SIO)
-		fprintf(stderr, "SIO %d queue %d: ", (int) (chan - sio), c);
-	/* Receive disabled */
-	if (!(chan->wr[3] & 1)) {
-		fprintf(stderr, "RX disabled.\n");
-		return;
-	}
-	/* Overrun */
-	if (chan->dptr == 2) {
-		if (trace & TRACE_SIO)
-			fprintf(stderr, "Overrun.\n");
-		chan->data[2] = c;
-		chan->rr[1] |= 0x20;	/* Overrun flagged */
-		/* What are the rules for overrun delivery FIXME */
-		sio2_raise_int(chan, INT_ERR);
-	} else {
-		/* FIFO add */
-		if (trace & TRACE_SIO)
-			fprintf(stderr, "Queued %d (mode %d)\n", chan->dptr, chan->wr[1] & 0x18);
-		chan->data[chan->dptr++] = c;
-		chan->rr[0] |= 1;
-		switch (chan->wr[1] & 0x18) {
-		case 0x00:
-			break;
-		case 0x08:
-			if (chan->dptr == 1)
-				sio2_raise_int(chan, INT_RX);
-			break;
-		case 0x10:
-		case 0x18:
-			sio2_raise_int(chan, INT_RX);
-			break;
-		}
-	}
-	/* Need to deal with interrupt results */
-}
-
-static void sio2_channel_timer(struct z80_sio_chan *chan, uint8_t ab)
-{
-	if (ab == 0) {
-		int c = check_chario();
-
-		if (sio2_input) {
-			if (c & 1)
-				sio2_queue(chan, next_char());
-		}
-		if (c & 2) {
-			if (!(chan->rr[0] & 0x04)) {
-				chan->rr[0] |= 0x04;
-				if (chan->wr[1] & 0x02)
-					sio2_raise_int(chan, INT_TX);
-			}
-		}
-	} else {
-		if (!(chan->rr[0] & 0x04)) {
-			chan->rr[0] |= 0x04;
-			if (chan->wr[1] & 0x02)
-				sio2_raise_int(chan, INT_TX);
-		}
-	}
-}
-
-static void sio2_timer(void)
-{
-	sio2_channel_timer(sio, 0);
-	sio2_channel_timer(sio + 1, 1);
-}
-
-static void sio2_channel_reset(struct z80_sio_chan *chan)
-{
-	chan->rr[0] = 0x2C;
-	chan->rr[1] = 0x01;
-	chan->rr[2] = 0;
-	sio2_clear_int(chan, INT_RX | INT_TX | INT_ERR);
-}
-
-static void sio_reset(void)
-{
-	sio2_channel_reset(sio);
-	sio2_channel_reset(sio + 1);
-}
-
-static uint8_t sio2_read(uint16_t addr)
-{
-	struct z80_sio_chan *chan = (addr & 1) ? sio + 1 : sio;
-	if (addr & 2) {
-		/* Control */
-		uint8_t r = chan->wr[0] & 007;
-		chan->wr[0] &= ~007;
-
-		chan->rr[0] &= ~2;
-		if (chan == sio && (sio[0].intbits | sio[1].intbits))
-			chan->rr[0] |= 2;
-		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read reg %d = ", (addr & 1) ? 'b' : 'a', r);
-		switch (r) {
-		case 0:
-		case 1:
-			if (trace & TRACE_SIO)
-				fprintf(stderr, "%02X\n", chan->rr[r]);
-			return chan->rr[r];
-		case 2:
-			if (chan != sio) {
-				if (trace & TRACE_SIO)
-					fprintf(stderr, "%02X\n", chan->rr[2]);
-				return chan->rr[2];
-			}
-		case 3:
-			/* What does the hw report ?? */
-			fprintf(stderr, "INVALID(0xFF)\n");
-			return 0xFF;
-		}
-	} else {
-		uint8_t c = chan->data[0];
-		chan->data[0] = chan->data[1];
-		chan->data[1] = chan->data[2];
-		if (chan->dptr)
-			chan->dptr--;
-		if (chan->dptr == 0)
-			chan->rr[0] &= 0xFE;	/* Clear RX pending */
-		sio2_clear_int(chan, INT_RX);
-		chan->rr[0] &= 0x3F;
-		chan->rr[1] &= 0x3F;
-		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c read data %d\n", (addr & 1) ? 'b' : 'a', c);
-		if (chan->dptr && (chan->wr[1] & 0x10))
-			sio2_raise_int(chan, INT_RX);
-		return c;
-	}
-	return 0xFF;
-}
-
-static void sio2_write(uint16_t addr, uint8_t val)
-{
-	struct z80_sio_chan *chan = (addr & 1) ? sio + 1 : sio;
-	uint8_t r;
-
-	if (addr & 2) {
-		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c write reg %d with %02X\n", (addr & 1) ? 'b' : 'a', chan->wr[0] & 7, val);
-		switch (chan->wr[0] & 007) {
-		case 0:
-			chan->wr[0] = val;
-			/* FIXME: CRC reset bits ? */
-			switch (val & 070) {
-			case 000:	/* NULL */
-				break;
-			case 010:	/* Send Abort SDLC */
-				/* SDLC specific no-op for async */
-				break;
-			case 020:	/* Reset external/status interrupts */
-				sio2_clear_int(chan, INT_ERR);
-				chan->rr[1] &= 0xCF;	/* Clear status bits on rr0 */
-				break;
-			case 030:	/* Channel reset */
-				if (trace & TRACE_SIO)
-					fprintf(stderr, "[channel reset]\n");
-				sio2_channel_reset(chan);
-				break;
-			case 040:	/* Enable interrupt on next rx */
-				chan->rxint = 1;
-				break;
-			case 050:	/* Reset transmitter interrupt pending */
-				chan->txint = 0;
-				sio2_clear_int(chan, INT_TX);
-				break;
-			case 060:	/* Reset the error latches */
-				chan->rr[1] &= 0x8F;
-				break;
-			case 070:	/* Return from interrupt (channel A) */
-				if (chan == sio) {
-					sio->irq = 0;
-					sio->rr[1] &= ~0x02;
-					sio2_clear_int(sio, INT_RX | INT_TX | INT_ERR);
-					sio2_clear_int(sio + 1, INT_RX | INT_TX | INT_ERR);
-				}
-				break;
-			}
-			break;
-		case 1:
-		case 2:
-		case 3:
-		case 4:
-		case 5:
-		case 6:
-		case 7:
-			r = chan->wr[0] & 7;
-			if (trace & TRACE_SIO)
-				fprintf(stderr, "sio%c: wrote r%d to %02X\n",
-					(addr & 1) ? 'b' : 'a', r, val);
-			chan->wr[r] = val;
-			if (chan != sio && r == 2)
-				chan->rr[2] = val;
-			chan->wr[0] &= ~007;
-			break;
-		}
-		/* Control */
-	} else {
-		/* Strictly we should emulate this as two bytes, one going out and
-		   the visible queue - FIXME */
-		/* FIXME: irq handling */
-		chan->rr[0] &= ~(1 << 2);	/* Transmit buffer no longer empty */
-		chan->txint = 1;
-		/* Should check chan->wr[5] & 8 */
-		sio2_clear_int(chan, INT_TX);
-		if (trace & TRACE_SIO)
-			fprintf(stderr, "sio%c write data %d\n", (addr & 1) ? 'b' : 'a', val);
-		if (chan == sio)
-			write(1, &val, 1);
-		else {
-//			write(1, "\033[1m;", 5);
-			write(1, &val,1);
-//			write(1, "\033[0m;", 5);
-		}
-	}
 }
 
 /*
@@ -802,6 +444,14 @@ static void gpio_write(uint16_t addr, uint8_t val)
 	}
 }
 
+/* Channel is A0, C/D is A1 */
+static unsigned sio_port[4] = {
+	SIOA_D,
+	SIOB_D,
+	SIOA_C,
+	SIOB_C
+};
+
 uint8_t io_read(int unused, uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -812,7 +462,7 @@ uint8_t io_read(int unused, uint16_t addr)
 		case 0x00:
 			return gpio_in;
 		case 0x30:
-			return sio2_read(addr & 3);
+			return sio_read(sio, sio_port[addr & 3]);
 		case 0x40:
 			return ctc_read(addr & 3);
 		case 0x50:
@@ -860,7 +510,7 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 		/* Printer */
 		break;
 	case 0x30:
-		sio2_write(addr & 3, val);
+		sio_write(sio, sio_port[addr & 3], val);
 		return;
 	case 0x40:
 		ctc_write(addr & 3, val);
@@ -892,13 +542,21 @@ void io_write(int unused, uint16_t addr, uint8_t val)
 
 static void poll_irq_event(void)
 {
-	if (!live_irq)
-		if (!sio2_check_im2(sio))
-		        if (!sio2_check_im2(sio + 1))
-				if (!ctc_check_im2()) {
-					if (uart && uart16x50_irq_pending(uart))
-						Z80INT(&cpu_z80, 0xFF);
-				}
+	unsigned v;
+
+	if (live_irq)
+		return;
+
+	v = sio_check_im2(sio);
+	if (v >= 0) {
+		live_irq = IRQ_SIO;
+		Z80INT(&cpu_z80, v);
+		return;
+	}
+	if (!ctc_check_im2()) {
+		if (uart && uart16x50_irq_pending(uart))
+				Z80INT(&cpu_z80, 0xFF);
+	}
 	/* If a real IM2 source is live then the serial int won't be seen */
 }
 
@@ -907,11 +565,8 @@ static void reti_event(void)
 	if (live_irq && (trace & TRACE_IRQ))
 		fprintf(stderr, "RETI\n");
 	switch(live_irq) {
-	case IRQ_SIOA:
-		sio2_reti(sio);
-		break;
-	case IRQ_SIOB:
-		sio2_reti(sio + 1);
+	case IRQ_SIO:
+		sio_reti(sio);
 		break;
 	case IRQ_CTC:
 	case IRQ_CTC + 1:
@@ -1010,15 +665,27 @@ int main(int argc, char *argv[])
 		sd_trace(sdcard, 1);
 	sd_blockmode(sdcard);
 
-	sio_reset();
+	ui_init();
+
+	sio = sio_create();
+	sio_reset(sio);
+	sio_trace(sio, 0, !!(trace & TRACE_SIO));
+	sio_trace(sio, 1, !!(trace & TRACE_SIO));
+
 	ctc_init();
 	if (have_16x50) {
 		uart = uart16x50_create();
 		uart16x50_trace(uart, trace & TRACE_UART);
 		uart16x50_attach(uart, &console);
 		uart16x50_reset(uart);
-	} else
-		sio2_input = 1;
+		sio_attach(sio, 0, vt_create("sioa", CON_VT52));
+		sio_attach(sio, 1, vt_create("siob", CON_VT52));
+	} else {
+		sio_attach(sio, 0, &console);
+		sio_attach(sio, 1, vt_create("siob", CON_VT52));
+	}
+
+	ui_init();
 
 	if (have_tms) {
 		vdp = tms9918a_create();
@@ -1027,6 +694,7 @@ int main(int argc, char *argv[])
 		/* SDL init called in tms9918a_renderer_create */
 		joystick_create();
 		joystick_trace( !! (trace & TRACE_JOY ));
+		js2063_add_events();
 	}
 
 	/* 60Hz for the VDP */
@@ -1062,6 +730,8 @@ int main(int argc, char *argv[])
 
 	/* We run 1000000 t-states per second */
 	while (!emulator_done) {
+		int i;
+
 		if (cpu_z80.halted && ! cpu_z80.IFF1) {
 			/* HALT with interrupts disabled, so nothing left
 			   to do, so exit simulation. If NMI was supported,
@@ -1069,7 +739,6 @@ int main(int argc, char *argv[])
 			emulator_done = 1;
 			break;
 		}
-		int i;
 		/* This is very slightly out but then so are most can oscillators ;) */
 		/* Ideal would be about 334 x 499 */
 		for (i = 0; i < 333; i++) {
@@ -1077,10 +746,11 @@ int main(int argc, char *argv[])
 			for (j = 0; j < 10; j++) {
 				Z80ExecuteTStates(&cpu_z80, tstate_steps);
 				ctc_tick(tstate_steps);
-				sio2_timer();
+				sio_timer(sio);
 			}
 			/* We want to run UI events regularly it seems */
-			ui_event();
+			if (ui_event())
+				emulator_done = 1;
 		}
 
 		/* Do 20ms of I/O and delays */
@@ -1090,18 +760,11 @@ int main(int argc, char *argv[])
 		}
 		if (!fast)
 			nanosleep(&tc, NULL);
-		if (int_recalc) {
-			/* If there is no pending Z80 vector IRQ but we think
-			   there now might be one we use the same logic as for
-			   reti */
-			if (!live_irq)
-				poll_irq_event();
-			/* Clear this after because reti_event may set the
-			   flags to indicate there is more happening. We will
-			   pick up the next state changes on the reti if so */
-			if (!(cpu_z80.IFF1|cpu_z80.IFF2))
-				int_recalc = 0;
-		}
+		/* If there is no pending Z80 vector IRQ but we think
+		   there now might be one we use the same logic as for
+		   reti */
+		if (!live_irq)
+			poll_irq_event();
 	}
 	exit(0);
 }

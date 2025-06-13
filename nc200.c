@@ -58,6 +58,7 @@
 
 #include <SDL2/SDL.h>
 
+#include "event.h"
 #include "keymatrix.h"
 
 #include "libz80/z80.h"
@@ -635,29 +636,17 @@ static void swap_disk(int n)
 	}
 }
 
-static void ui_event(void)
+/* Ok so this isn't quite what it was intended for but it works out */
+static void keytranslate(SDL_Event *ev)
 {
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch(ev.type) {
-		/* FIXME: should fake the  magic key combo ? */
-		case SDL_QUIT:
-			emulator_done = 1;
-			break;
-		case SDL_KEYUP:
-			if (ev.key.keysym.sym == SDLK_F1)
-				swap_disk(0);
-			if (ev.key.keysym.sym == SDLK_F2)
-				swap_disk(1);
-			if (ev.key.keysym.sym == SDLK_F3)
-				swap_disk(2);
-			if (ev.key.keysym.sym == SDLK_F4)
-				swap_disk(3);
-		case SDL_KEYDOWN:
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
+	if (ev->key.keysym.sym == SDLK_F1)
+		swap_disk(0);
+	if (ev->key.keysym.sym == SDLK_F2)
+		swap_disk(1);
+	if (ev->key.keysym.sym == SDLK_F3)
+		swap_disk(2);
+	if (ev->key.keysym.sym == SDLK_F4)
+		swap_disk(3);
 }
 
 static struct termios saved_term, term;
@@ -758,8 +747,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "nc200: mapped %dKB PCMCIA image.\n", pcmcia_size);
 	}
 
+	ui_init();
 	matrix = keymatrix_create(10, 8, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
+	keymatrix_translator(matrix, keytranslate);
+	keymatrix_add_events(matrix);
 
 	fdc = fdc_new();
 
@@ -777,12 +769,6 @@ int main(int argc, char *argv[])
 	fdc_setisr(fdc, fdc_isr);
 	fdc_setdrive(fdc, 0, drive);
 
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "nc200: unable to initialize SDL: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
 	window = SDL_CreateWindow("NC200",
 			SDL_WINDOWPOS_UNDEFINED,
 			SDL_WINDOWPOS_UNDEFINED,
@@ -854,7 +840,8 @@ int main(int argc, char *argv[])
 		}
 
 		/* We want to run UI events before we rasterize */
-		ui_event();
+		if (ui_event())
+			emulator_done = 1;
 		nc200_rasterize();
 		nc200_render();
 		raise_irq(IRQ_TICK);

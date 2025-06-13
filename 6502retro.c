@@ -70,6 +70,7 @@
 #include <time.h>
 #include <SDL2/SDL.h>
 
+#include "event.h"
 #include "serialdevice.h"
 #include "ttycon.h"
 #include "fake65c02.h"
@@ -114,8 +115,6 @@ static struct sn76489 *sn;
 
 volatile int emulator_done;
 static uint8_t fast = 0;
-
-int sdl_live;
 
 static int trace = 0;
 
@@ -388,18 +387,6 @@ static void irqnotify(void)
                 irq6502();
 }
 
-void ui_event(void)
-{
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {
-                switch(ev.type) {
-                        case SDL_QUIT:
-                                emulator_done = 1;
-                                break;
-                        }
-        }
-}
-
 static void take_a_nap(void)
 {
         struct timespec t;
@@ -476,6 +463,8 @@ int main(int argc, char *argv[])
 
         sd_blockmode(sdcard);
 
+        ui_init();
+
         if (have_tms) {
                 vdp = tms9918a_create();
                 tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
@@ -517,7 +506,8 @@ int main(int argc, char *argv[])
 
                 // Need to poll the sdl event handler quit offten.
                 if (vdp)
-                        ui_event();
+                        if (ui_event())
+                                emulator_done = 1;
 
                 /* leverage the SDL_GetTicks() to figure out how long to wait
                  * before rendering the next frame. This gives a nice 60hz

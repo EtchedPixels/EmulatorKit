@@ -37,6 +37,7 @@
 #include "ide.h"
 #include "ppide.h"
 #include "rtc_bitbang.h"
+#include "event.h"
 #include "system.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
@@ -598,7 +599,8 @@ int main(int argc, char *argv[])
 				uart16x50_event(uart);
 			poll_irq_event();
 			/* We want to run UI events regularly it seems */
-			ui_event();
+			if (ui_event())
+				emulator_done = 1;
 		}
 		/* 50Hz which is near enough */
 		if (vdp) {

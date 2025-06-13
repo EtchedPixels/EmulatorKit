@@ -53,8 +53,11 @@
 
 #include "6847.h"
 #include "6847_render.h"
+#include "event.h"
 #include "keymatrix.h"
 #include "sdcard.h"
+
+#include "event.h"
 
 #include "libz80/z80.h"
 #include "z80dis.h"
@@ -424,22 +427,6 @@ uint8_t m6847_font_rom(struct m6847 *video, uint8_t ch, unsigned row)
 	return 0xFF;
 }
 
-static void ui_event(void)
-{
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch(ev.type) {
-		case SDL_QUIT:
-			Z80NMI(&cpu_z80);
-			break;
-		case SDL_KEYDOWN:
-		case SDL_KEYUP:
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
-}
-
 static struct termios saved_term, term;
 
 static void cleanup(int sig)
@@ -536,8 +523,6 @@ static void select_vzfile(void)
 	load_vzfile(buf);
 }
 
-int sdl_live;
-
 int main(int argc, char *argv[])
 {
 	static struct timespec tc;
@@ -588,8 +573,11 @@ int main(int argc, char *argv[])
 	if (sd_path) 
 		sd_init(sdrom_path, sd_path);
 
+	ui_init();
+
 	matrix = keymatrix_create(8, 6, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
+	keymatrix_add_events(matrix);
 
 	video = m6847_create(M6847);
 	m6847_reset(video);
@@ -649,7 +637,9 @@ int main(int argc, char *argv[])
 		/* We are just about to go back into blank which means we've
 		   sparklified the raster image nicely ready to draw */
 		/* We want to run UI events before we rasterize */
-		ui_event();
+		if (ui_event())
+			Z80NMI(&cpu_z80);
+
 		m6847_render(render);
 		/* Do 16.66ms of I/O and delays */
 		if (!fast)

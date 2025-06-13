@@ -37,6 +37,7 @@
 
 #include <SDL2/SDL.h>
 
+#include "event.h"
 #include "keymatrix.h"
 
 #include "nasfont.h"
@@ -843,23 +844,6 @@ static void keytranslate(SDL_Event *ev)
 	ev->key.keysym.sym = c;
 }
 
-static void ui_event(void)
-{
-	SDL_Event ev;
-	while (SDL_PollEvent(&ev)) {
-		switch(ev.type) {
-		case SDL_QUIT:
-			emulator_done = 1;
-			break;
-		case SDL_KEYDOWN:
-		case SDL_KEYUP:
-			keytranslate(&ev);
-			keymatrix_SDL2event(matrix, &ev);
-			break;
-		}
-	}
-}
-
 static struct termios saved_term, term;
 
 static void cleanup(int sig)
@@ -1213,14 +1197,14 @@ int main(int argc, char *argv[])
 		sasi_disk_attach(sasi, 0, sasi_path, 512);
 		sasi_bus_reset(sasi);
 	}
+
+	ui_init();
+
 	matrix = keymatrix_create(9, 7, keyboard);
 	keymatrix_trace(matrix, trace & TRACE_KEY);
-	atexit(SDL_Quit);
-	if (SDL_Init(SDL_INIT_EVERYTHING) < 0) {
-		fprintf(stderr, "nascom: unable to initialize SDL: %s\n",
-			SDL_GetError());
-		exit(1);
-	}
+	keymatrix_add_events(matrix);
+	keymatrix_translator(matrix, keytranslate);
+
 	window = SDL_CreateWindow("Nascom",
 			SDL_WINDOWPOS_UNDEFINED,
 			SDL_WINDOWPOS_UNDEFINED,
@@ -1296,7 +1280,8 @@ int main(int argc, char *argv[])
 		}
 
 		/* We want to run UI events before we rasterize */
-		ui_event();
+		if (ui_event())
+			emulator_done = 1;
 		nascom_rasterize();
 		nascom_render();
 		if (fdc_motor) {
