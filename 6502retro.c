@@ -21,8 +21,8 @@
  *      Other VIA Pins:
  *      SN76489 /SNWE    pa2
  *      SN76489 SNREADY  pa3
- *      LED            pa4
- *      BUTTON         pa5
+ *      LED              pa4
+ *      BUTTON           pa5
  *
  *      All of PB is used for SN76589 Auido
  * Rockwell 6551 UART
@@ -79,6 +79,9 @@
 #include "sdcard.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
+#include "emu76489.h"
+#include "sn76489_sdl.h"
+
 
 #define TRACE_MEM       1
 #define TRACE_IRQ       2
@@ -90,6 +93,9 @@
 #define TRACE_VIA       128
 
 #define ROM_SWITCH      0x40
+#define SN_RDY_ON       0x08
+#define SN_RDY_OFF      0xF7
+
 #define VIA_SR          10
 
 // LED OFF, ROM SWITCH ON, other active lows disabled.
@@ -105,6 +111,7 @@ static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct via6522 *via1;
 static struct m6551 *uart;
+static struct sn76489 *sn;
 
 volatile int emulator_done;
 static uint8_t fast = 0;
@@ -133,8 +140,17 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
         /* VIA - SPI to SDCARD */
         if (via1 && (addr & 0xFFF0) == 0xBF20)
         {
-                if (debug) fprintf(stderr, "Read from via\n");
-                return via_read(via1, addr & 0x0F);
+                uint8_t data = via_read(via1, addr & 0x0F);
+                if (addr == 0xBF21) {
+                        bool snrdy = sn76489_readReady(sn);
+                        if (snrdy)
+                                data |= SN_RDY_ON;
+                        else
+                                data &= SN_RDY_OFF;
+                }
+                if (debug)
+                        fprintf(stderr, "Read from via: %x = %02x\n", addr & 0x0f, data);
+                return data;
         }
         /*  TMS 9918a */
         if (vdp && (addr & 0xFFF0) == 0xBF30)
@@ -196,7 +212,12 @@ void write6502(uint16_t addr, uint8_t val)
                         pa |= ROM_SWITCH;
                         via_write(via1, 1, pa);
                 }
-                via_write(via1, addr & 0x0F, val);
+                else if (addr == 0xBF20)
+                {
+                        sn76489_writeIO(sn, val);
+                }
+                else
+                        via_write(via1, addr & 0x0F, val);
                 return;
         }
         /*  TMS 9918a */
@@ -334,6 +355,7 @@ static void cleanup(int sig)
 static void exit_cleanup(void)
 {
         tcsetattr(0, TCSADRAIN, &saved_term);
+        sn76489_destroy(sn);
         SDL_Quit();
 }
 
@@ -388,8 +410,7 @@ int main(int argc, char *argv[])
         char *rompath = "6502retro.rom";
         char *sdpath = NULL;
         unsigned have_tms = 0;
-        static int tstates = 6667;      /* 4mhz / 60 / 10 */
-
+        static int tstates = 666; //4mhz / 60 / 10 = 60fps and doing 10 cycles between each call to SDL_Delay()
         while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
                 switch (opt) {
                 case 'r':
@@ -458,6 +479,9 @@ int main(int argc, char *argv[])
         m6551_trace(uart, trace & TRACE_6551);
         m6551_attach(uart, con);
 
+        // Add audio device
+        sn = sn76489_create();
+
         hookexternal(irqnotify);
         reset6502();
 
@@ -474,17 +498,16 @@ int main(int argc, char *argv[])
                 }
 
                 int i;
-                for (i = 0; i < 10; i++) {
+                for (i = 0; i < 100; i++) {
                         exec6502(tstates);
                         via_tick(via1, tstates);
+                        m6551_timer(uart);
                 }
 
                 // Need to poll the sdl event handler quit offten.
                 if (vdp)
                         if (ui_event())
                                 emulator_done = 1;
-
-                m6551_timer(uart);
 
                 /* leverage the SDL_GetTicks() to figure out how long to wait
                  * before rendering the next frame. This gives a nice 60hz
@@ -499,7 +522,7 @@ int main(int argc, char *argv[])
 
                                 end = SDL_GetPerformanceCounter();
                                 elapsedMS = (end -start) / (float)SDL_GetPerformanceFrequency() * 1000.0f;
-                                SDL_Delay((16.6667f - elapsedMS)>0 ? 16.6667f - elapsedMS : 0);
+                                SDL_Delay( (16.6667f - elapsedMS) > 0 ? 16.6667f - elapsedMS : 0);
                         }
                         else
                         {
@@ -507,7 +530,6 @@ int main(int argc, char *argv[])
                         }
                 }
         }
-
         exit(0);
 }
 
