@@ -310,14 +310,14 @@ static void fdc_write(uint8_t addr, uint8_t val)
 			fprintf(stderr, "]\n");
 		}
 		fdc_write_dor(fdc, val);
-#if 0		
+#if 0
 		if ((val & 0x21) == 0x21)
 			fdc_set_motor(fdc, 2);
 		else if ((val & 0x11) == 0x10)
 			fdc_set_motor(fdc, 1);
 		else
 			fdc_set_motor(fdc, 0);
-#endif			
+#endif
 		break;
 	case 3:	/* DCR */
 		if (trace & TRACE_FDC) {
@@ -528,7 +528,7 @@ static void poll_irq_event(void)
 {
 	z180_interrupt(io, 0, 0, 0);
 	/* TODO: TMS9918A int */
-#if 0	
+#if 0
 	if (vdp && tms9918a_irq_pending(vdp))
 		Z80INT(&cpu_z180, 0x78);
 	else

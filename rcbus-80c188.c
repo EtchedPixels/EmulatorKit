@@ -199,7 +199,7 @@ static void i808x_outport(uint16_t addr, uint8_t val)
 		nic_w5100_write(wiz, addr & 3, val);
 	else if (addr == 0x0C && rtc)
 		rtc_write(rtcdev, val);
-	else if (addr >= 0xC0 && addr <= 0xCF) { 
+	else if (addr >= 0xC0 && addr <= 0xCF) {
 		uart16x50_write(uart, addr & 0x0F, val);
 		recalc_interrupts();
 	} else if (addr == 0xFD) {
@@ -384,7 +384,7 @@ int main(int argc, char *argv[])
 	e86_set_prt(cpu, NULL, i808x_in8, i808x_out8, i808x_in16, i808x_out16);
 	e86_set_ram(cpu, ramrom, sizeof(ramrom));
 
-	/* Reset the CPU */	
+	/* Reset the CPU */
 	e86_reset(cpu);
 
 	if (trace & TRACE_CPU) {

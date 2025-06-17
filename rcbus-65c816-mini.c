@@ -1,7 +1,7 @@
 /*
  *	Platform features
  *
- *	65C816 processor card for rcbus with 16bit addressing and I/O at $FExx 
+ *	65C816 processor card for rcbus with 16bit addressing and I/O at $FExx
  *	Motorola 68B50
  *	IDE at 0x10-0x17 no high or control access
  *	Memory banking Zeta style 16K page at 0x78-0x7B (enable at 0x7C)
@@ -233,7 +233,7 @@ uint8_t read65c816(uint32_t addr, uint8_t debug)
 	uint8_t r;
 
 	addr &= 0xFFFF;
-	
+
 	if (addr >> 8 == iopage && mmumode == 1) {
 		if (debug)
 			return 0xFF;

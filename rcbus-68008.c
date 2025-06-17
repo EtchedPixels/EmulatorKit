@@ -106,7 +106,7 @@ int cpu_irq_ack(int level)
 /* We do this in the main loop so no helper needed */
 void recalc_interrupts(void)
 {
-} 
+}
 
 static int ide = 0;
 struct ide_controller *ide0;
@@ -183,10 +183,10 @@ void mmio_write_68000(uint16_t addr, uint8_t val)
 	else if (addr == 0x00) {
 		printf("trace set to %d\n", val);
 		trace = val;
-#if 0		
+#if 0
 		if (trace & TRACE_CPU)
 		else
-#endif		
+#endif
 	} else if (trace & TRACE_UNK)
 		fprintf(stderr, "Unknown write to port %04X of %02X\n", addr, val);
 }
@@ -249,7 +249,7 @@ static unsigned int do_cpu_read_byte(unsigned int addr)
 unsigned int cpu_read_byte(unsigned int addr)
 {
 	unsigned int r;
-	
+
 	if (trace & TRACE_MEM)
 		fprintf(stderr, "R %06X = ", addr & 0xFFFFF);
 	r = do_cpu_read_byte(addr);

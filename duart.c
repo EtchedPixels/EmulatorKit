@@ -160,14 +160,14 @@ void duart_tick(struct duart *d)
 	uint8_t r = check_chario();
 	if (r & 1) {
 		if (d->input == 1 && d->port[0].rxdis == 0) {
-		    d->port[0].rx = next_char();
-		    d->port[0].sr |= 0x01;
-		    duart_irq_raise(d, 0x02);
-                } else if (d->input == 2 && d->port[1].rxdis == 0) {
-		    d->port[1].rx = next_char();
-		    d->port[1].sr |= 0x01;
-		    duart_irq_raise(d, 0x20);
-                }
+			d->port[0].rx = next_char();
+			d->port[0].sr |= 0x01;
+			duart_irq_raise(d, 0x02);
+		} else if (d->input == 2 && d->port[1].rxdis == 0) {
+			d->port[1].rx = next_char();
+			d->port[1].sr |= 0x01;
+			duart_irq_raise(d, 0x20);
+		}
 	}
 	if (r & 2) {
 		if (!d->port[0].txdis && !(d->port[0].sr & 0x04))
@@ -350,12 +350,12 @@ void duart_write(struct duart *d, uint16_t address, uint8_t value)
 		break;
 	case 0x0E:
 		d->opr |= value;
-                duart_signal_change(d, d->opr);
-                break;
+		duart_signal_change(d, d->opr);
+		break;
 	case 0x0F:
 		d->opr &= ~value;
-                duart_signal_change(d, d->opr);
-                break;
+		duart_signal_change(d, d->opr);
+		break;
 	}
 	if (bgrc && d->trace) {
 		fprintf(stderr, "BGR %d\n", d->acr >> 7);
@@ -406,7 +406,7 @@ void duart_set_input(struct duart *duart, int port)
 }
 
 void duart_trace(struct duart *duart, int onoff)
-{	
+{
 	duart->trace = onoff;
 }
 

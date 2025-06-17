@@ -144,7 +144,7 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 	/* Hardcoded for now for 440. The pages are
 	   440 / ASCII	5 0 1
 	   540 / Polled 4 3 2
-	   Serial  5 6 6 
+	   Serial  5 6 6
 	   Disk boot (no basic) 5 6 7 */
 	case 0xFD:
 		return rom[page_fd + (addr & 0xFF)];
@@ -272,7 +272,7 @@ static void osi440_rasterize(void)
 static void osi440_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = vwidth * CWIDTH;
 	rect.h = 32 * CHEIGHT;
@@ -441,7 +441,7 @@ int main(int argc, char *argv[])
 		bank_mask = 0x03;
 
 	romsize = romload(rom_path, rom, 0x0800);
-        if (romsize != 0x0800) {
+	if (romsize != 0x0800) {
 		fprintf(stderr, "osi500: invalid ROM size '%s'.\n", rom_path);
 		exit(EXIT_FAILURE);
 	}
@@ -546,7 +546,7 @@ int main(int argc, char *argv[])
 
 	init6502();
 	reset6502();
-	
+
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host

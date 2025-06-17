@@ -9,13 +9,15 @@ BINS =  rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80 \
 	trcwm6809 swt6809 nybbles scmp2 sbc08k mini11 microtanic6808 \
 	s100-8080
- 
+
 all: $(BINS)
 
-sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
+SDL2_BINS = rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
 	sorceror z80all osi400 osi500 spectrum microtan 6502retro \
 	poly88
+
+sdl2: $(SDL2_BINS)
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -339,7 +341,7 @@ clean:
 	$(MAKE) --directory m68k clean && \
 	$(MAKE) --directory am9511 clean && \
 	$(MAKE) --directory ns32k clean && \
-	rm -f *.o *~ rc2014 rbcv2 $(BINS)
+	rm -f *.o *~ $(BINS) $(SDL2_BINS)
 
 SRCS := $(subst ./,,$(shell find . -name '*.c'))
 DEPDIR := .deps

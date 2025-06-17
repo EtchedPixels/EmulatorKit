@@ -1,0 +1,23 @@
+root = true
+
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# default to 8-wide tabs
+[*.{c,h,cpp,hpp}]
+indent_style = tab
+tab_width = 8
+
+# some vendored sources with other ideas
+
+[d6809.c]
+indent_style = space
+indent_size = 2
+
+[fake65c02.h]
+indent_style = space
+indent_size = 4
+
+[riscv-disas.*]
+indent_style = space
+indent_size = 4

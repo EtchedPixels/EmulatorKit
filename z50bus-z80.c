@@ -944,7 +944,7 @@ static void pio_reset(void)
 }
 
 static void bitbang_serout(unsigned val)
-{	
+{
 	fprintf(stderr, "%c", "01"[val & 1]);
 }
 
@@ -961,7 +961,7 @@ static void leds(unsigned port, unsigned bits)
 	}
 	printf("\n");
 }
-	
+
 static uint8_t io_read(int unused, uint16_t addr)
 {
 	if (trace & TRACE_IO)
@@ -1021,7 +1021,7 @@ static void io_write(int unused, uint16_t addr, uint8_t val)
 	} else if (addr == 0x30)
 		ramsel = val & 1;
 	else if (addr == 0x38)
-		romdis = val & 1; 
+		romdis = val & 1;
 	else if (addr == 0xFD) {
 		printf("trace set to %d\n", val);
 		trace = val;
@@ -1143,7 +1143,7 @@ int main(int argc, char *argv[])
 	}
 	if (optind < argc)
 		load(argv[optind++]);
-		
+
 	if (optind < argc)
 		usage();
 

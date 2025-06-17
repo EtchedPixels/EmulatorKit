@@ -5,8 +5,8 @@ This is a model of the SCELBI, a pre-Altair i8008 based system. It models
 the basic machine and some peripherals. The original machine just came with
 RAM and some 8bit I/O ports.
 
-The real machine has a bunch of switches to toggle in stuff and get going. 
-Rather than simulating the front panel you are dropped into a simple command 
+The real machine has a bunch of switches to toggle in stuff and get going.
+Rather than simulating the front panel you are dropped into a simple command
 line monitor.
 
 ## Addressing

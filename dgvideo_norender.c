@@ -11,9 +11,9 @@
 #include "dgvideo_render.h"
 
 struct dgvideo_renderer {
-    struct dgvideo *dg;
+	struct dgvideo *dg;
 };
-    
+
 
 void dgvideo_render(struct dgvideo_renderer *render)
 {
@@ -21,20 +21,20 @@ void dgvideo_render(struct dgvideo_renderer *render)
 
 void dgvideo_renderer_free(struct dgvideo_renderer *render)
 {
-    free(render);
+	free(render);
 }
 
 
 struct dgvideo_renderer *dgvideo_renderer_create(struct dgvideo *dg)
 {
-    struct dgvideo_renderer *render;
+	struct dgvideo_renderer *render;
 
-    render = malloc(sizeof(struct dgvideo_renderer));
-    if (render == NULL) {
-        fprintf(stderr, "Out of memory.\n");
-        exit(1);
-    }
-    memset(render, 0, sizeof(struct dgvideo_renderer));
-    render->dg = dg;
-    return render;
+	render = malloc(sizeof(struct dgvideo_renderer));
+	if (render == NULL) {
+		fprintf(stderr, "Out of memory.\n");
+		exit(1);
+	}
+	memset(render, 0, sizeof(struct dgvideo_renderer));
+	render->dg = dg;
+	return render;
 }

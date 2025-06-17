@@ -38,7 +38,7 @@
  *
  * The bootloader had to be altered to work with this emulator.  The hardware
  * issues a number of empty bytes to the sdcard spi interface before and after
- * each sd command.  It's not clear why that's required on hardware but the 
+ * each sd command.  It's not clear why that's required on hardware but the
  * emulator does not support this kind of carry-on.  For now, the bootloader rom
  * must be compiled from the `emulator` branch.
  *
@@ -170,20 +170,20 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 
 uint8_t read6502_debug(uint16_t addr)
 {
-        uint8_t r = do_read_6502(addr, 1);
-        if (trace & TRACE_MEM) {
-                fprintf(stderr, "%04X -> %02X\n", addr, r);
-        }
-        return r;
+	uint8_t r = do_read_6502(addr, 1);
+	if (trace & TRACE_MEM) {
+		fprintf(stderr, "%04X -> %02X\n", addr, r);
+	}
+	return r;
 }
 
 uint8_t read6502(uint16_t addr)
 {
-        uint8_t r = do_read_6502(addr, 0);
-        if (trace & TRACE_MEM) {
-                fprintf(stderr, "%04X -> %02X\n", addr, r);
-        }
-        return r;
+	uint8_t r = do_read_6502(addr, 0);
+	if (trace & TRACE_MEM) {
+		fprintf(stderr, "%04X -> %02X\n", addr, r);
+	}
+	return r;
 }
 
 void write6502(uint16_t addr, uint8_t val)
@@ -247,81 +247,81 @@ void recalc_interrupts(void)
  */
 void via_recalc_outputs(struct via6522 *via)
 {
-        uint8_t port = via_get_port_a(via);
+	uint8_t port = via_get_port_a(via);
 
-        bool clk = port & 1;
-        bool is_sdcard = !((port >> 1) & 1);
-        bool mosi = port >> 7;
+	bool clk = port & 1;
+	bool is_sdcard = !((port >> 1) & 1);
+	bool mosi = port >> 7;
 
-        if (trace & TRACE_SPI)
-                fprintf(stderr, "SPI: sdcs=%d, sdclk=%d, mosi=%d\n", is_sdcard, clk, mosi);
+	if (trace & TRACE_SPI)
+		fprintf(stderr, "SPI: sdcs=%d, sdclk=%d, mosi=%d\n", is_sdcard, clk, mosi);
 
-        /* SD_CS edge detection */
-        static bool last_sdcard;
-        static uint8_t bit_counter = 0;
-        if (!last_sdcard && is_sdcard) {
-                bit_counter = 0;
-                sd_spi_lower_cs(sdcard);
-        }
-        last_sdcard = is_sdcard;
+	/* SD_CS edge detection */
+	static bool last_sdcard;
+	static uint8_t bit_counter = 0;
+	if (!last_sdcard && is_sdcard) {
+		bit_counter = 0;
+		sd_spi_lower_cs(sdcard);
+	}
+	last_sdcard = is_sdcard;
 
-        static int init_counter = 0;
-        static bool initialized = false;
-        /* For initialization, the client has to pull&release CLK 74 times.
-         * The SD card should be deselected, because it's not actual
-         * data transmission - Its possible that the sdcard is erronously
-         * selected so we catch that here and only assert SD_CS after 74 init
-         * clocks.
-         */
-        if (!initialized) {
-                if (clk) {
-                        init_counter++;
-                        if (init_counter >= 74) {
-                                sd_spi_lower_cs(sdcard);
-                                initialized = true;
-                        }
-                }
-                return;
-        }
+	static int init_counter = 0;
+	static bool initialized = false;
+	/* For initialization, the client has to pull&release CLK 74 times.
+	 * The SD card should be deselected, because it's not actual
+	 * data transmission - Its possible that the sdcard is erronously
+	 * selected so we catch that here and only assert SD_CS after 74 init
+	 * clocks.
+	 */
+	if (!initialized) {
+		if (clk) {
+			init_counter++;
+			if (init_counter >= 74) {
+				sd_spi_lower_cs(sdcard);
+				initialized = true;
+			}
+		}
+		return;
+	}
 
-        if (!is_sdcard) {
-                return;
-        }
-        /* SD_CLK edge detection */
-        static bool last_clk = false;
-        if (clk == last_clk) {
-                return;
-        }
-        last_clk = clk;
-        if (!clk) {     // only care about rising clock
-                return;
-        }
+	if (!is_sdcard) {
+		return;
+	}
+	/* SD_CLK edge detection */
+	static bool last_clk = false;
+	if (clk == last_clk) {
+		return;
+	}
+	last_clk = clk;
+	if (!clk) {     // only care about rising clock
+		return;
+	}
 
-        // SD is selected, Clock is high, gather MOSI bits into outbyte.
-        static uint8_t inbyte, outbyte;
-        outbyte <<= 1;
-        outbyte |= mosi;
-        bit_counter++;
+	// SD is selected, Clock is high, gather MOSI bits into outbyte.
+	static uint8_t inbyte, outbyte;
+	outbyte <<= 1;
+	outbyte |= mosi;
+	bit_counter++;
 
 
-        if (bit_counter != 8) {
-                return;
-        }
+	if (bit_counter != 8) {
+		return;
+	}
 
-        bit_counter = 0;
+	bit_counter = 0;
 
-        /* If we have reached this far, then we know that the sdcard is selected
-         * and the bit counter has reached 8.  It's time to ask the sdcard
-         * library for a new byte.
-         */
-        inbyte = sd_spi_in(sdcard, outbyte);
-        if (trace & TRACE_SPI)
-                fprintf(stderr, "SDSPI: %02X -> %02X\n", outbyte, inbyte);
-        /* We are not modelling the VIA shift register with all of its CB1 and
-         * CB2 logic.  We just insert the byte directly into the SR so the 6502
-         * can read it out again.
-         */
-        via_write(via, VIA_SR, inbyte);
+	/* If we have reached this far, then we know that the sdcard is selected
+	 * and the bit counter has reached 8.  It's time to ask the sdcard
+	 * library for a new byte.
+	 */
+	inbyte = sd_spi_in(sdcard, outbyte);
+	if (trace & TRACE_SPI)
+		fprintf(stderr, "SDSPI: %02X -> %02X\n", outbyte, inbyte);
+	/* We are not modelling the VIA shift register with all of its CB1 and
+	 * CB2 logic.  We just insert the byte directly into the SR so the 6502
+	 * can read it out again.
+	 */
+	via_write(via, VIA_SR, inbyte);
 }
 
 // Stubs - not used here.
@@ -334,22 +334,22 @@ void via_handshake_b(struct via6522 *via)
 
 static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
 {
-        int fd;
-        int size;
-        fd = open(path, O_RDONLY);
-        if (fd == -1) {
-                perror(path);
-                exit(1);
-        }
-        size = read(fd, mem, maxsize);
-        close(fd);
-        return size;
+	int fd;
+	int size;
+	fd = open(path, O_RDONLY);
+	if (fd == -1) {
+		perror(path);
+		exit(1);
+	}
+	size = read(fd, mem, maxsize);
+	close(fd);
+	return size;
 }
 
 static void cleanup(int sig)
 {
-        tcsetattr(0, TCSADRAIN, &saved_term);
-        emulator_done = 1;
+	tcsetattr(0, TCSADRAIN, &saved_term);
+	emulator_done = 1;
 }
 
 static void exit_cleanup(void)
@@ -361,46 +361,46 @@ static void exit_cleanup(void)
 
 void termon(void)
 {
-    if (tcgetattr(0, &term) == 0) {
-        saved_term = term;
-        atexit(exit_cleanup);
-        signal(SIGINT, cleanup);
-        signal(SIGQUIT, cleanup);
-        signal(SIGPIPE, cleanup);
-        term.c_lflag &= ~(ICANON | ECHO);
-        term.c_cc[VMIN] = 0;
-        term.c_cc[VTIME] = 1;
-        term.c_cc[VINTR] = 0;
-        term.c_cc[VSUSP] = 0;
-        term.c_cc[VSTOP] = 0;
-        tcsetattr(0, TCSADRAIN, &term);
-    }
+	if (tcgetattr(0, &term) == 0) {
+		saved_term = term;
+		atexit(exit_cleanup);
+		signal(SIGINT, cleanup);
+		signal(SIGQUIT, cleanup);
+		signal(SIGPIPE, cleanup);
+		term.c_lflag &= ~(ICANON | ECHO);
+		term.c_cc[VMIN] = 0;
+		term.c_cc[VTIME] = 1;
+		term.c_cc[VINTR] = 0;
+		term.c_cc[VSUSP] = 0;
+		term.c_cc[VSTOP] = 0;
+		tcsetattr(0, TCSADRAIN, &term);
+	}
 
 }
 static void irqnotify(void)
 {
-        if (via1 && via_irq_pending(via1))
-                irq6502();
-        else if (uart && m6551_irq_pending(uart))
-                irq6502();
-        else if (vdp && tms9918a_irq_pending(vdp))
-                irq6502();
+	if (via1 && via_irq_pending(via1))
+		irq6502();
+	else if (uart && m6551_irq_pending(uart))
+		irq6502();
+	else if (vdp && tms9918a_irq_pending(vdp))
+		irq6502();
 }
 
 static void take_a_nap(void)
 {
-        struct timespec t;
-        t.tv_sec = 0;
-        t.tv_nsec = 15000000;
-        if (nanosleep(&t, NULL))
-                perror("nanosleep");
+	struct timespec t;
+	t.tv_sec = 0;
+	t.tv_nsec = 15000000;
+	if (nanosleep(&t, NULL))
+		perror("nanosleep");
 }
 
 static void usage(void)
 {
-        fprintf(stderr, "6502retro: [-1] [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
-        exit_cleanup();
-        exit(EXIT_FAILURE);
+	fprintf(stderr, "6502retro: [-1] [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
+	exit_cleanup();
+	exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[])
@@ -532,4 +532,3 @@ int main(int argc, char *argv[])
         }
         exit(0);
 }
-

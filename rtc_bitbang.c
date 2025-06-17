@@ -13,7 +13,7 @@
 
    Give the host time and don't emulate time setting except for
    the 24/12 hour setting.
-   
+
  */
 
 struct rtc {

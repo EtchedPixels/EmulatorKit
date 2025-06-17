@@ -96,7 +96,7 @@ static einline void set_cc (unsigned flag, unsigned value)
 /* test carry */
 
 static einline unsigned test_c (unsigned i0, unsigned i1,
-								unsigned r, unsigned sub)
+				unsigned r, unsigned sub)
 {
 	unsigned flag;
 
@@ -906,7 +906,7 @@ static einline void inst_bra16 (unsigned test, unsigned op, unsigned *cycles)
 /* instruction: pshs/pshu */
 
 static einline void inst_psh (unsigned op, unsigned *sp,
-					   unsigned data, unsigned *cycles)
+			      unsigned data, unsigned *cycles)
 {
 	if (op & 0x80) {
 		push16 (sp, reg_pc);
@@ -953,7 +953,7 @@ static einline void inst_psh (unsigned op, unsigned *sp,
 /* instruction: puls/pulu */
 
 static einline void inst_pul (unsigned op, unsigned *sp, unsigned *osp,
-					   unsigned *cycles)
+			      unsigned *cycles)
 {
 	if (op & 0x01) {
 		reg_cc = pull8 (sp);
@@ -2194,7 +2194,7 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 	/* ble */
 	case 0x2f:
 		inst_bra8 (get_cc (FLAG_Z) |
-				   (get_cc (FLAG_N) ^ get_cc (FLAG_V)), op, &cycles);
+			   (get_cc (FLAG_N) ^ get_cc (FLAG_V)), op, &cycles);
 		break;
 	/* lbra */
 	case 0x16:
@@ -2331,8 +2331,8 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		inst_psh (0xff, &reg_s, reg_u, &cycles);
 		set_cc (FLAG_I, 1);
 		set_cc (FLAG_F, 1);
-	        reg_pc = read16 (0xfffa);
-	        cycles += 7;
+		reg_pc = read16 (0xfffa);
+		cycles += 7;
 		break;
 	/* sync */
 	case 0x13:
@@ -2426,7 +2426,7 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		/* lble */
 		case 0x2f:
 			inst_bra16 (get_cc (FLAG_Z) |
-						(get_cc (FLAG_N) ^ get_cc (FLAG_V)), op, &cycles);
+				    (get_cc (FLAG_N) ^ get_cc (FLAG_V)), op, &cycles);
 			break;
 		/* cmpd */
 		case 0x83:
@@ -2558,7 +2558,7 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		case 0x3f:
 			set_cc (FLAG_E, 1);
 			inst_psh (0xff, &reg_s, reg_u, &cycles);
-		    reg_pc = read16 (0xfff4);
+			reg_pc = read16 (0xfff4);
 			cycles += 8;
 			break;
 		default:
@@ -2618,7 +2618,7 @@ unsigned e6809_sstep (unsigned irq_i, unsigned irq_f)
 		case 0x3f:
 			set_cc (FLAG_E, 1);
 			inst_psh (0xff, &reg_s, reg_u, &cycles);
-		    reg_pc = read16 (0xfff2);
+			reg_pc = read16 (0xfff2);
 			cycles += 8;
 			break;
 		default:

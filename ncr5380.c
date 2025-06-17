@@ -48,7 +48,7 @@ static void ncr_set_icr(struct ncr5380 *ncr, uint8_t val)
 		ncr->busbits |= SASI_ACK;
 	else
 		ncr->busbits &= ~SASI_ACK;
-		
+
 	/* TODO: should merge the status bits for the totem pole */
 	sasi_bus_control(ncr->bus, ncr->busbits);
 //	if (delta & ~val & 0x04)
@@ -60,7 +60,7 @@ static void ncr_set_icr(struct ncr5380 *ncr, uint8_t val)
 
 static void ncr_dma_end(struct ncr5380 *ncr)
 {
-	if (ncr->dma_rx || ncr->dma_tx) { 
+	if (ncr->dma_rx || ncr->dma_tx) {
 		if (ncr->trace)
 			fprintf(stderr, "ncr5380: dma end\n");
 		ncr->dma_rx = 0;
@@ -256,7 +256,7 @@ uint8_t ncr5380_write(struct ncr5380 *ncr, unsigned reg, uint8_t val)
 //			ncr_clear_select_int();
 		break;
 	case 5:
-		/* Start a DMA send */	
+		/* Start a DMA send */
 		if (ncr->mode & 2) {
 			ncr->dma_tx = 1;
 			ncr->bsr |= 0x40;
@@ -274,7 +274,7 @@ uint8_t ncr5380_write(struct ncr5380 *ncr, unsigned reg, uint8_t val)
 		break;
 	case 8:
 		/* PDMA port */
-		if (ncr->dma_tx) { 
+		if (ncr->dma_tx) {
 			ncr_phase_check(ncr);
 			sasi_write_data(ncr->bus, val);
 			ncr5380_activity(ncr);

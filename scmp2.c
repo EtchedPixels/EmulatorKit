@@ -99,13 +99,13 @@ uint8_t mem_read(struct ns8060 *cpu, uint16_t addr)
 void mem_write(struct ns8060 *cpu, uint16_t addr, uint8_t val)
 {
 #if 1 // ROM Modify Check.
-    /* BASIC and spare ROM */
-    if (addr < 0x1000) {
+	/* BASIC and spare ROM */
+	if (addr < 0x1000) {
 		printf("mem_write(%04x,%02x) %x\n",addr,val,ramrom[addr]);
 		printf("WRITE VIOLATION!\n");
 		exit(1);
-        return;
-    }
+		return;
+	}
 #endif
 	ramrom[addr] = val;
 }
@@ -217,7 +217,7 @@ int main(int argc, char *argv[])
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host
 	   is loaded though */
-	
+
 	while (!done) {
 		/* TODO: timing, ints etc */
 		ns8060_execute_one(cpu);
@@ -252,7 +252,7 @@ int  ns8060_emu_getch(void)
 	int c = getchar();
 	if( (c>='a')&&(c<='z') ) c=c-0x20;
 	if( c == 0x0a ) c=0x0d;
-	
+
 /*	LogPrint("\nGETC:%02x:%c\n",c,c & 0x7f); */
 	return c;
 }
@@ -262,4 +262,3 @@ void ns8060_emu_putch(int ch)
 /*	printf("PUTC:%02x:%c\n",ch,ch & 0x7f);
 	LogPrint("\nPUTC:%02x:%c\n",ch,ch & 0x7f); */
 }
-

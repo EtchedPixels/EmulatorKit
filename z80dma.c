@@ -169,10 +169,10 @@ static void z80dma_command(struct z80dma *dma)
 	case 0x83:
 		dma->enabled = 0;
 		break;
-	
+
 	}
 }
-	
+
 uint8_t z80dma_read(struct z80dma *dma)
 {
 	if (dma->rregmask)
@@ -260,7 +260,7 @@ static uint8_t z80_dma_one_cycle(struct z80dma *dma)
 	port_a = dma->reg[WR1] & 0x08;
 
 	/* Weird rules about register B */
-	if (dma->reg[WR2] & 0x20) 
+	if (dma->reg[WR2] & 0x20)
 		addr_b = dma->reg[WR_B_L] | (dma->reg[WR_B_H] << 8);
 	else {
 		if ((dma->reg[RR1] | dma->reg[RR2]) == 0) {

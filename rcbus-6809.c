@@ -414,11 +414,11 @@ void e6809_instruction(unsigned pc)
 	char buf[80];
 	struct reg6809 *r = e6809_get_regs();
 	if (trace & TRACE_CPU) {
-                /*
-                 * The PC reported by e6809 can have garbage in the upper
-                 * bits of the value. Mask it off.
-                 */
-                unsigned dpc = pc & 0xFFFF;
+		/*
+		 * The PC reported by e6809 can have garbage in the upper
+		 * bits of the value. Mask it off.
+		 */
+		unsigned dpc = pc & 0xFFFF;
 		d6809_disassemble(buf, dpc);
 		fprintf(stderr, "%04X: %-16.16s | ", dpc, buf);
 		fprintf(stderr, "%s %02X:%02X %04X %04X %04X %04X\n",
@@ -546,7 +546,7 @@ int main(int argc, char *argv[])
 				}
 				else if (ide_attach(ide0, 0, ide_fd) == 0) {
 					ide = 1;
-						ide_reset_begin(ide0);
+					ide_reset_begin(ide0);
 				}
 			} else
 				ide = 0;

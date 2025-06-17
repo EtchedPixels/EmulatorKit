@@ -147,7 +147,7 @@ static void raster_char(unsigned int y, unsigned int x, uint8_t c)
 		pixp += 47 * CWIDTH;
 	}
 }
-		
+
 static void raster_char_vu(unsigned int y, unsigned int x, uint8_t c)
 {
 	uint8_t *fp = &font[8 * c];
@@ -168,7 +168,7 @@ static void raster_char_vu(unsigned int y, unsigned int x, uint8_t c)
 		pixp += 47 * CWIDTH;
 	}
 }
-		
+
 static void uk101_rasterize(void)
 {
 	unsigned int lptr = 0xD00C;
@@ -190,7 +190,7 @@ static void uk101_rasterize(void)
 static void uk101_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = 48 * CWIDTH;
 	rect.h = 16 * CHEIGHT;
@@ -212,7 +212,7 @@ static void keytranslate(SDL_Event *ev)
 	}
 	ev->key.keysym.sym = c;
 }
-	
+
 /* We do this in the 6502 loop instead. Provide a dummy for the device models */
 void recalc_interrupts(void)
 {
@@ -370,7 +370,7 @@ int main(int argc, char *argv[])
 
 	init6502();
 	reset6502();
-	
+
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host

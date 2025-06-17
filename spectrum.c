@@ -231,7 +231,7 @@ static uint8_t mem_read(int unused, uint16_t addr)
 				divide_mapped = 0;
 			if (divide && (addr == 0x0000 || addr == 0x0008 || addr == 0x0038 ||
 				addr == 0x0066 || addr == 0x04C6 || addr == 0x0562))
-					divide_mapped = 1;
+				divide_mapped = 1;
 		}
 		/* DD FD CB see the Z80 interrupt manual */
 		if (r == 0xDD || r == 0xFD || r == 0xCB) {
@@ -719,7 +719,7 @@ int main(int argc, char *argv[])
 		model = ZX_PLUS3;
 		break;
 	default:
- 		fprintf(stderr, "spectrum: invalid rom '%s'.\n", rompath);
+		fprintf(stderr, "spectrum: invalid rom '%s'.\n", rompath);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
@@ -811,10 +811,10 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 	texture =
-	    SDL_CreateTexture(render,
-			      SDL_PIXELFORMAT_ARGB8888,
-			      SDL_TEXTUREACCESS_STREAMING,
-			      WIDTH, HEIGHT);
+		SDL_CreateTexture(render,
+				  SDL_PIXELFORMAT_ARGB8888,
+				  SDL_TEXTUREACCESS_STREAMING,
+				  WIDTH, HEIGHT);
 	if (texture == NULL) {
 		fprintf(stderr,
 			"spectrum: unable to create texture: %s\n",

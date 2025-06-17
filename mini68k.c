@@ -524,7 +524,7 @@ void recalc_interrupts(void)
 		m68k_set_irq(0);
 }
 
-	
+
 static unsigned int cfg_read(void)
 {
 	return mfpic_cfg;
@@ -693,7 +693,7 @@ unsigned int do_cpu_read_byte(unsigned int address, unsigned debug)
 	if (!(u27 & 0x80)) {
 		if (debug == 0) {
 			u27 <<= 1;
-			u27 |= 1; 
+			u27 |= 1;
 		}
 		return rom[address & 0x1FFFF];
 	}

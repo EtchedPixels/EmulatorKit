@@ -1,19 +1,19 @@
 struct z8
 {
-    /* CPU state */
-    uint8_t reg[256];
-    uint16_t pc;
-    uint8_t regmax;	/* Highest non special register present */
-    /* Internal emulation state */
-    uint8_t arg0, arg1, dreg; uint8_t opl;
-    /* Counter states */
-    uint8_t psc0, psc1;	/* Prescalers */
-    uint8_t t0, t1;	/* Timers */
-    /* Instruction timing */
-    unsigned long cycles;
-    int done_ei;	/* Has done an EI (weirdness with IRR register) */
-    int ei_state;	/* Interrupt control */
-    int trace;
+	/* CPU state */
+	uint8_t reg[256];
+	uint16_t pc;
+	uint8_t regmax;		/* Highest non special register present */
+	/* Internal emulation state */
+	uint8_t arg0, arg1, dreg; uint8_t opl;
+	/* Counter states */
+	uint8_t psc0, psc1;	/* Prescalers */
+	uint8_t t0, t1;		/* Timers */
+	/* Instruction timing */
+	unsigned long cycles;
+	int done_ei;		/* Has done an EI (weirdness with IRR register) */
+	int ei_state;		/* Interrupt control */
+	int trace;
 };
 
 

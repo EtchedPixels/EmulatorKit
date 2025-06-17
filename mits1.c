@@ -9,7 +9,7 @@
 
 /* A very simple TR1402 or similar UART. It can be jumpered for some kinds
    of serial interrupt but this isn't currently used anywhere
-   
+
    0x80		low if ready for a byte (an tx int)
    0x40		free
    0x20		high if input available
@@ -18,18 +18,18 @@
    0x04		parity
    0x02		xmit empty (1)
    0x01		input ready (bit 0 low)
-   
+
    Later boards used an ACIA at 0x10 instead
- 
+
  */
 
 struct mits1_uart {
-    uint8_t status;
-    uint8_t config;
-    uint8_t rxchar;
-    uint8_t inint;
-    uint8_t trace;
-    struct serial_device *dev;
+	uint8_t status;
+	uint8_t config;
+	uint8_t rxchar;
+	uint8_t inint;
+	uint8_t trace;
+	struct serial_device *dev;
 };
 
 

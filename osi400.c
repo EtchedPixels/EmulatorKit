@@ -58,8 +58,8 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
 		return last_key;
 	if (basic && addr >= 0xA000 && addr <= 0xBFFF)
 		return mem[addr];
-        if (addr < 0xA000)
-            addr &= ram_mask;
+	if (addr < 0xA000)
+		addr &= ram_mask;
 	return mem[addr];
 }
 
@@ -88,11 +88,11 @@ void write6502(uint16_t addr, uint8_t val)
 		mem[addr] = val;
 		return;
 	}
-	
+
 	if (addr < 0xA000 || (!basic && addr < 0xD000)) {
 		if (trace & TRACE_MEM)
 			fprintf(stderr, "%04X <- %02X\n", addr, val);
-                addr &= ram_mask;
+		addr &= ram_mask;
 		mem[addr] = val;
 	} else {
 		if (trace & (TRACE_MEM|TRACE_CPU))
@@ -144,7 +144,7 @@ static void osi440_rasterize(void)
 static void osi440_render(void)
 {
 	SDL_Rect rect;
-	
+
 	rect.x = rect.y = 0;
 	rect.w = 32 * CWIDTH;
 	rect.h = 32 * CHEIGHT;
@@ -280,9 +280,9 @@ int main(int argc, char *argv[])
 		case 'F':
 			font_path = optarg;
 			break;
-                case 'm':
-                        memsize = atoi(optarg);
-                        break;
+		case 'm':
+			memsize = atoi(optarg);
+			break;
 		case 'b':
 			basic_path = optarg;
 			break;
@@ -293,24 +293,24 @@ int main(int argc, char *argv[])
 	if (optind < argc)
 		usage();
 
-        if (memsize == 0 || (memsize & (memsize - 1))) {
-            fprintf(stderr, "osi400: only power of 2 memory sizes supported.\n");
-            exit(1);
-        }
-        if (memsize > 52) {
-            fprintf(stderr, "osi400: maximum ram of 52K\n");
-            exit(1);
-        }
-        ram_mask = (memsize * 1024) - 1;
-        
+	if (memsize == 0 || (memsize & (memsize - 1))) {
+		fprintf(stderr, "osi400: only power of 2 memory sizes supported.\n");
+		exit(1);
+	}
+	if (memsize > 52) {
+		fprintf(stderr, "osi400: maximum ram of 52K\n");
+		exit(1);
+	}
+	ram_mask = (memsize * 1024) - 1;
+
 	acia = acia_create();
 	acia_attach(acia, &console);
 	acia_trace(acia, trace & TRACE_ACIA);
 
 	romsize = romload(rom_path, mem + 0xFE00, 0x0200);
 	if (romsize == 0x0100)
-	    memcpy(mem + 0xFF00, mem + 0xFE00, 256);
-        else if (romsize != 0x0200) {
+		memcpy(mem + 0xFF00, mem + 0xFE00, 256);
+	else if (romsize != 0x0200) {
 		fprintf(stderr, "osi400: invalid ROM size '%s'.\n", rom_path);
 		exit(EXIT_FAILURE);
 	}
@@ -382,7 +382,7 @@ int main(int argc, char *argv[])
 
 	init6502();
 	reset6502();
-	
+
 	/* This is the wrong way to do it but it's easier for the moment. We
 	   should track how much real time has occurred and try to keep cycle
 	   matched with that. The scheme here works fine except when the host

@@ -36,12 +36,12 @@ extern uint16_t pc;
 
 //6502 defines
 #define UNDOCUMENTED //when this is defined, undocumented opcodes are handled.
-                     //otherwise, they're simply treated as NOPs.
+		     //otherwise, they're simply treated as NOPs.
 
-#undef NES_CPU       //when this is defined, the binary-coded decimal (BCD)
-                     //status flag is not honored by ADC and SBC. the 2A03
-                     //CPU in the Nintendo Entertainment System does not
-                     //support BCD operation.
+#undef NES_CPU	     //when this is defined, the binary-coded decimal (BCD)
+		     //status flag is not honored by ADC and SBC. the 2A03
+		     //CPU in the Nintendo Entertainment System does not
+		     //support BCD operation.
 
 #define FLAG_CARRY     0x01
 #define FLAG_ZERO      0x02
@@ -76,23 +76,23 @@ extern uint16_t pc;
 
 //flag calculation macros
 #define zerocalc(n) {\
-    if ((n) & 0x00FF) clearzero();\
-        else setzero();\
+	if ((n) & 0x00FF) clearzero();\
+		else setzero();\
 }
 
 #define signcalc(n) {\
-    if ((n) & 0x0080) setsign();\
-        else clearsign();\
+	if ((n) & 0x0080) setsign();\
+		else clearsign();\
 }
 
 #define carrycalc(n) {\
-    if ((n) & 0xFF00) setcarry();\
-        else clearcarry();\
+	if ((n) & 0xFF00) setcarry();\
+		else clearcarry();\
 }
 
 #define overflowcalc(n, m, o) { /* n = result, m = accumulator, o = memory */ \
-    if (((n) ^ (uint16_t)(m)) & ((n) ^ (o)) & 0x0080) setoverflow();\
-        else clearoverflow();\
+	if (((n) ^ (uint16_t)(m)) & ((n) ^ (o)) & 0x0080) setoverflow();\
+		else clearoverflow();\
 }
 #endif
 #endif
