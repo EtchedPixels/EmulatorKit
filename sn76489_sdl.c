@@ -24,7 +24,7 @@ struct sn76489 {
 
 static SNG *sng;
 
-struct sn76489 *sn76489_create()
+struct sn76489 *sn76489_create(void)
 {
     struct sn76489 *sn = malloc(sizeof(struct sn76489));
     if (sn == NULL)
