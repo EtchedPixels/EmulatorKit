@@ -274,8 +274,8 @@ z80retro: z80retro.o event_noui.o z80sio.o ttycon.o i2c_bitbang.o i2c_ds1307.o s
 zeta-v2: zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a
 	cc -g3 zeta-v2.o ide.o ppide.o pprop.o 16x50.o rtc_bitbang.o z80dis.o libz80/libz80.o lib765/lib/lib765.a -o zeta-v2
 
-6502retro: 6502retro.o event_sdl2.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o
-	cc 6502retro.o event_sdl2.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o -lSDL2 -o 6502retro
+6502retro: 6502retro.o event_sdl2.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o sn76489_sdl.o emu76489.o
+	cc 6502retro.o event_sdl2.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502dis.o sn76489_sdl.o emu76489.o -lSDL2 -o 6502retro
 
 # TODO make rules and dependencies within z280/*
 z280rc: z280rc.o ide.o rtc_bitbang.o z280/z280uart.o z280/z80daisy.o z280/z280dasm.o z280/z280.o

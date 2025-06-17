@@ -21,8 +21,8 @@
  *      Other VIA Pins:
  *      SN76489 /SNWE    pa2
  *      SN76489 SNREADY  pa3
- *      LED            pa4
- *      BUTTON         pa5
+ *      LED              pa4
+ *      BUTTON           pa5
  *
  *      All of PB is used for SN76589 Auido
  * Rockwell 6551 UART
@@ -79,6 +79,9 @@
 #include "sdcard.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
+#include "emu76489.h"
+#include "sn76489_sdl.h"
+
 
 #define TRACE_MEM       1
 #define TRACE_IRQ       2
@@ -90,6 +93,9 @@
 #define TRACE_VIA       128
 
 #define ROM_SWITCH      0x40
+#define SN_RDY_ON       0x08
+#define SN_RDY_OFF      0xF7
+
 #define VIA_SR          10
 
 // LED OFF, ROM SWITCH ON, other active lows disabled.
@@ -105,6 +111,7 @@ static struct tms9918a *vdp;
 static struct tms9918a_renderer *vdprend;
 static struct via6522 *via1;
 static struct m6551 *uart;
+static struct sn76489 *sn;
 
 volatile int emulator_done;
 static uint8_t fast = 0;
@@ -117,39 +124,48 @@ static uint8_t rom[0x2000];
 
 uint8_t do_read_6502(uint16_t addr, unsigned debug)
 {
-	/* ROM */
-	bool flash_in = via_get_port_a(via1) & ROM_SWITCH;
-	if (flash_in && (addr >= 0xE000))
-	{
-		if (debug) fprintf(stderr, "Read from rom\n");
-		return rom[addr - 0xE000];
-	}
-	/* Serial */
-	if (uart && (addr & 0xFFF0) == 0xBF10)
-	{
-		if (debug) fprintf(stderr, "Read from uart\n");
-		return m6551_read(uart, addr & 0x03);
-	}
-	/* VIA - SPI to SDCARD */
-	if (via1 && (addr & 0xFFF0) == 0xBF20)
-	{
-		if (debug) fprintf(stderr, "Read from via\n");
-		return via_read(via1, addr & 0x0F);
-	}
-	/*  TMS 9918a */
-	if (vdp && (addr & 0xFFF0) == 0xBF30)
-	{
-		if (debug) fprintf(stderr, "Read from vdp\n");
-		return tms9918a_read(vdp, addr);
-	}
-	/* banked ram */
-	if (addr >= 0xC000 && addr < 0xE000)
-	{
-		uint8_t bank = ram[0xBF00];
-		if (debug) fprintf(stderr, "Read from bank [%d]\n",bank);
-		return paged_ram[(bank * 0x2000) + (0xC000-addr)];
-	}
-	return ram[addr];
+        /* ROM */
+        bool flash_in = via_get_port_a(via1) & ROM_SWITCH;
+        if (flash_in && (addr >= 0xE000))
+        {
+                if (debug) fprintf(stderr, "Read from rom\n");
+                return rom[addr - 0xE000];
+        }
+        /* Serial */
+        if (uart && (addr & 0xFFF0) == 0xBF10)
+        {
+                if (debug) fprintf(stderr, "Read from uart\n");
+                return m6551_read(uart, addr & 0x03);
+        }
+        /* VIA - SPI to SDCARD */
+        if (via1 && (addr & 0xFFF0) == 0xBF20)
+        {
+                uint8_t data = via_read(via1, addr & 0x0F);
+                if (addr == 0xBF21) {
+                        bool snrdy = sn76489_readReady(sn);
+                        if (snrdy)
+                                data |= SN_RDY_ON;
+                        else
+                                data &= SN_RDY_OFF;
+                }
+                if (debug)
+                        fprintf(stderr, "Read from via: %x = %02x\n", addr & 0x0f, data);
+                return data;
+        }
+        /*  TMS 9918a */
+        if (vdp && (addr & 0xFFF0) == 0xBF30)
+        {
+                if (debug) fprintf(stderr, "Read from vdp\n");
+                return tms9918a_read(vdp, addr);
+        }
+        /* banked ram */
+        if (addr >= 0xC000 && addr < 0xE000)
+        {
+                uint8_t bank = ram[0xBF00];
+                if (debug) fprintf(stderr, "Read from bank [%d]\n",bank);
+                return paged_ram[(bank * 0x2000) + (0xC000-addr)];
+        }
+        return ram[addr];
 }
 
 uint8_t read6502_debug(uint16_t addr)
@@ -172,48 +188,53 @@ uint8_t read6502(uint16_t addr)
 
 void write6502(uint16_t addr, uint8_t val)
 {
-	/* ROM */
-	bool flash_in = via_get_port_a(via1) & ROM_SWITCH;
-	if (flash_in && (addr >= 0xE000))
-	{
-		return;
-	}
-	/* Serial */
-	if (uart && (addr & 0xFFF0) == 0xBF10)
-	{
-		m6551_write(uart, addr & 0x03, val);
-		return;
-	}
-	/* VIA - SPI to SDCARD */
-	if (via1 && (addr & 0xFFF0) == 0xBF20)
-	{
-		/* we want to make sure that ROM_SWITCH is pulled up when
-		 * setting the direction to input.
-		 */
-		if ((addr == 0xBF23) && ((val & ROM_SWITCH) == 0))
-		{
-			uint8_t pa = via_get_port_a(via1);
-			pa |= ROM_SWITCH;
-			via_write(via1, 1, pa);
-		}
-		via_write(via1, addr & 0x0F, val);
-		return;
-	}
-	/*  TMS 9918a */
-	if (vdp && (addr & 0xFFF0) == 0xBF30)
-	{
-		tms9918a_write(vdp, addr, val);
-		return;
-	}
-	/* banked ram */
-	if (addr >= 0xC000 && addr < 0xE000)
-	{
-		uint8_t bank = ram[0xBF00];
-		paged_ram[(bank * 0x2000) + (0xC000-addr)] = val;
-		return;
-	}
-	ram[addr] = val;
-	return;
+        /* ROM */
+        bool flash_in = via_get_port_a(via1) & ROM_SWITCH;
+        if (flash_in && (addr >= 0xE000))
+        {
+            return;
+        }
+        /* Serial */
+        if (uart && (addr & 0xFFF0) == 0xBF10)
+        {
+                m6551_write(uart, addr & 0x03, val);
+                return;
+        }
+        /* VIA - SPI to SDCARD */
+        if (via1 && (addr & 0xFFF0) == 0xBF20)
+        {
+                /* we want to make sure that ROM_SWITCH is pulled up when
+                 * setting the direction to input.
+                 */
+                if ((addr == 0xBF23) && ((val & ROM_SWITCH) == 0))
+                {
+                        uint8_t pa = via_get_port_a(via1);
+                        pa |= ROM_SWITCH;
+                        via_write(via1, 1, pa);
+                }
+                else if (addr == 0xBF20)
+                {
+                        sn76489_writeIO(sn, val);
+                }
+                else
+                        via_write(via1, addr & 0x0F, val);
+                return;
+        }
+        /*  TMS 9918a */
+        if (vdp && (addr & 0xFFF0) == 0xBF30)
+        {
+                tms9918a_write(vdp, addr, val);
+                return;
+        }
+        /* banked ram */
+        if (addr >= 0xC000 && addr < 0xE000)
+        {
+                uint8_t bank = ram[0xBF00];
+                paged_ram[(bank * 0x2000) + (0xC000-addr)] = val;
+                return;
+        }
+        ram[addr] = val;
+        return;
 }
 
 /* We do this in the 6502 loop instead. Provide a dummy for the device models */
@@ -333,8 +354,9 @@ static void cleanup(int sig)
 
 static void exit_cleanup(void)
 {
-	tcsetattr(0, TCSADRAIN, &saved_term);
-	SDL_Quit();
+        tcsetattr(0, TCSADRAIN, &saved_term);
+        sn76489_destroy(sn);
+        SDL_Quit();
 }
 
 void termon(void)
@@ -383,130 +405,130 @@ static void usage(void)
 
 int main(int argc, char *argv[])
 {
-	int opt;
-	int fd;
-	char *rompath = "6502retro.rom";
-	char *sdpath = NULL;
-	unsigned have_tms = 0;
-	static int tstates = 6667;      /* 4mhz / 60 / 10 */
+        int opt;
+        int fd;
+        char *rompath = "6502retro.rom";
+        char *sdpath = NULL;
+        unsigned have_tms = 0;
+        static int tstates = 666; //4mhz / 60 / 10 = 60fps and doing 10 cycles between each call to SDL_Delay()
+        while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
+                switch (opt) {
+                case 'r':
+                        rompath = optarg;
+                        break;
+                case 'S':
+                        sdpath = optarg;
+                        break;
+                case 'd':
+                        trace = atoi(optarg);
+                        break;
+                case 'f':
+                        fast = 1;
+                        break;
+                case 'T':
+                        have_tms = 1;
+                        break;
+                default:
+                        usage();
+                }
+        }
+        if (optind < argc)
+                usage();
 
-	while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
-		switch (opt) {
-		case 'r':
-			rompath = optarg;
-			break;
-		case 'S':
-			sdpath = optarg;
-			break;
-		case 'd':
-			trace = atoi(optarg);
-			break;
-		case 'f':
-			fast = 1;
-			break;
-		case 'T':
-			have_tms = 1;
-			break;
-		default:
-			usage();
-		}
-	}
-	if (optind < argc)
-		usage();
+        uint16_t rsize = romload(rompath, rom, 0x2000);
+        fprintf(stderr,"Loaded %04x bytes from %s into rom\n", rsize, rompath);
+        if (rsize != 0x2000) {
+                fprintf(stderr, "6502retro: invalid BOOT ROM\n");
+                exit(EXIT_FAILURE);
+        }
 
-	uint16_t rsize = romload(rompath, rom, 0x2000);
-	fprintf(stderr,"Loaded %04x bytes from %s into rom\n", rsize, rompath);
-	if (rsize != 0x2000) {
-		fprintf(stderr, "6502retro: invalid BOOT ROM\n");
-		exit(EXIT_FAILURE);
-	}
+        via1 = via_create();
+        if (via1 && trace & TRACE_VIA)
+                via_trace(via1, 1);
 
-	via1 = via_create();
-	if (via1 && trace & TRACE_VIA)
-		via_trace(via1, 1);
+        sdcard = sd_create("sd0");
+        if (sdpath) {
+                fd = open(sdpath, O_RDWR);
+                if (fd == -1) {
+                        perror(sdpath);
+                        exit(1);
+                }
+                sd_attach(sdcard, fd);
+                via_write(via1, 1, VIA_PA_DEFAULT);
+                via_write(via1, 3, VIA_DDRA_DEFAULT);
+        }
 
-	sdcard = sd_create("sd0");
-	if (sdpath) {
-		fd = open(sdpath, O_RDWR);
-		if (fd == -1) {
-			perror(sdpath);
-			exit(1);
-		}
-		sd_attach(sdcard, fd);
-		via_write(via1, 1, VIA_PA_DEFAULT);
-		via_write(via1, 3, VIA_DDRA_DEFAULT);
-	}
+        if (trace & TRACE_SD)
+                sd_trace(sdcard, 1);
 
-	if (trace & TRACE_SD)
-		sd_trace(sdcard, 1);
+        sd_blockmode(sdcard);
 
-	sd_blockmode(sdcard);
+        ui_init();
 
-	ui_init();
+        if (have_tms) {
+                vdp = tms9918a_create();
+                tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
+                vdprend = tms9918a_renderer_create(vdp);
+                /* SDL init called in tms9918a_renderer_create */
+        }
 
-	if (have_tms) {
-		vdp = tms9918a_create();
-		tms9918a_trace(vdp, !!(trace & TRACE_TMS9918A));
-		vdprend = tms9918a_renderer_create(vdp);
-		/* SDL init called in tms9918a_renderer_create */
-	}
+        termon();
 
-	termon();
+        con = &console;
+        uart = m6551_create();
+        m6551_trace(uart, trace & TRACE_6551);
+        m6551_attach(uart, con);
 
-	con = &console;
-	uart = m6551_create();
-	m6551_trace(uart, trace & TRACE_6551);
-	m6551_attach(uart, con);
+        // Add audio device
+        sn = sn76489_create();
 
-	hookexternal(irqnotify);
-	reset6502();
+        hookexternal(irqnotify);
+        reset6502();
 
-	/* This is the wrong way to do it but it's easier for the moment. We
-	   should track how much real time has occurred and try to keep cycle
-	   matched with that. The scheme here works fine except when the host
-	   is loaded though */
+        /* This is the wrong way to do it but it's easier for the moment. We
+           should track how much real time has occurred and try to keep cycle
+           matched with that. The scheme here works fine except when the host
+           is loaded though */
 
-	uint64_t start, end;
-	float elapsedMS;
-	while (!emulator_done) {
-		if (vdp) {
-			start = SDL_GetPerformanceCounter();
-		}
+        uint64_t start, end;
+        float elapsedMS;
+        while (!emulator_done) {
+                if (vdp) {
+                        start = SDL_GetPerformanceCounter();
+                }
 
-		int i;
-		for (i = 0; i < 10; i++) {
-			exec6502(tstates);
-			via_tick(via1, tstates);
-		}
+                int i;
+                for (i = 0; i < 100; i++) {
+                        exec6502(tstates);
+                        via_tick(via1, tstates);
+                        m6551_timer(uart);
+                }
 
-		// Need to poll the sdl event handler quit offten.
-		if (vdp)
-			if (ui_event())
-				emulator_done = 1;
+                // Need to poll the sdl event handler quit offten.
+                if (vdp)
+                        if (ui_event())
+                                emulator_done = 1;
 
-		m6551_timer(uart);
+                /* leverage the SDL_GetTicks() to figure out how long to wait
+                 * before rendering the next frame. This gives a nice 60hz
+                 * approximation.
+                */
+                if (!fast)
+                {
+                        if (vdp)
+                        {
+                                tms9918a_rasterize(vdp);
+                                tms9918a_render(vdprend);
 
-		/* leverage the SDL_GetTicks() to figure out how long to wait
-		 * before rendering the next frame. This gives a nice 60hz
-		 * approximation.
-		 */
-		if (!fast)
-		{
-			if (vdp)
-			{
-				tms9918a_rasterize(vdp);
-				tms9918a_render(vdprend);
-
-				end = SDL_GetPerformanceCounter();
-				elapsedMS = (end -start) / (float)SDL_GetPerformanceFrequency() * 1000.0f;
-				SDL_Delay((16.6667f - elapsedMS)>0 ? 16.6667f - elapsedMS : 0);
-			}
-			else
-			{
-				take_a_nap();
-			}
-		}
-	}
-
-	exit(0);
+                                end = SDL_GetPerformanceCounter();
+                                elapsedMS = (end -start) / (float)SDL_GetPerformanceFrequency() * 1000.0f;
+                                SDL_Delay( (16.6667f - elapsedMS) > 0 ? 16.6667f - elapsedMS : 0);
+                        }
+                        else
+                        {
+                                take_a_nap();
+                        }
+                }
+        }
+        exit(0);
 }
