@@ -79,8 +79,7 @@
 #include "sdcard.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
-#include "emu76489.h"
-#include "sn76489_sdl.h"
+#include "sn76489.h"
 
 
 #define TRACE_MEM       1

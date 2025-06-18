@@ -1,5 +1,6 @@
 #include <SDL2/SDL.h>
 #include "emu76489.h"
+#include "sn76489.h"
 
 #define SAMPLE_SIZE 512
 #define FREQUENCY 48000
