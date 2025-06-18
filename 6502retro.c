@@ -141,7 +141,7 @@ uint8_t do_read_6502(uint16_t addr, unsigned debug)
         {
                 uint8_t data = via_read(via1, addr & 0x0F);
                 if (addr == 0xBF21) {
-                        bool snrdy = sn76489_readReady(sn);
+                        bool snrdy = sn76489_ready(sn);
                         if (snrdy)
                                 data |= SN_RDY_ON;
                         else
@@ -213,7 +213,7 @@ void write6502(uint16_t addr, uint8_t val)
                 }
                 else if (addr == 0xBF20)
                 {
-                        sn76489_writeIO(sn, val);
+                        sn76489_write(sn, val);
                 }
                 else
                         via_write(via1, addr & 0x0F, val);

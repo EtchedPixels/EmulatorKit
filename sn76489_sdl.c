@@ -7,7 +7,7 @@
 #define CHANNELS 1
 #define CPU_CLK 4000000
 
-void play_buffer(void*, unsigned char*, int);
+void play_buffer(void *, unsigned char *, int);
 
 SDL_AudioSpec spec = {
 	.freq = FREQUENCY,
@@ -31,7 +31,7 @@ struct sn76489 *sn76489_create(void)
     if (sn == NULL)
     {
         fprintf(stderr, "Out of memory\n");
-        return NULL;
+        exit(1);
     }
 
     sng = SNG_new(CPU_CLK, FREQUENCY);
@@ -40,6 +40,8 @@ struct sn76489 *sn76489_create(void)
 
     sn->sng = sng;
 
+    /* TODO: We probablyt should't be doing this multiple times if
+       we have multiple audio devices */
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0)
     {
         fprintf(stderr, "Could not init SDL audio subsystem. %s\n", SDL_GetError());
@@ -50,7 +52,7 @@ struct sn76489 *sn76489_create(void)
     return sn;
 }
 
-void play_buffer(void* userdata, unsigned char* stream, int len)
+void play_buffer(void *userdata, unsigned char *stream, int len)
 {
     static size_t total_sample_count = 0;
     Sint16 *audio_buffer = (Sint16*)stream;
@@ -63,12 +65,12 @@ void play_buffer(void* userdata, unsigned char* stream, int len)
     }
 }
 
-uint8_t sn76489_readReady(struct sn76489 *sn)
+uint8_t sn76489_ready(struct sn76489 *sn)
 {
     return sn->sng->ready;
 }
 
-void sn76489_writeIO(struct sn76489 *sn, uint8_t val)
+void sn76489_write(struct sn76489 *sn, uint8_t val)
 {
     SDL_LockAudioDevice(sn->dev);
     SNG_writeIO(sn->sng, val);
