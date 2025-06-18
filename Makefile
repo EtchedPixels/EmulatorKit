@@ -3,7 +3,7 @@ CFLAGS = -Wall -pedantic -g3 -Werror
 
 BINS =  rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 	rcbus-65c816 rcbus-6800 rcbus-68008 rcbus-6809 rcbus-68hc11 \
-	rcbus-80c188 rcbus-8085 rcbus-z8 rcbus-z180 rbcv2 searle linc80 \
+	rcbus-80c188 rcbus-8070 rcbus-8085 rcbus-z8 rcbus-z180 rbcv2 searle linc80 \
 	makedisk markiv mbc2 smallz80 sbc2g z80mc simple80 flexbox tiny68k \
 	s100-z80 scelbi rb-mbc rcbus-tms9995 rhyophyre pz1 68knano \
 	littleboard mini68k mb020 pico68 z80retro 2063 z50bus-z80 \
@@ -13,7 +13,7 @@ BINS =  rc2014 rcbus-1802 rcbus-6303 rcbus-6502 rcbus-6509 rcbus-65c816-mini \
 all: $(BINS)
 
 SDL2_BINS = rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
-	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
+	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8070_sdl2 rcbus-8085_sdl2 max80 \
 	sorceror z80all osi400 osi500 spectrum microtan 6502retro \
 	poly88
 
@@ -104,6 +104,12 @@ m68k/lib68k.a:
 
 rcbus-68008.o: rcbus-68008.c m68k/lib68k.a
 	$(CC) $(CFLAGS) -Im68k -c rcbus-68008.c
+
+rcbus-8070: rcbus-8070.o event_noui.o ns807x.o ide.o ttycon.o tms9918a.o tms9918a_norender.o ppide.o 16x50.o
+	cc -g3 rcbus-8070.o event_noui.o ns807x.o ttycon.o ide.o ppide.o 16x50.o tms9918a.o tms9918a_norender.o -o rcbus-8070
+
+rcbus-8070_sdl2: rcbus-8070.o event_sdl2.o ns807x.o ide.o ttycon.o tms9918a.o tms9918a_sdl2.o w5100.o ppide.o 16x50.o
+	cc -g3 rcbus-8070.o event_sdl2.o ns807x.o ttycon.o ide.o ppide.o 16x50.o tms9918a.o tms9918a_sdl2.o -o rcbus-8070_sdl2 -lSDL2
 
 rcbus-8085: rcbus-8085.o event_noui.o intel_8085_emulator.o ide.o acia.o ttycon.o tms9918a.o tms9918a_norender.o w5100.o ppide.o rtc_bitbang.o 16x50.o sasi.o ncr5380.o
 	cc -g3 rcbus-8085.o event_noui.o acia.o ttycon.o ide.o ppide.o rtc_bitbang.o 16x50.o tms9918a.o tms9918a_norender.o w5100.o sasi.o ncr5380.o intel_8085_emulator.o -o rcbus-8085
