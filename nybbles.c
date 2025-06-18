@@ -94,17 +94,17 @@ uint8_t ns8070_read_op(struct ns8070 *cpu, uint16_t addr, int debug)
 	return ramrom[addr];
 }
 
-uint8_t mem_debug_read(struct ns8070 *cpu, uint16_t addr)
+uint8_t ns8070_debug_read(struct ns8070 *cpu, uint16_t addr)
 {
 	return ns8070_read_op(cpu, addr, 1);
 }
 
-uint8_t mem_read(struct ns8070 *cpu, uint16_t addr)
+uint8_t ns8070_read(struct ns8070 *cpu, uint16_t addr)
 {
 	return ns8070_read_op(cpu, addr, 0);
 }
 
-void mem_write(struct ns8070 *cpu, uint16_t addr, uint8_t val)
+void ns8070_write(struct ns8070 *cpu, uint16_t addr, uint8_t val)
 {
 	if (addr == 0xFCFF) {
 		val &= 0x7F;
@@ -117,7 +117,7 @@ void mem_write(struct ns8070 *cpu, uint16_t addr, uint8_t val)
 		ramrom[addr] = val;
 }
 
-void flag_change(struct ns8070 *cpu, uint8_t fbits)
+void ns8070_flag_change(struct ns8070 *cpu, uint8_t fbits)
 {
 }
 
