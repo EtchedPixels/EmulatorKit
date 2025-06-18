@@ -15,9 +15,9 @@ extern void ns8070_set_b(struct ns8070 *cpu, unsigned int b);
  *	Helpers required by the implementor
  */
 
-extern uint8_t mem_read(struct ns8070 *cpu, uint16_t addr);
-extern void mem_write(struct ns8070 *cpu, uint16_t addr, uint8_t val);
-extern void flag_change(struct ns8070 *cpu, uint8_t fbits);
+extern uint8_t ns8070_read(struct ns8070 *cpu, uint16_t addr);
+extern void ns8070_write(struct ns8070 *cpu, uint16_t addr, uint8_t val);
+extern void ns8070_flag_change(struct ns8070 *cpu, uint8_t fbits);
 #define S_CL	0x80		/* Carry / Link */
 #define S_OV	0x40		/* Signed overflow */
 #define S_SB	0x20		/* Buffered input B */

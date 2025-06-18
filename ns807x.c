@@ -51,7 +51,7 @@ static uint8_t mread(struct ns8070 *cpu, uint16_t addr)
 		return cpu->ram[addr - 0xFFC0];
 	if (cpu->rom && addr < 0xA00)
 		return cpu->rom[addr];
-	return mem_read(cpu, addr);
+	return ns8070_read(cpu, addr);
 }
 
 static uint16_t mread16(struct ns8070 *cpu, uint16_t addr)
@@ -68,7 +68,7 @@ static void mwrite(struct ns8070 *cpu, uint16_t addr, uint8_t val)
 		return;
 	}
 	else if (!cpu->rom || addr >= 0xA00) {
-		mem_write(cpu, addr, val);
+		ns8070_write(cpu, addr, val);
 		return;
 	}
 	if (cpu->trace)
@@ -727,7 +727,7 @@ static unsigned int execute_op(struct ns8070 *cpu)
 		return 3;
 	case 0x07:	/* LD S,A */
 		cpu->s = cpu->a;
-		flag_change(cpu, cpu->s & (S_F3|S_F2|S_F1));
+		ns8070_flag_change(cpu, cpu->s & (S_F3|S_F2|S_F1));
 		return 3;
 	case 0x08:	/* PUSH EA */
 		push8(cpu, cpu->e);
@@ -847,7 +847,7 @@ static unsigned int execute_op(struct ns8070 *cpu)
 		return 6;
 	case 0x39:	/* AND S,=DATA1 */
 		cpu->s &= get_imm8(cpu);
-		flag_change(cpu, cpu->s & (S_F3|S_F2|S_F1));
+		ns8070_flag_change(cpu, cpu->s & (S_F3|S_F2|S_F1));
 		return 5;
 	case 0x3A:	/* POP EA */
 		cpu->a = pop8(cpu);
@@ -855,7 +855,7 @@ static unsigned int execute_op(struct ns8070 *cpu)
 		return 9;
 	case 0x3B:	/* OR S,=DATA1 */
 		cpu->s |= get_imm8(cpu);
-		flag_change(cpu, cpu->s & (S_F3|S_F2|S_F1));
+		ns8070_flag_change(cpu, cpu->s & (S_F3|S_F2|S_F1));
 		return 5;
 	case 0x3C:	/* SR A */
 		cpu->a >>= 1;
@@ -1033,7 +1033,7 @@ void ns8070_reset(struct ns8070 *cpu)
 	cpu->pc = 0;
 	cpu->sp = 0;
 	cpu->s = 0;
-	flag_change(cpu, 0);
+	ns8070_flag_change(cpu, 0);
 
 	cpu->int_latch = 0;	/* Open to debate */
 }
