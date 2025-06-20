@@ -65,6 +65,7 @@
 #include "z80dis.h"
 #include "sasi.h"
 #include "ncr5380.h"
+#include "sn76489.h"
 
 static uint8_t ramrom[2048 * 1024];	/* Covers the banked card and ZRC */
 
@@ -135,6 +136,7 @@ static struct uart16x50 *uart;
 static struct z80_sio *sio;
 static struct sasi_bus *sasi;
 static struct ncr5380 *ncr;
+static struct sn76489 *sn;
 
 static uint8_t ef9345_vram[16384];
 static uint8_t ef9345_rom[8192];
@@ -2162,6 +2164,8 @@ static void io_write_2014(uint16_t addr, uint8_t val, uint8_t known)
 	/* The switchable/pageable ROM is not very well decoded */
 	else if (switchrom && (addr & 0x7F) >= 0x38 && (addr & 0x7F) <= 0x3F)
 		toggle_rom();
+	else if (addr == 0xFF && sn)
+		sn76489_write(sn, val);
 	else if (addr == 0xFD) {
 		trace &= 0xFF00;
 		trace |= val;
@@ -2836,6 +2840,7 @@ int main(int argc, char *argv[])
 	int sio2 = 0;
 	int indev;
 	char *patha = NULL, *pathb = NULL;
+	int have_sn = 0;
 
 #define INDEV_ACIA	1
 #define INDEV_SIO	2
@@ -2847,7 +2852,7 @@ int main(int argc, char *argv[])
 	while (p < ramrom + sizeof(ramrom))
 		*p++= rand();
 
-	while ((opt = getopt(argc, argv, "19Aabcd:e:EfF:i:I:km:nN:pPr:sRS:Tuw8CZz:X")) != -1) {
+	while ((opt = getopt(argc, argv, "179Aabcd:e:EfF:i:I:km:nN:pPr:sRS:Tuw8CZz:XS")) != -1) {
 		switch (opt) {
 		case 'a':
 			have_acia = 1;
@@ -3120,6 +3125,9 @@ int main(int argc, char *argv[])
 			extreme = 1;
 			have_kio_ext = 1;
 			break;
+		case '7':
+			have_sn = 1;
+			break;
 		default:
 			usage();
 		}
@@ -3371,6 +3379,8 @@ int main(int argc, char *argv[])
 		wiz = nic_w5100_alloc();
 		nic_w5100_reset(wiz);
 	}
+	if (have_sn)
+		sn = sn76489_create();
 
 	fdc = fdc_new();
 

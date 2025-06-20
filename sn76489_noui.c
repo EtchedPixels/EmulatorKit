@@ -1,3 +1,6 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "sn76489.h"
 
 struct sn76489 {
