@@ -305,7 +305,7 @@ int main(int argc, char *argv[])
 	char *rompath = "rcbus-8070.rom";
 	char *idepath;
 
-	while ((opt = getopt(argc, argv, "bBd:e:fI:r:T")) != -1) {
+	while ((opt = getopt(argc, argv, "bBd:e:fi:r:T")) != -1) {
 		switch (opt) {
 		case 'r':
 			rompath = optarg;
@@ -323,7 +323,7 @@ int main(int argc, char *argv[])
 			bank512 = 0;
 			rom = 0;
 			break;
-		case 'I':
+		case 'i':
 			idepath = optarg;
 			break;
 		case 'd':

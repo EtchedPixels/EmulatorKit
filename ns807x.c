@@ -273,7 +273,7 @@ static char *iname(uint8_t i)
 	case 0x08:
 		return "PUSH EA";
 	case 0x09:
-		return "LD T,";
+		return "LD T,EA";
 	case 0x0A:
 		return "PUSH A,";
 	case 0x0B:
