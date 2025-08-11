@@ -31,11 +31,11 @@ lib765/lib/lib765.a:
 am9511/libam9511.a:
 	$(MAKE) --directory am9511
 
-rc2014:	rc2014.o event_noui.o 16x50.o acia.o z80sio.o ttycon.o vtcon_noui.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o ps2event_noui.o rtc_bitbang.o sasi.o sdcard.o sn76489_noui.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o zxkey_none.o z180_io.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
-	cc -g3 rc2014.o event_noui.o zxkey_none.o 16x50.o acia.o z80sio.o ttycon.o vtcon_noui.o amd9511.o ef9345.o ef9345_norender.o ide.o ncr5380.o ppide.o ps2.o ps2event_noui.o rtc_bitbang.o sasi.o sdcard.o sn76489_noui.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o z80dis.o z180_io.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
+rc2014:	rc2014.o event_noui.o 16x50.o acia.o z80sio.o ttycon.o vtcon_noui.o amd9511.o ef9345.o ef9345_norender.o gdb-backend-z80.o gdb-server.o ide.o ncr5380.o ppide.o ps2.o ps2event_noui.o rtc_bitbang.o sasi.o sdcard.o sn76489_noui.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o zxkey_none.o z180_io.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o event_noui.o zxkey_none.o 16x50.o acia.o z80sio.o ttycon.o vtcon_noui.o amd9511.o ef9345.o ef9345_norender.o gdb-backend-z80.o gdb-server.o ide.o ncr5380.o ppide.o ps2.o ps2event_noui.o rtc_bitbang.o sasi.o sdcard.o sn76489_noui.o tft_dumb.o tft_dumb_norender.o tms9918a.o tms9918a_norender.o w5100.o z80dma.o z180copro.o z80dis.o z180_io.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014
 
-rc2014_sdl2: rc2014.o event_sdl2.o acia.o 16x50.o z80sio.o ttycon.o vtcon_sdl2.o asciikbd_sdl2.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o ps2event_sdl2.o rtc_bitbang.o sasi.o sdcard.o sn76489_sdl.o emu76489.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
-	cc -g3 rc2014.o event_sdl2.o acia.o 16x50.o z80sio.o ttycon.o vtcon_sdl2.o asciikbd_sdl2.o amd9511.o ef9345.o ef9345_sdl2.o ide.o ncr5380.o ppide.o ps2.o ps2event_sdl2.o rtc_bitbang.o sasi.o sdcard.o sn76489_sdl.o emu76489.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
+rc2014_sdl2: rc2014.o event_sdl2.o acia.o 16x50.o z80sio.o ttycon.o vtcon_sdl2.o asciikbd_sdl2.o amd9511.o ef9345.o ef9345_sdl2.o gdb-backend-z80.o gdb-server.o ide.o ncr5380.o ppide.o ps2.o ps2event_sdl2.o rtc_bitbang.o sasi.o sdcard.o sn76489_sdl.o emu76489.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a
+	cc -g3 rc2014.o event_sdl2.o acia.o 16x50.o z80sio.o ttycon.o vtcon_sdl2.o asciikbd_sdl2.o amd9511.o ef9345.o ef9345_sdl2.o gdb-backend-z80.o gdb-server.o ide.o ncr5380.o ppide.o ps2.o ps2event_sdl2.o rtc_bitbang.o sasi.o sdcard.o sn76489_sdl.o emu76489.o tft_dumb.o tft_dumb_sdl2.o tms9918a.o tms9918a_sdl2.o w5100.o z80dma.o z180copro.o zxkey_sdl2.o z180_io.o keymatrix.o z80dis.o libz80/libz80.o libz180/libz180.o lib765/lib/lib765.a am9511/libam9511.a -lm -o rc2014_sdl2 -lSDL2
 
 rb-mbc:	rb-mbc.o 16x50.o ttycon.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o
 	cc -g3 rb-mbc.o 16x50.o ttycon.o ide.o ppide.o rtc_bitbang.o z80dis.o libz80/libz80.o -o rb-mbc
@@ -227,8 +227,8 @@ poly88: poly88.o intel_8080_emulator.o event_sdl2.o i8251.o ide.o ttycon.o ascii
 mini11: mini11.o 68hc11.o sdcard.o 6522.o
 	cc -g3 mini11.o sdcard.o 6522.o 68hc11.o -o mini11
 
-mini-riscv: mini-riscv.o riscv-disas.o sdcard.o
-	cc -g3 mini-riscv.o riscv-disas.o sdcard.o -o mini-riscv
+mini-riscv: mini-riscv.o gdb-backend-rv32.o gdb-server.o riscv-disas.o sdcard.o
+	cc -g3 mini-riscv.o gdb-backend-rv32.o gdb-server.o riscv-disas.o sdcard.o -o mini-riscv
 
 mini-riscv.o: mini-riscv.c riscv/mini-rv32ima.h riscv-disas.h
 	$(CC) -c $(CFLAGS) -std=gnu2x mini-riscv.c
