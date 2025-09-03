@@ -51,6 +51,7 @@ struct tms9918a {
  */
 static void tms9918a_render_slice(struct tms9918a *vdp, int y, uint8_t *sprat, uint16_t bits, unsigned int width)
 {
+	y += 1;
 	int x = sprat[1];
 	uint32_t *pixptr = vdp->rasterbuffer + 256 * y;
 	uint8_t *colptr = vdp->colbuf + 32;
