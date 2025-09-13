@@ -29,7 +29,7 @@ struct tms9918a {
 			   back so who cares */
 	uint8_t status;
 	uint8_t framebuffer[16384];	/* The memory behind the VDP */
-	uint32_t rasterbuffer[256 * 192]; /* Our output texture */
+	uint32_t rasterbuffer[256 * 256]; /* Our output texture allow partially signed Y */
 	uint32_t *colourmap;
 	uint8_t colbuf[256 + 64];	/* For off edge collisions */
 	unsigned int latch;		/* The toggling latch for low/hi */
