@@ -99,8 +99,9 @@ static void tms9918a_render_sprite(struct tms9918a *vdp, int y, uint8_t *sprat, 
 	unsigned int width = 8;
 
 	/* Figure out the right data row */
-	if (row >= 0xE1)
+	if (row > 0xE0)
 		row -= 0x100;	/* Signed top border */
+	row += 1;
 	row = y - row;
 	/* Get the data and expand it if needed */
 	if ((vdp->reg[1] & 0x02) == 0) {
@@ -126,6 +127,9 @@ static void tms9918a_sprite_line(struct tms9918a *vdp, int y)
 	uint8_t *sprat = vdp->framebuffer + ((vdp->reg[5] & 0x7F) << 7);
 	uint8_t *spdat = vdp->framebuffer + ((vdp->reg[6] & 0x07) << 11);
 	int i;
+	int16_t ypos;
+	int16_t pattrow;
+
 	unsigned int spheight = vdp->reg[1]& 0x02 ? 16 : 8;
 	unsigned int mag = vdp->reg[1] & 0x01;
 	unsigned int ns = 0;
@@ -139,18 +143,29 @@ static void tms9918a_sprite_line(struct tms9918a *vdp, int y)
 
 	/* Walk the sprite table and queue any sprite on this line */
 	for(i = 0; i < 32; i++) {
+		ypos = *sprat;
+		if (ypos > 0xE0)
+			ypos -= 256;
+		ypos += 1;
+		pattrow = y - ypos;
+
+		if (mag) pattrow >>= 1;
+
 		if (*sprat == 0xD0)
 			break;
-		if (*sprat <= y && *sprat + spheight > y) {
-			ns++;
-			/* Too many sprites: only 4 get handled */
-			/* Q: do the full 32 get collision detected ? */
-			if (ns > 4) {
-				vdp->status |= 0x40 | i;	/* Too many sprites */
-				break;
-			}
-			*spqueue++ = sprat;
+
+		if (pattrow < 0 || pattrow >= spheight) {
+			sprat += 4;
+			continue;
 		}
+		ns++;
+		/* Too many sprites: only 4 get handled */
+		/* Q: do the full 32 get collision detected ? */
+		if (ns > 4) {
+			vdp->status |= 0x40 | i;	/* Too many sprites */
+			break;
+		}
+		*spqueue++ = sprat;
 		sprat += 4;
 	}
 	/* We need to render the ones we got in reverse order to get right
