@@ -52,26 +52,24 @@ struct tms9918a {
 static void tms9918a_render_slice(struct tms9918a *vdp, int y, uint8_t *sprat, uint16_t bits, unsigned int width)
 {
 	int x = sprat[1];
-	uint32_t *pixptr = vdp->rasterbuffer + 256 * y;
 	uint8_t *colptr = vdp->colbuf + 32;
 	uint32_t foreground = vdp->colourmap[sprat[3] & 0x0F];
 	int mag = vdp->reg[1] & 0x01;
 	int step = 1;
 	int i;
-
+	int xmax;
 	if (sprat[3] & 0x80)
 		x -= 32;
-	pixptr += x;
 	colptr += x;
-
+	
+	xmax = x+width;
+	if (xmax >= 256) xmax = 256;
 	/* Walk across the sprite doing rendering and collisions. Collisions apply
 	   to offscreen objects. Colbuf is sized to cover this */
-	for (i = x; i < x + width; i++) {
+	for (i = x; i < xmax; i++) {
 		if (i >= 0 && i <= 255) {
 			if (bits & 0x8000U)
-				*pixptr++ = foreground;
-			else
-				pixptr++;
+				vdp->rasterbuffer[256*y+i] = foreground;
 		}
 		/* This pixel was already sprite written - collision */
 		if (*colptr) {
