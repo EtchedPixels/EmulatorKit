@@ -62,7 +62,9 @@ static void tms9918a_render_slice(struct tms9918a *vdp, int y, uint8_t *sprat, u
 		x -= 32;
 	colptr += x;
 	
+	if (mag) width <<= 1;
 	xmax = x+width;
+
 	if (xmax >= 256) xmax = 256;
 	/* Walk across the sprite doing rendering and collisions. Collisions apply
 	   to offscreen objects. Colbuf is sized to cover this */
@@ -94,12 +96,15 @@ static void tms9918a_render_sprite(struct tms9918a *vdp, int y, uint8_t *sprat, 
 	int row = *sprat;
 	uint16_t bits;
 	unsigned int width = 8;
+	unsigned int mag = vdp->reg[1] & 0x01;
 
 	/* Figure out the right data row */
 	if (row > 0xE0)
 		row -= 0x100;	/* Signed top border */
 	row += 1;
 	row = y - row;
+	if (mag)
+		row >>= 1;
 	/* Get the data and expand it if needed */
 	if ((vdp->reg[1] & 0x02) == 0) {
 		spdat += row;
@@ -131,9 +136,6 @@ static void tms9918a_sprite_line(struct tms9918a *vdp, int y)
 	unsigned int mag = vdp->reg[1] & 0x01;
 	unsigned int ns = 0;
 	unsigned int spshft = 3;
-
-	if (mag)
-		spheight <<= 1;
 
 	/* Clear the collision buffer for the line */
 	memset(vdp->colbuf, 0, sizeof(vdp->colbuf));
