@@ -51,28 +51,27 @@ struct tms9918a {
  */
 static void tms9918a_render_slice(struct tms9918a *vdp, int y, uint8_t *sprat, uint16_t bits, unsigned int width)
 {
-	y += 1;
 	int x = sprat[1];
-	uint32_t *pixptr = vdp->rasterbuffer + 256 * y;
 	uint8_t *colptr = vdp->colbuf + 32;
 	uint32_t foreground = vdp->colourmap[sprat[3] & 0x0F];
 	int mag = vdp->reg[1] & 0x01;
 	int step = 1;
 	int i;
-
+	int xmax;
 	if (sprat[3] & 0x80)
 		x -= 32;
-	pixptr += x;
 	colptr += x;
+	
+	if (mag) width <<= 1;
+	xmax = x+width;
 
+	if (xmax >= 256) xmax = 256;
 	/* Walk across the sprite doing rendering and collisions. Collisions apply
 	   to offscreen objects. Colbuf is sized to cover this */
-	for (i = x; i < x + width; i++) {
+	for (i = x; i < xmax; i++) {
 		if (i >= 0 && i <= 255) {
 			if (bits & 0x8000U)
-				*pixptr++ = foreground;
-			else
-				pixptr++;
+				vdp->rasterbuffer[256*y+i] = foreground;
 		}
 		/* This pixel was already sprite written - collision */
 		if (*colptr) {
@@ -97,12 +96,15 @@ static void tms9918a_render_sprite(struct tms9918a *vdp, int y, uint8_t *sprat, 
 	int row = *sprat;
 	uint16_t bits;
 	unsigned int width = 8;
+	unsigned int mag = vdp->reg[1] & 0x01;
 
 	/* Figure out the right data row */
 	if (row > 0xE0)
 		row -= 0x100;	/* Signed top border */
 	row += 1;
 	row = y - row;
+	if (mag)
+		row >>= 1;
 	/* Get the data and expand it if needed */
 	if ((vdp->reg[1] & 0x02) == 0) {
 		spdat += row;
@@ -134,9 +136,6 @@ static void tms9918a_sprite_line(struct tms9918a *vdp, int y)
 	unsigned int mag = vdp->reg[1] & 0x01;
 	unsigned int ns = 0;
 	unsigned int spshft = 3;
-
-	if (mag)
-		spheight <<= 1;
 
 	/* Clear the collision buffer for the line */
 	memset(vdp->colbuf, 0, sizeof(vdp->colbuf));
